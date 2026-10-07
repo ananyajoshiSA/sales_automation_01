@@ -35,11 +35,74 @@ def to_attributes(fields: Mapping[str, Any]) -> list[dict[str, Any]]:
     return [{"Attribute": k, "Value": "" if v is None else v} for k, v in fields.items()]
 
 
+def parse_activity_note(note: str | None) -> dict[str, str]:
+    """Split LeadSquared's ``Key{=}Value{next}...`` activity note into a dict.
+
+    Repeated keys keep the last non-empty value.
+    """
+    out: dict[str, str] = {}
+    for part in (note or "").split("{next}"):
+        if "{=}" not in part:
+            continue
+        key, _, value = part.partition("{=}")
+        if value or key not in out:
+            out[key] = value
+    return out
+
+
+PHONE_INBOUND = 21
+PHONE_OUTBOUND = 22
+
+
+def parse_phone_call(activity: dict) -> dict[str, Any]:
+    """Flatten an inbound/outbound phone call activity into one record.
+
+    ``start_utc`` is the call start in UTC (``CreatedOn``); ``status`` is e.g.
+    Answered / NotAnswered / CallFailure (outbound) or Answered / Missed (inbound).
+    """
+    import json as _json
+
+    note = parse_activity_note(activity.get("ActivityEvent_Note"))
+    src: dict = {}
+    if note.get("SourceData"):
+        try:
+            src = _json.loads(note["SourceData"])
+        except ValueError:
+            src = {}
+    try:
+        duration = int(float(note.get("Duration") or 0))
+    except ValueError:
+        duration = 0
+    event = int(activity.get("ActivityEvent") or 0)
+    return {
+        "activity_id": activity.get("ProspectActivityId") or activity.get("Id"),
+        "lead_id": activity.get("RelatedProspectId"),
+        "direction": "inbound" if event == PHONE_INBOUND else "outbound",
+        "start_utc": activity.get("CreatedOn"),
+        "user_id": note.get("UserId") or activity.get("Owner") or activity.get("CreatedBy"),
+        "caller": note.get("Caller") or activity.get("CreatedByName"),
+        "status": note.get("Status") or activity.get("Status"),
+        "duration": duration,
+        "call_notes": note.get("CallNotes"),
+        "recording_url": note.get("ResourceURL"),
+        "lead_number": src.get("DestinationNumber") if event == PHONE_OUTBOUND else src.get("SourceNumber"),
+        "display_number": note.get("DisplayNumber"),
+    }
+
+
 def format_datetime(dt: datetime) -> str:
     """LeadSquared expects UTC timestamps as ``YYYY-MM-DD HH:MM:SS``."""
     if dt.tzinfo is not None:
         dt = dt.astimezone(timezone.utc)
     return dt.strftime("%Y-%m-%d %H:%M:%S")
+
+
+def _is_api_error(resp: requests.Response) -> bool:
+    try:
+        body = resp.json()
+    except ValueError:
+        return False
+    return isinstance(body, dict) and body.get("Status") == "Error"
 
 
 class LeadSquaredClient:
@@ -89,8 +152,10 @@ class LeadSquaredClient:
                     continue
                 raise LeadSquaredError(f"{method} {path} failed: {exc}") from exc
 
-            # 429 = rate limited, 5xx = transient server error
-            if (resp.status_code == 429 or resp.status_code >= 500) and attempt < self.max_retries:
+            # 429 = rate limited, 5xx = transient server error. LeadSquared also uses
+            # 500 for validation errors (JSON body with Status=Error) — don't retry those.
+            if (resp.status_code == 429 or (resp.status_code >= 500 and not _is_api_error(resp))) \
+                    and attempt < self.max_retries:
                 retry_after = resp.headers.get("Retry-After")
                 time.sleep(float(retry_after) if retry_after and retry_after.isdigit() else 2**attempt)
                 continue
@@ -226,6 +291,37 @@ class LeadSquaredClient:
             body["Fields"] = [{"SchemaName": k, "Value": v} for k, v in fields.items()]
         data = self.request("POST", "ProspectActivity.svc/Create", json=body)
         return data["Message"]["Id"]
+
+    def iter_activities_by_event(
+        self,
+        activity_event: int,
+        from_dt: datetime,
+        to_dt: datetime,
+        page_size: int = 1000,
+    ) -> Iterator[dict]:
+        """Every activity of one type created in ``[from_dt, to_dt]`` across all leads.
+
+        Datetimes are converted to UTC. ``page_size`` is capped at 1000 by the API.
+        """
+        page = 1
+        while True:
+            data = self.request(
+                "POST",
+                "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent",
+                json={
+                    "Parameter": {
+                        "FromDate": format_datetime(from_dt),
+                        "ToDate": format_datetime(to_dt),
+                        "ActivityEvent": activity_event,
+                    },
+                    "Paging": {"PageIndex": page, "PageSize": page_size},
+                },
+            ) or {}
+            batch = data.get("List") or []
+            yield from batch
+            if len(batch) < page_size:
+                return
+            page += 1
 
     # ----------------------------------------------------------------- users
 

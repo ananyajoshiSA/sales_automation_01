@@ -13,3 +13,6 @@ venv/
 
 # Lead data exports (contain PII)
 exports/
+
+# Data snapshots (contain PII)
+data/

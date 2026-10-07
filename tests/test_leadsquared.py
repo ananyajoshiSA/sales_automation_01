@@ -127,7 +127,7 @@ def test_error_response_raises(client, monkeypatch):
     with pytest.raises(LeadSquaredError, match="Duplicate") as exc:
         client.create_lead({"EmailAddress": "a@x.com"})
     assert exc.value.status_code == 500
-    assert len(responses.calls) == 2  # retried once
+    assert len(responses.calls) == 1  # validation errors are not retried
 
 
 @responses.activate
@@ -137,3 +137,37 @@ def test_retries_on_429(client, monkeypatch):
     responses.get(url, status=429)
     responses.get(url, json=[{"SchemaName": "FirstName"}])
     assert client.get_lead_metadata() == [{"SchemaName": "FirstName"}]
+
+
+@responses.activate
+def test_retries_plain_500(client, monkeypatch):
+    monkeypatch.setattr("integrations.leadsquared.client.time.sleep", lambda s: None)
+    url = HOST + "LeadManagement.svc/LeadsMetaData.Get"
+    responses.get(url, status=502, body="Bad gateway")
+    responses.get(url, json=[])
+    assert client.get_lead_metadata() == []
+
+
+def test_parse_phone_call():
+    from integrations.leadsquared import parse_phone_call
+    act = {
+        "ProspectActivityId": "a1", "RelatedProspectId": "p1", "ActivityEvent": "22",
+        "CreatedOn": "2026-10-06 06:37:33",
+        "ActivityEvent_Note": 'Caller{=}Faisal Bashir{next}UserId{=}{next}UserId{=}u1{next}Duration{=}41'
+                              '{next}Status{=}Answered{next}ResourceURL{=}https://r/x.wav{next}'
+                              'SourceData{=}{"SourceNumber":"700","DestinationNumber":"600","Direction":"Outbound"}{next}',
+    }
+    c = parse_phone_call(act)
+    assert c["user_id"] == "u1" and c["caller"] == "Faisal Bashir"
+    assert (c["direction"], c["status"], c["duration"], c["lead_number"]) == ("outbound", "Answered", 41, "600")
+
+
+@responses.activate
+def test_iter_activities_by_event_pages(client):
+    url = HOST + "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+    responses.post(url, json={"RecordCount": 3, "List": [{"id": 1}, {"id": 2}]})
+    responses.post(url, json={"RecordCount": 3, "List": [{"id": 3}]})
+    got = list(client.iter_activities_by_event(22, datetime(2026, 10, 1), datetime(2026, 10, 2), page_size=2))
+    assert [g["id"] for g in got] == [1, 2, 3]
+    body = json.loads(responses.calls[0].request.body)
+    assert body["Parameter"] == {"FromDate": "2026-10-01 00:00:00", "ToDate": "2026-10-02 00:00:00", "ActivityEvent": 22}
