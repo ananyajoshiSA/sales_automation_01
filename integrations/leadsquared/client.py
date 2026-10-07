@@ -232,3 +232,16 @@ class LeadSquaredClient:
     def get_users(self) -> list[dict]:
         """Sales users / lead owners in the account."""
         return self.request("GET", "UserManagement.svc/Users.Get")
+
+    def get_users_in_group(self, group: str) -> list[dict]:
+        """Users whose ``MemberOfGroups`` contains ``group`` (case-insensitive)."""
+        g = group.strip().lower()
+        return [
+            u for u in self.get_users()
+            if any(m.strip().lower() == g for m in (u.get("MemberOfGroups") or []))
+        ]
+
+    def iter_leads_by_group(self, group: str, columns: Iterable[str] | None = None, **kwargs) -> Iterator[dict]:
+        """Yield every lead owned by a member of the given user group."""
+        for user in self.get_users_in_group(group):
+            yield from self.iter_leads("OwnerId", user["ID"], page_size=1000, columns=columns, **kwargs)
