@@ -21,11 +21,13 @@ IST = timezone(timedelta(hours=5, minutes=30))
 WORK_START, WORK_END = 10, 20  # IST hours used for "assigned during working hours"
 MEANINGFUL_SECS = 120          # a connected call shorter than this is treated as not a real conversation
 
+# Zipteams scores each skill pass/fail (0 or 100) per call, so the mean is "% of calls
+# where the skill was shown". "Clear Call to Action" (mx_Custom_7) is defined but not
+# populated by Zip as of Oct 2026, so it is left out.
 ZIP_SCORES = {
-    "mx_Custom_5": "probing",
-    "mx_Custom_4": "product_pitch",
-    "mx_Custom_6": "objection_handling",
-    "mx_Custom_7": "call_to_action",
+    "mx_Custom_5": "probing_%",
+    "mx_Custom_4": "product_pitch_%",
+    "mx_Custom_6": "objection_handling_%",
 }
 
 
@@ -163,9 +165,12 @@ def analyse(snap: dict, start: str, end: str) -> dict:
     stl_rows = []
     for l in new_leads:
         at = utc(l["mx_Assigned_On"])
-        after = [c for c in by_lead.get(l["ProspectID"], []) if c["t"] and c["t"] >= at and c["direction"] == "outbound"]
-        first = after[0]["t"] if after else None
-        connect = next((c["t"] for c in after if c["answered"]), None)
+        lead_calls = [c for c in by_lead.get(l["ProspectID"], []) if c["t"] and c["t"] >= at]
+        after = [c for c in lead_calls if c["direction"] == "outbound"]
+        # first contact attempt: an outbound dial, or an inbound call the team answered
+        contacts = [c for c in lead_calls if c["direction"] == "outbound" or c["answered"]]
+        first = contacts[0]["t"] if contacts else None
+        connect = next((c["t"] for c in lead_calls if c["answered"]), None)
         h = at.astimezone(IST).hour
         first_24h = [c for c in after if c["t"] <= at + timedelta(hours=24)]
         stl_rows.append({
@@ -176,6 +181,8 @@ def analyse(snap: dict, start: str, end: str) -> dict:
             "source": l.get("Source") or "(blank)",
             "stage": l.get("ProspectStage"),
             "assigned_ist": at.astimezone(IST).strftime("%Y-%m-%d %H:%M"),
+            # Assigned On also moves when an old lead is reassigned; fresh = created within a day
+            "fresh_lead": bool(utc(l.get("CreatedOn")) and at - utc(l["CreatedOn"]) <= timedelta(days=1)),
             "working_hours": WORK_START <= h < WORK_END,
             "mins_to_first_dial": round(minutes(at, first)) if first else None,
             "mins_to_first_connect": round(minutes(at, connect)) if connect else None,
@@ -285,8 +292,10 @@ def analyse(snap: dict, start: str, end: str) -> dict:
         row = {"caller": owner, "analysed_calls": n}
         for label in ZIP_SCORES.values():
             row[label] = round(statistics.mean(q[label])) if q[label] else None
-        row["high_intent_%"] = pct(ic.get("HIGH", 0), n)
-        row["not_qualified_%"] = pct(ic.get("NOT_QUALIFIED", 0), n)
+        rated = n - ic.get("NOT_AVAILABLE", 0) - ic.get("UNKNOWN", 0)
+        row["intent_rated_calls"] = rated
+        row["high_or_moderate_intent_%"] = pct(ic.get("HIGH", 0) + ic.get("MODERATE", 0), rated)
+        row["low_intent_%"] = pct(ic.get("LOW", 0), rated)
         quality_rows.append(row)
 
     # ---- 6. outcomes

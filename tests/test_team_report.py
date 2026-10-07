@@ -44,5 +44,5 @@ def test_analyse():
     assert caller["dials_per_day"] == 2 and caller["connected_per_day"] == 1 and caller["meaningful_per_day"] == 1
 
     q = r["quality"][0]
-    assert (q["caller"], q["product_pitch"], q["probing"], q["high_intent_%"]) == ("A B", 80, 60, 100)
+    assert (q["caller"], q["product_pitch_%"], q["probing_%"], q["high_or_moderate_intent_%"]) == ("A B", 80, 60, 100)
     assert r["outcomes"][0]["enrolled"] == 1
