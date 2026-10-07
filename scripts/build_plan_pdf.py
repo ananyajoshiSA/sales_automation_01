@@ -41,8 +41,10 @@ def flags(r):
         out.append('<span class="chip bad">Missed call from lead</span>')
     if r.get("month_end_due"):
         out.append('<span class="chip warn">Month-end promise due</span>')
-    if (r.get("next_action") or "").startswith("[Was due"):
-        out.append('<span class="chip warn">Carried over from Wed</span>')
+    if (r.get("next_action") or "").startswith("[Wed evening"):
+        out.append('<span class="chip warn">Wed evening callback missed</span>')
+    if r.get("changed") and not r["changed"].lower().startswith("unchanged"):
+        out.append('<span class="chip good">Updated from Wed night calls</span>')
     if r.get("stage") == "Not Interested":
         out.append('<span class="chip bad">Staged Not Interested – fix</span>')
     return " ".join(out)
@@ -51,7 +53,7 @@ def flags(r):
 def lead_rows(rs):
     rows = []
     for i, r in enumerate(rs, 1):
-        action = re.sub(r"^\[Was due[^\]]*\]\s*", "", r.get("next_action") or "")
+        action = r.get("next_action") or ""
         rows.append(f"""
 <tr class="tier-{r['tier']}">
   <td class="num">{i}</td>
@@ -70,7 +72,7 @@ def caller_section(owner, rs):
     p3 = sum(r["prob_3d"] for r in rs) / 100
     tm = tomorrow(rs)
     missed = sum(1 for r in rs if r.get("missed_unreturned"))
-    carried = sum(1 for r in rs if (r.get("next_action") or "").startswith("[Was due"))
+    carried = sum(1 for r in rs if (r.get("next_action") or "").startswith("[Wed evening"))
     ni = sum(1 for r in rs if r["tier"] in "AB" and r.get("stage") == "Not Interested")
     first_names = lambda lst, n=12: ", ".join(name(r) for r in lst[:n]) + (f" and {len(lst) - n} more" if len(lst) > n else "")  # noqa: E731
     gap = "on track if every A and B is worked" if p3 >= 4 else "short of 4 even over 3 days – needs extra leads"
@@ -86,7 +88,7 @@ def caller_section(owner, rs):
     <div><b>{tm:.1f}</b><span>Likely enrollments tomorrow</span></div>
     <div><b>{p3:.1f}</b><span>3-day pipeline ({gap})</span></div>
   </div>
-  <p class="note">First 30 minutes: {missed} missed call(s) to return, {carried} action(s) carried over from Wednesday evening, {ni} stage(s) to correct. Then work the list below in order.</p>
+  <p class="note">First 30 minutes: {missed} missed call(s) to return, {carried} Wednesday-evening callback(s) that were missed, {ni} stage(s) to correct. Then work the list below in order.</p>
   <h3>Tier A – close today ({len(t['A'])})</h3>
   {'<table class="leads"><thead><tr><th>#</th><th>Lead</th><th>Why</th><th>Opening line</th><th>What to send / ask</th></tr></thead><tbody>' + lead_rows(t['A']) + '</tbody></table>' if t['A'] else '<p class="note">No Tier A lead. Start with the B list at 10:30.</p>'}
   <h3>Tier B – hot follow-up ({len(t['B'])})</h3>
@@ -127,7 +129,7 @@ td.t { white-space: nowrap; font-weight: bold; color: #123f36; }
 .tier-A td { background: #f1f8f4; } .tier-B td { background: #f4f7fc; }
 .sub { color: #5c6763; font-size: 8pt; margin-top: 1.5pt; }
 .chip { display: inline-block; padding: 0 5pt; border-radius: 8pt; font-size: 7.4pt; font-weight: bold; margin: 2pt 2pt 0 0; }
-.chip.bad { background: #f8e3e0; color: #a3302a; } .chip.warn { background: #fbefd6; color: #8a5a00; }
+.chip.bad { background: #f8e3e0; color: #a3302a; } .chip.good { background: #e2f1e6; color: #2c6e3c; } .chip.warn { background: #fbefd6; color: #8a5a00; }
 .callout { background: #e8f2ee; border-left: 4pt solid #1f6f5c; padding: 8pt 11pt; margin: 9pt 0; border-radius: 3pt; }
 .warnbox { background: #fdf3e2; border-left: 4pt solid #b07800; padding: 8pt 11pt; margin: 9pt 0; border-radius: 3pt; }
 .note { color: #5c6763; font-size: 9pt; }
@@ -150,7 +152,7 @@ def build(plan_path, out_path):
     team_tom = sum(tomorrow(P[o]) for o in owners)
     team_p3 = sum(r["prob_3d"] for r in all_rows) / 100
     missed = sum(1 for r in all_rows if r.get("missed_unreturned"))
-    carried = sum(1 for r in all_rows if (r.get("next_action") or "").startswith("[Was due"))
+    carried = sum(1 for r in all_rows if (r.get("next_action") or "").startswith("[Wed evening"))
     month_end = [(o, r) for o in owners for r in P[o] if r.get("month_end_due")]
     ni = [(o, r) for o in owners for r in P[o] if r["tier"] in "AB" and r.get("stage") == "Not Interested"]
 
@@ -193,7 +195,7 @@ def build(plan_path, out_path):
       <li>Stages to fix, month-end leads, escalations</li>
       <li>Caller-wise call lists (one section per caller)</li>
     </ol>
-    <p class="note">Data: LeadSquared calls, stages and follow-ups plus Zipteams call notes, 22 Sep – 7 Oct 2026; stages refreshed on the evening of 7 Oct. Companion file: <b>Elite_call_plan_Thu_8_Oct.xlsx</b> (phone numbers, attempt tracking, live team summary).</p>
+    <p class="note">Data: LeadSquared calls, stages and follow-ups plus Zipteams call notes, 22 Sep – 7 Oct 2026, complete through midnight (pulled 01:30 IST, Thu 8 Oct), including every Wednesday-evening call, Zip note and stage change. Companion file: <b>Elite_call_plan_Thu_8_Oct.xlsx</b> (phone numbers, attempt tracking, live team summary).</p>
   </div>
 </div>
 
@@ -251,7 +253,7 @@ def build(plan_path, out_path):
 <section>
 <h2>4. The day, hour by hour</h2>
 <table><thead><tr><th>Time</th><th>What callers do</th><th>What you do</th></tr></thead><tbody>
-<tr><td class="t">10:00–10:30</td><td>Return every missed call from a lead ({missed} on sheets). Check the {carried} actions carried over from Wednesday evening: if the call happened, update the sheet; if not, make it now.</td><td>Walk the floor; make sure nobody starts with C leads.</td></tr>
+<tr><td class="t">10:00–10:30</td><td>Return every missed call from a lead ({missed} on sheets). Make the {carried} Wednesday-evening callbacks that didn't happen or weren't answered (flagged on the sheets).</td><td>Walk the floor; make sure nobody starts with C leads.</td></tr>
 <tr><td class="t">10:30–11:30</td><td>Tier A first attempts, in order (honour each lead's best time). Send the payment link while the lead is on the call. If unanswered, WhatsApp immediately (template A1).</td><td>Be available for 3-way calls with parents or spouses and for EMI or discount approvals.</td></tr>
 <tr><td class="t">11:30–12:00</td><td>Overnight new leads and any fresh missed calls. First call to a new lead within 5 minutes of it appearing.</td><td>Check new leads were assigned (not stuck with the distributor).</td></tr>
 <tr><td class="t">12:00</td><td colspan="2"><b>Checkpoint 1</b> (section 9).</td></tr>
@@ -404,16 +406,16 @@ def build(plan_path, out_path):
 
 <section>
 <h2>12. Caller-wise call lists</h2>
-<p>One section per caller. Tier A and B leads are listed in full and in call order, with the reason, the opening line and the ask. New, revive and nurture leads are named; their full details, and phone numbers for every lead, are in the caller's sheet in the workbook. Flags: <span class="chip bad">Missed call from lead</span> return first · <span class="chip warn">Month-end promise due</span> · <span class="chip warn">Carried over from Wed</span> check whether it happened · <span class="chip bad">Staged Not Interested – fix</span>.</p>
+<p>One section per caller. Tier A and B leads are listed in full and in call order, with the reason, the opening line and the ask. New, revive and nurture leads are named; their full details, and phone numbers for every lead, are in the caller's sheet in the workbook. Flags: <span class="chip bad">Missed call from lead</span> return first · <span class="chip warn">Month-end promise due</span> · <span class="chip warn">Wed evening callback missed</span> was due Wednesday evening and not completed – do it first · <span class="chip good">Updated from Wed night calls</span> re-judged using what the lead said on Wednesday evening · <span class="chip bad">Staged Not Interested – fix</span>.</p>
 </section>
 {''.join(caller_section(o, P[o]) for o in owners)}
 
 <section>
 <h2>Appendix – notes on the data</h2>
 <ul>
-  <li>Lead owner is the owner in LeadSquared on the evening of 7 Oct. Leads moved to the team after that are not on the sheets.</li>
+  <li>Lead owner and stage are as in LeadSquared at 01:30 IST on 8 Oct. Leads moved to the team after that are not on the sheets.</li>
   <li>"Likely tomorrow" takes about 60% of each Tier A lead's 3-day chance, 35% for Tier B and 30% for the rest. The 3-day pipeline is the sum of the estimated chances. Both are judgement-based estimates, not guarantees.</li>
-  <li>About 20 actions on the sheets were planned for the evening of 7 Oct (for example, callbacks booked for 18:30). Check whether they happened before redoing them.</li>
+  <li>Wednesday-evening calls are included. Callbacks booked for Wednesday evening that didn't happen or weren't answered are flagged "Wed evening callback missed". Leads whose situation changed on Wednesday evening were re-judged on the new conversation.</li>
   <li>Revenue isn't recorded in LeadSquared, so these lists target enrollments. Please share the payment source so revenue per caller can be tracked.</li>
 </ul>
 </section>

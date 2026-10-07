@@ -50,6 +50,10 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
     for t in plan["tiered"]:
         if t["tier"] == "D":
             continue
+        t = dict(t)
+        ch = (t.get("changed") or "").strip()
+        if ch and not ch.lower().startswith("unchanged"):
+            t["why"] = f"Updated from Wed night: {ch}. {t.get('why', '')}"
         rows[t["lead_id"]] = {**t, "source_list": "tiered"}
     for r in plan["reviewed"]:  # the deeper 48h review wins over the broader tiering
         tier = "A" if r["likelihood"] == "High" else "B"
