@@ -173,7 +173,7 @@ def build(plan_path, out_path):
   </div>
   <div>
     <div class="kpis">
-      <div><b>514</b><span>leads on tomorrow's call sheets (11 callers + team leader)</span></div>
+      <div><b>{sum(len(v) for v in P.values())}</b><span>leads on tomorrow's call sheets (11 callers + team leader)</span></div>
       <div><b>{T['A']}</b><span>Tier A: can close tomorrow</span></div>
       <div><b>{T['B']}</b><span>Tier B: hot follow-ups</span></div>
       <div><b>{T['F']}</b><span>New leads (1–7 Oct) still needing a real first conversation</span></div>
