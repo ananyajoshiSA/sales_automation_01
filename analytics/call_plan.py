@@ -59,7 +59,11 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
             "tier": tier, "prob_3d": max(REVIEWED_PROB[r["likelihood"]], prev.get("prob_3d", 0)),
             "why": r["why"], "next_action": r["next_action_48h"], "course": r.get("course", ""),
             "objection_to_prepare": prev.get("objection_to_prepare") or r.get("risk", ""),
-            "opening_line": prev.get("opening_line", ""), "best_time": prev.get("best_time", ""),
+            "opening_line": prev.get("opening_line") or (
+                f"Hi {(r.get('lsq_name') or r['name']).split()[0].title()}, this is {r['owner'].split()[0]} from LawSikho — "
+                f"following up on our last conversation about {r.get('course') or 'the program'}. "
+                "Have you been able to decide? I can help you complete it right now."),
+            "best_time": prev.get("best_time", ""),
             "month_end_due": prev.get("month_end_due", False), "source_list": "reviewed",
         }
     for f in plan["first"]:
@@ -106,6 +110,9 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         r["missed_unreturned"] = c.get("inbound_missed_unreturned", 0)
         if r["stage"] in CLOSED:
             continue
+        if not (r.get("opening_line") or "").strip():
+            r["opening_line"] = (f"Hi, this is {r['owner'].split()[0]} from LawSikho — we spoke recently about "
+                                 f"{r.get('course') or 'our programs'}. Is now a good time for two minutes?")
         # a missed call from the lead that nobody returned jumps the queue within its tier
         r["sort"] = (TIER_ORDER[r["tier"]], -int(bool(r["missed_unreturned"])), -int(r.get("month_end_due") or 0),
                      -int(r["prob_3d"]))
