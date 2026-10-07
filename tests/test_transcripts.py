@@ -41,7 +41,7 @@ def test_search_batches_and_parses(client):
             "sales_call": [{"caller_id": "919000000001", "start_time": "2026-10-06T10:00:00.000Z",
                             "call_duration": 60, "agent_name": "Asha-Extension ",
                             "transcript": {"text": "Hello"}}],
-            "support_calls": [{"start_time": "2026-10-06T12:00:00.000Z", "transcript": {"text": ""}}],
+            "support_calls": [{"start_time": "2026-10-06T18:00:00.000Z", "transcript": {"text": ""}}],  # IST -> 12:30 UTC
         },
         "919000000002": {"sales_call": [], "support_calls": []},
     })
@@ -88,3 +88,94 @@ def test_start_time_timezone_resolution():
                                           "createdAt": "2026-05-03T11:55:18.000Z"})
     assert ist.start_time.tzinfo == IST and ist.start_time.hour == 17
     assert ist.end_time.tzinfo == IST
+
+
+# --------------------------------------------------------------- timezone rules
+
+from datetime import datetime, timedelta, timezone  # noqa: E402
+
+from integrations.transcripts import IST, Call, RequestBudgetExceeded, detect_call_timezone  # noqa: E402
+
+NOW = datetime(2026, 10, 7, 11, 15, tzinfo=timezone.utc)
+
+
+@pytest.mark.parametrize("kind,raw,expected", [
+    # support is always IST, even when createdAt == start_time (older records)
+    ("support", {"start_time": "2025-10-01T15:00:00.000Z", "createdAt": "2025-10-01T15:00:00.000Z"}, IST),
+    # Acefone sales recordings are genuine UTC, even with a 5.5h createdAt lag
+    ("sales", {"start_time": "2026-10-06T06:00:00.000Z", "createdAt": "2026-10-06T11:30:00.000Z",
+               "s3_audio_file_url": "https://console.acefone.in/file/recording?callId=1"}, timezone.utc),
+    # S3 /recordings/ sales are IST, even when created much later
+    ("sales", {"start_time": "2026-10-06T19:00:00.000Z", "createdAt": "2026-10-07T03:00:00.000Z",
+               "s3_audio_file_url": "https://x.s3.amazonaws.com/recordings/abc.mp3"}, IST),
+    # mixed sources: created before start -> IST
+    ("sales", {"start_time": "2026-10-06T15:00:00.000Z", "createdAt": "2026-10-06T09:35:00.000Z",
+               "s3_audio_file_url": "https://x.s3.amazonaws.com/audio/1.mp3"}, IST),
+    # mixed sources: start in the future -> IST
+    ("sales", {"start_time": "2026-10-07T14:00:00.000Z"}, IST),
+    # mixed sources: created shortly after start -> UTC
+    ("sales", {"start_time": "2026-10-06T07:00:00.000Z", "createdAt": "2026-10-06T07:30:00.000Z",
+               "s3_audio_file_url": "https://x.s3.amazonaws.com/audio/2.mp3"}, timezone.utc),
+])
+def test_detect_call_timezone(kind, raw, expected):
+    assert detect_call_timezone(kind, raw, now=NOW) is expected
+
+
+def test_call_times_relabelled_not_shifted():
+    c = Call.from_api("p", "support", {"start_time": "2026-10-06T17:23:28.000Z",
+                                        "end_time": "2026-10-06T17:25:28.000Z"})
+    assert c.source_tz == "IST"
+    assert (c.start_time.hour, c.start_time.utcoffset()) == (17, timedelta(hours=5, minutes=30))
+    assert c.start_time.astimezone(timezone.utc).hour == 11
+    assert c.end_time.tzinfo is IST
+
+
+# --------------------------------------------------------------- request budget
+
+def test_batch_size_cannot_exceed_api_limit():
+    with pytest.raises(ValueError):
+        TranscriptClient("key", base_url=BASE, batch_size=11)
+
+
+@pytest.mark.parametrize("n", [0, 10, 50])
+def test_max_requests_strictly_below_10(n):
+    with pytest.raises(ValueError):
+        TranscriptClient("key", base_url=BASE, max_requests=n)
+
+
+def test_max_requests_from_env(monkeypatch):
+    monkeypatch.setenv("TRANSCRIPT_MAX_REQUESTS_PER_RUN", "3")
+    assert TranscriptClient("key", base_url=BASE).max_requests == 3
+    monkeypatch.setenv("TRANSCRIPT_MAX_REQUESTS_PER_RUN", "10")
+    with pytest.raises(ValueError):
+        TranscriptClient("key", base_url=BASE)
+
+
+@responses.activate
+def test_search_over_budget_sends_nothing():
+    c = TranscriptClient("key", base_url=BASE, max_requests=9)
+    numbers = [f"90000{i:05d}" for i in range(91)]  # 10 batches of 10 -> over 9
+    with pytest.raises(RequestBudgetExceeded, match="needs 10 request"):
+        c.search(numbers)
+    assert len(responses.calls) == 0 and c.requests_made == 0
+
+
+@responses.activate
+def test_budget_tracked_across_calls():
+    responses.get(SEARCH, json={})
+    c = TranscriptClient("key", base_url=BASE, max_requests=3, max_retries=0)
+    c.search([f"90000{i:05d}" for i in range(20)])     # 2 requests
+    assert (c.requests_made, c.requests_remaining) == (2, 1)
+    with pytest.raises(RequestBudgetExceeded):
+        c.search([f"91000{i:05d}" for i in range(11)])  # needs 2, 1 left
+    assert len(responses.calls) == 2
+
+
+@responses.activate
+def test_retries_count_against_budget(monkeypatch):
+    monkeypatch.setattr("integrations.transcripts.client.time.sleep", lambda s: None)
+    responses.get(SEARCH, status=503)
+    c = TranscriptClient("key", base_url=BASE, max_requests=2, max_retries=5)
+    with pytest.raises(RequestBudgetExceeded):
+        c.search(["9000000001"])
+    assert len(responses.calls) == 2

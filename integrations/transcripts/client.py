@@ -2,8 +2,14 @@
 
 Credentials are read from the environment, never hard-coded:
 
-    TRANSCRIPT_API_BASE   default https://centralized-transcript-api.altlapps.com/api/v1/
+    TRANSCRIPT_API_BASE                default https://centralized-transcript-api.altlapps.com/api/v1/
     TRANSCRIPT_API_KEY
+    TRANSCRIPT_MAX_REQUESTS_PER_RUN    default 9 (hard ceiling, must be < 10)
+
+Request limits:
+  * at most 10 numbers per search request (API validation limit);
+  * fewer than 10 API requests per client instance ("run"). Work that would
+    exceed the budget is refused up front, before any request is sent.
 """
 
 from __future__ import annotations
@@ -20,12 +26,19 @@ import requests
 DEFAULT_BASE = "https://centralized-transcript-api.altlapps.com/api/v1/"
 IST = timezone(timedelta(hours=5, minutes=30))
 
+MAX_NUMBERS_PER_REQUEST = 10  # API rejects more
+MAX_REQUESTS_PER_RUN = 9      # strict: always fewer than 10 requests per run
+
 
 class TranscriptError(Exception):
     def __init__(self, message: str, status_code: int | None = None, payload: Any = None):
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
+
+
+class RequestBudgetExceeded(TranscriptError):
+    """The work asked for would take this run to MAX_REQUESTS_PER_RUN or more requests."""
 
 
 def normalize_phone(phone: str | None) -> str | None:
@@ -56,17 +69,40 @@ def _parse_dt(value: str | None) -> datetime | None:
         return None
 
 
-def _fix_call_tz(start: datetime | None, created: datetime | None, now: datetime | None = None) -> bool:
-    """Whether a call's ``start_time`` is really IST despite its ``Z`` suffix.
+def detect_call_timezone(kind: str, raw: dict, now: datetime | None = None) -> timezone:
+    """The real timezone of a call's ``start_time``/``end_time``.
 
-    The API mixes dialers: some send true UTC, others send IST wall-clock time
-    labelled ``Z``. A record can't be created before its call started, nor can a
-    call start in the future, so either of those means the time is IST.
+    Every timestamp from the API ends in ``Z``, but several sources actually send
+    IST wall-clock time. Established from the data (Oct 2026):
+
+    * support calls ............................ always IST
+    * sales, Acefone recording (console.acefone) real UTC
+    * sales, S3 ``/recordings/`` audio ......... always IST
+    * anything else (S3 ``/audio/``, no audio) . mixed, so inferred: a record can't
+      be created before its call started and a call can't start in the future,
+      so either means IST; otherwise UTC.
     """
+    if kind == "support":
+        return IST
+    audio = raw.get("s3_audio_file_url") or ""
+    if "acefone" in audio:
+        return timezone.utc
+    if "/recordings/" in audio:
+        return IST
+
+    start = _parse_dt(raw.get("start_time"))
+    created = _parse_dt(raw.get("createdAt"))
     if start is None:
-        return False
+        return timezone.utc
     now = now or datetime.now(timezone.utc)
-    return start > now or (created is not None and created < start)
+    if start > now or (created is not None and created < start):
+        return IST
+    return timezone.utc
+
+
+def _as_tz(dt: datetime | None, tz: timezone) -> datetime | None:
+    """Re-label a parsed ``...Z`` timestamp with its real timezone (wall clock unchanged)."""
+    return dt.replace(tzinfo=tz) if dt else None
 
 
 @dataclass
@@ -82,6 +118,7 @@ class Call:
     transcript_url: str | None
     audio_url: str | None
     created_at: datetime | None = None
+    source_tz: str = "UTC"   # timezone the API's start/end time was actually in
 
     @property
     def has_transcript(self) -> bool:
@@ -89,12 +126,10 @@ class Call:
 
     @classmethod
     def from_api(cls, phone: str, kind: str, raw: dict) -> "Call":
-        start = _parse_dt(raw.get("start_time"))
-        end = _parse_dt(raw.get("end_time"))
+        tz = detect_call_timezone(kind, raw)
+        start = _as_tz(_parse_dt(raw.get("start_time")), tz)
+        end = _as_tz(_parse_dt(raw.get("end_time")), tz)
         created = _parse_dt(raw.get("createdAt"))
-        if _fix_call_tz(start, created):
-            start = start.replace(tzinfo=IST)
-            end = end.replace(tzinfo=IST) if end else None
         return cls(
             phone=phone,
             kind=kind,
@@ -107,6 +142,7 @@ class Call:
             transcript_url=raw.get("s3_transcript_url"),
             audio_url=raw.get("s3_audio_file_url"),
             created_at=created,
+            source_tz="IST" if tz is IST else "UTC",
         )
 
 
@@ -117,7 +153,8 @@ class TranscriptClient:
         base_url: str | None = None,
         timeout: float = 60,
         max_retries: int = 3,
-        batch_size: int = 10,  # API maximum per request
+        batch_size: int = MAX_NUMBERS_PER_REQUEST,
+        max_requests: int | None = None,
         session: requests.Session | None = None,
     ):
         self.api_key = api_key or os.environ.get("TRANSCRIPT_API_KEY")
@@ -127,13 +164,35 @@ class TranscriptClient:
         self.base_url = base.rstrip("/") + "/"
         self.timeout = timeout
         self.max_retries = max_retries
+        if not 1 <= batch_size <= MAX_NUMBERS_PER_REQUEST:
+            raise ValueError(f"batch_size must be 1-{MAX_NUMBERS_PER_REQUEST}")
         self.batch_size = batch_size
+        if max_requests is None:
+            max_requests = int(os.environ.get("TRANSCRIPT_MAX_REQUESTS_PER_RUN") or MAX_REQUESTS_PER_RUN)
+        if not 1 <= max_requests <= MAX_REQUESTS_PER_RUN:
+            raise ValueError(f"max_requests must be 1-{MAX_REQUESTS_PER_RUN} (strictly fewer than 10)")
+        self.max_requests = max_requests
+        self.requests_made = 0
         self.session = session or requests.Session()
 
+    @property
+    def requests_remaining(self) -> int:
+        return self.max_requests - self.requests_made
+
+    def _reserve(self, n: int, what: str) -> None:
+        if n > self.requests_remaining:
+            raise RequestBudgetExceeded(
+                f"{what} needs {n} request(s) but only {self.requests_remaining} of "
+                f"{self.max_requests} remain this run; nothing was sent"
+            )
+
     def request(self, method: str, path: str, params: dict | None = None, json: Any = None) -> Any:
+        """One logical API call. Counts against the run budget (retries included)."""
         url = self.base_url + path.lstrip("/")
         headers = {"x-api-key": self.api_key}
         for attempt in range(self.max_retries + 1):
+            self._reserve(1, f"{method} {path}")
+            self.requests_made += 1
             try:
                 resp = self.session.request(
                     method, url, params=params, json=json, headers=headers, timeout=self.timeout
@@ -165,6 +224,8 @@ class TranscriptClient:
     def search_raw(self, numbers: Iterable[str], call_status: str | None = "answered") -> dict:
         """Raw API response keyed by number, batching large lists."""
         nums = list(dict.fromkeys(n for n in (normalize_phone(x) for x in numbers) if n))
+        batches = -(-len(nums) // self.batch_size)
+        self._reserve(batches, f"Searching {len(nums)} numbers")
         result: dict = {}
         for i in range(0, len(nums), self.batch_size):
             chunk = nums[i : i + self.batch_size]
@@ -200,4 +261,5 @@ class TranscriptClient:
                 body.append({"student_phone": n[-10:]})
         if not body:
             return None
+        self._reserve(1, "Generating transcripts")
         return self.request("POST", "webhook/generate-transcripts-by-phone", json=body)

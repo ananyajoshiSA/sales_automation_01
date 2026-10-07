@@ -63,9 +63,17 @@ for c in calls:
 tc.generate_transcripts([c.phone for c in calls if not c.has_transcript])
 ```
 
-`start_time` is returned timezone-aware. The API labels every time `Z`, but some
-dialers actually send IST; the client detects these (record created before the call
-"started", or a start in the future) and corrects them.
+**Request limits.** At most 10 numbers per search request (API limit) and fewer than
+10 requests per run: each `TranscriptClient` has a budget of 9 requests (retries
+count; lower it with `TRANSCRIPT_MAX_REQUESTS_PER_RUN`). Work that would go over is
+refused with `RequestBudgetExceeded` before anything is sent — so one run covers
+up to 90 numbers.
+
+**Timezones.** The API labels every time `Z`, but several sources send IST. Each
+call's `start_time` is returned timezone-aware and `source_tz` says which it was:
+support calls → IST; sales via Acefone → UTC; sales with S3 `/recordings/` → IST;
+other sales are inferred (created before the call started, or a start in the
+future → IST, else UTC).
 
 ## Tests
 
