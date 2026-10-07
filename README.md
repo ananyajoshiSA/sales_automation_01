@@ -46,6 +46,27 @@ python -m integrations.leadsquared users
 python -m integrations.leadsquared lead-by-email someone@example.com
 ```
 
+## Call transcripts
+
+| Variable | Description |
+|---|---|
+| `TRANSCRIPT_API_BASE` | default `https://centralized-transcript-api.altlapps.com/api/v1/` |
+| `TRANSCRIPT_API_KEY` | `x-api-key` header value |
+
+```python
+from integrations.transcripts import TranscriptClient
+
+tc = TranscriptClient()
+calls = tc.search(["+91-9876543210", "8001950065"])   # any phone format; batched 10 per request
+for c in calls:
+    print(c.kind, c.agent_name, c.start_time, c.duration, c.has_transcript)
+tc.generate_transcripts([c.phone for c in calls if not c.has_transcript])
+```
+
+`start_time` is returned timezone-aware. The API labels every time `Z`, but some
+dialers actually send IST; the client detects these (record created before the call
+"started", or a start in the future) and corrects them.
+
 ## Tests
 
 ```bash
