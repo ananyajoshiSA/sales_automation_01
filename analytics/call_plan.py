@@ -225,14 +225,19 @@ def caller_sheet(wb, owner, rows):
     return ws, first, last
 
 
+TARGETS = {"Shivangi Sahu": 0}  # team leader: monitors the team, no personal target
+
+
 def summary_sheet(wb, owners, ranges):
     ws = wb.create_sheet("Team summary", 1)
     ws["A1"] = "Team Elite Calling — Thu 8 Oct targets and live progress"
     ws["A1"].font = Font(name=FONT, bold=True, size=14)
-    ws["A2"] = "Updates automatically as callers fill their sheets. Target: 4 enrollments per caller."
+    ws["A2"] = ("Updates automatically as callers fill their sheets. Target: 4 enrollments per caller tomorrow. "
+                "The pipeline column is the 3-day expectation from the lead review; a negative gap means even the "
+                "3-day pipeline is short of tomorrow's target.")
     ws["A2"].font = Font(name=FONT, italic=True, size=9, color="555555")
     heads = ["Caller", "Tier A", "Tier B", "New leads (F)", "Revive + nurture (R, C)", "Leads on sheet",
-             "Expected enrollments", "Target", "Gap to target", "Attempts required", "Attempts logged",
+             "Pipeline: expected enrollments over 3 days", "Target tomorrow", "3-day pipeline minus target", "Attempts required", "Attempts logged",
              "Leads not started", "Tier A not started", "Enrolled so far"]
     _hdr(ws, 4, heads, [20, 8, 8, 10, 10, 10, 12, 8, 10, 11, 11, 11, 11, 11])
     for i, o in enumerate(owners):
@@ -247,8 +252,8 @@ def summary_sheet(wb, owners, ranges):
         ws.cell(row=r, column=5, value=f'=COUNTIF({tier},"R ·*")+COUNTIF({tier},"C ·*")')
         ws.cell(row=r, column=6, value=f"=COUNTA({tier})")
         ws.cell(row=r, column=7, value=f"=SUM({sh}!${L('Est. chance (3 days)')}${f}:${L('Est. chance (3 days)')}${l})")
-        ws.cell(row=r, column=8, value=4)
-        ws.cell(row=r, column=9, value=f"=MAX(0,H{r}-G{r})")
+        ws.cell(row=r, column=8, value=TARGETS.get(o, 4))
+        ws.cell(row=r, column=9, value=f"=G{r}-H{r}")
         ws.cell(row=r, column=10, value=f"=SUM({sh}!${L('Attempts required')}${f}:${L('Attempts required')}${l})")
         ws.cell(row=r, column=11, value=f"=SUM({sh}!${L('Attempts done')}${f}:${L('Attempts done')}${l})")
         st = f"{sh}!${L('Status')}${f}:${L('Status')}${l}"
@@ -270,7 +275,8 @@ def summary_sheet(wb, owners, ranges):
     for c in range(1, 15):
         ws.cell(row=tr, column=c).font = Font(name=FONT, bold=True, size=10)
         ws.cell(row=tr, column=c).border = BORDER
-    ws.cell(row=5, column=8).comment = Comment("Target set by the business owner: 4 enrollments per caller.", "plan")
+    ws.cell(row=4, column=8).comment = Comment("Set by the business owner: 4 enrollments per caller. "
+                                               "Team leader has no personal target.", "plan")
     ws.cell(row=4, column=7).comment = Comment(
         "Sum of each lead's estimated chance of enrolling within 3 days, from the lead review. "
         "Calibration: A 25–50%, B 8–25%, F ~5%, C 2–8%. An estimate, not a forecast guarantee.", "plan")
