@@ -1,6 +1,6 @@
 # Fixed parameters for the daily team calling report
 
-Version 1.1, 8 Oct 2026 (v1.1 changed only the layout, P62/P64, and added the blocking validation gate in section 10; every definition and number rule is unchanged from v1.0). Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
+Version 1.2, 8 Oct 2026. v1.2 adds the call-integrity section (11, P67–P74), its page-2 block (P62) and validation check 14. v1.1 changed only the layout (P62/P64) and added the blocking validation gate (section 10). Every definition and number rule from v1.0 is unchanged, so v1.0–v1.2 figures for teams and callers are comparable. Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
 
 The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in its `<parameters>` block. Change both files together.
 
@@ -95,7 +95,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 |---|---|---|
 | P60 | File | PDF, A4 portrait, **exactly 1–2 pages**, saved as `/mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf` |
 | P61 | Rendering | HTML rendered by headless Chromium (`--print-to-pdf --no-pdf-header-footer`), as in `scripts/build_plan_pdf.py`. Check the page count before delivering. |
-| P62 | Sections, in order | **Page 1, readable at a glance:** title with the weekday and date · 4 KPI tiles (calls, answered, Zipteams-scored calls, credited enrollments) · verdict box · 1. Teams ranked (conversion bar, enrolled, real convs) · 2. Callers to recognise (P52, incl. the coaching case) · 3. Do next (top three actions). **Page 2:** 4. Team scorecard (P63) · 5. Why the top teams won · 6. Where other teams lost revenue · Method and limits with the validation summary |
+| P62 | Sections, in order | **Page 1, readable at a glance:** title with the weekday and date · 4 KPI tiles (calls, answered, Zipteams-scored calls, credited enrollments) · verdict box · 1. Teams ranked (conversion bar, enrolled, real convs) · 2. Callers to recognise (P52, incl. the coaching case) · 3. Do next (top three actions). **Page 2:** 4. Team scorecard (P63) · 5. Why the top teams won · 6. Where other teams lost revenue · 7. Call integrity (P74) · Method and limits with the validation summary |
 | P63 | Scorecard columns | Team, Callers, Dials, Answer %, Real convs, Talk min, Enrolled (credited), Conversion %, Enrolled same day (owner), Probing, Pitch, Objection, High/mod intent |
 | P64 | Required footnotes | The window (P3), the enrollment and credit definitions (P27, P28), the Zipteams coverage gap (P45), the team-mapping rule and the number of callers in more than one group (P11), the warm-lead flag (P29c), the validation summary, and the parameter version. |
 | P65 | Weekday | Compute it from the date; never write it from memory. |
@@ -116,3 +116,19 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 11. Every rate is within 0–100 and no call has a negative duration.
 12. Totals reconcile: calls = team dials + inbound; credited = sum of team credited = sum of their callers; Zipteams attributed + dropped = total.
 13. A seeded sample of 10 credited enrollments is re-read from LeadSquared stage history and confirmed as first-ever "Course Enrolled" in the window.
+14. Call-integrity counts reconcile (flagged and checked calls never exceed eligible calls; caller totals add up) and carry no lead details.
+
+## 11. Call integrity (v1.2; every flag means "needs review", never proof)
+
+Eligible calls: answered calls of 2+ minutes (P20) by LeadSquared users. Thresholds were calibrated on 5 Oct 2026: 1,450 eligible calls, and a 90-call transcript sample with a median of 148 words a minute (lowest 28, 38) and a most-repeated 3-word phrase of at most 4% of the words.
+
+| ID | Parameter | Definition |
+|---|---|---|
+| P67 | Purpose | Find long calls that may be fake, artificially stretched, or long with little or no conversation, and the callers who have the most of them. A flag is a prompt to listen to the recording. |
+| P68 | Overlap | The caller's answered call starts more than 30 s before their previous answered call ends. Both calls are flagged if they are 2+ minutes long. 5 Oct: 6 calls. |
+| P69 | Repeat | 3 or more real conversations between the same caller and lead on the day. 1% of 5 Oct caller-lead pairs. |
+| P70 | Just over 2 minutes | A caller with 10+ eligible calls whose share of calls lasting 120–149 s is at least twice the day's account-wide share. That caller's 120–149 s calls are flagged. 5 Oct: account share 17.2%, 7 callers. |
+| P71 | Ranking | Per caller: eligible calls, flagged calls, flagged share, and transcripts checked. Only callers with 10+ eligible calls are ranked, by flagged share. |
+| P72 | Transcript signals | No content: under 30 words. Thin: under 60 words a minute of LeadSquared duration, about 40% of the 5 Oct median. Recorded message: IVR, voicemail, switched-off or hold text in the first 40 words. Loop: one 3-word phrase making up 15%+ of the words. The transcript has no speaker labels or timestamps, so the customer's share of the talk and silences can't be measured; words a minute stands in for silence. |
+| P73 | Transcript sample | Within the API limits (90 numbers, 9 requests a run, and its own run: `python -m analytics.call_integrity TARGET_DATE [--limit N]`). The sample is one third calls already flagged by P68–P70, one third each caller's longest call, and the rest 120–149 s calls. A transcript matches the LeadSquared call on the same number that started closest to it, within 10 minutes. Some API start times are off by exactly 5 h 30 min (wrong timezone label), so that shift also counts when the two durations agree within 10%. |
+| P74 | Output | The report's page 2 gets a "7. Call integrity" block: flagged counts by signal, transcript coverage, and up to 5 ranked callers with flagged/eligible calls. Per-call evidence (call ID, caller, duration, words, words a minute, flags) goes to `data/report_{TARGET_DATE}/integrity_calls.csv`. No lead names or numbers appear anywhere in the output. |

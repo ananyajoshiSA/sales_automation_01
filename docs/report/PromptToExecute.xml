@@ -5,7 +5,7 @@
   The full definitions live in report_parameters.md (same version). This file and that one must
   carry the same values; change both and bump the version together.
 -->
-<report_prompt version="1.1" updated="2026-10-08">
+<report_prompt version="1.2" updated="2026-10-08">
 
   <inputs>
     <target_date>TARGET_DATE</target_date>
@@ -98,12 +98,23 @@
     <output>
       <rule id="P60">PDF, A4 portrait, 1–2 pages, saved as /mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf.</rule>
       <rule id="P61">Render HTML with headless Chromium (--print-to-pdf --no-pdf-header-footer). Check the page count before delivering.</rule>
-      <rule id="P62">Page 1 must be readable at a glance: title with weekday and date; 4 KPI tiles (calls, answered, Zipteams-scored calls, credited enrollments); verdict box; 1. Teams ranked (conversion bar, enrolled, real convs); 2. Callers to recognise (P52, incl. the coaching case); 3. Do next (the top three actions). Page 2: 4. Team scorecard (P63); 5. Why the top teams won; 6. Where other teams lost revenue; Method and limits with the validation summary.</rule>
+      <rule id="P62">Page 1 must be readable at a glance: title with weekday and date; 4 KPI tiles (calls, answered, Zipteams-scored calls, credited enrollments); verdict box; 1. Teams ranked (conversion bar, enrolled, real convs); 2. Callers to recognise (P52, incl. the coaching case); 3. Do next (the top three actions). Page 2: 4. Team scorecard (P63); 5. Why the top teams won; 6. Where other teams lost revenue; 7. Call integrity (P74); Method and limits with the validation summary.</rule>
       <rule id="P63">Scorecard columns: Team, Callers, Dials, Answer %, Real convs, Talk min, Enrolled (credited), Conversion %, Enrolled same day (owner), Probing, Pitch, Objection, High/mod intent.</rule>
-      <rule id="P64">Footnotes must state: the conversion window, the enrollment and credit definitions, the Zipteams coverage gap, the team-mapping rule with the count of multi-group callers, the warm-lead flag, the validation summary, and "Parameters v1.1".</rule>
+      <rule id="P64">Footnotes must state: the conversion window, the enrollment and credit definitions, the Zipteams coverage gap, the team-mapping rule with the count of multi-group callers, the warm-lead flag, the validation summary, and "Parameters v1.2".</rule>
       <rule id="P65">Compute the weekday from the date. Never write it from memory.</rule>
       <rule id="P66">Make no repository commits or pushes without the owner's approval.</rule>
     </output>
+
+    <call_integrity note="v1.2; every flag means needs review, never proof. Calibrated on 5 Oct 2026: 1,450 eligible calls; 90-call transcript sample, median 148 words a minute.">
+      <rule id="P67">Find answered calls of 2+ minutes by LeadSquared users that may be fake, artificially stretched, or long with little or no conversation, and the callers with the most of them. A flag is a prompt to listen to the recording.</rule>
+      <rule id="P68">Overlap: an answered call starts more than 30 s before the same caller's previous answered call ends; flag both if 2+ minutes.</rule>
+      <rule id="P69">Repeat: 3 or more real conversations between the same caller and lead on the day.</rule>
+      <rule id="P70">Just over 2 minutes: a caller with 10+ eligible calls whose share of 120–149 s calls is at least twice the day's account-wide share; flag those calls.</rule>
+      <rule id="P71">Per caller: eligible calls, flagged calls, flagged share, transcripts checked. Rank only callers with 10+ eligible calls, by flagged share.</rule>
+      <rule id="P72">Transcripts: no content under 30 words; thin under 60 words a minute; recorded message, IVR, voicemail or hold text in the first 40 words; loop when one 3-word phrase is 15%+ of the words. No speaker labels or timestamps exist, so words a minute stands in for silence and the customer's share is not measured.</rule>
+      <rule id="P73">Transcript sample in its own run (`python -m analytics.call_integrity TARGET_DATE [--limit N]`, API limits apply): a third calls flagged by P68–P70, a third each caller's longest call, the rest 120–149 s calls. Match on the same number, closest start within 10 minutes; a 5 h 30 min shift also counts when durations agree within 10% (some API times carry the wrong timezone).</rule>
+      <rule id="P74">Page 2 gets "7. Call integrity": flagged counts by signal, transcript coverage, up to 5 ranked callers with flagged/eligible calls. Per-call evidence to data/report_{TARGET_DATE}/integrity_calls.csv. No lead names or numbers in any output.</rule>
+    </call_integrity>
   </parameters>
 
   <validation gate="blocking">
@@ -113,7 +124,7 @@
     <check>Zipteams notes attributed ÷ total is printed, and fewer than 5% were dropped.</check>
     <check>Every number in the verdict appears in the scorecard.</check>
     <check>The PDF has 1 or 2 pages.</check>
-    <check>"Parameters v1.1" appears in the Method section.</check>
+    <check>"Parameters v1.2" appears in the Method section.</check>
     <check>No duplicate call or Zipteams activity IDs.</check>
     <check>Every call and Zipteams note falls inside the target IST day.</check>
     <check>Calls from callers who are not LeadSquared users stay under 5%.</check>
@@ -121,6 +132,7 @@
     <check>Every rate is within 0–100 and no call has a negative duration.</check>
     <check>Totals reconcile: calls = team dials + inbound; credited = sum of team credited = sum of their callers; Zipteams attributed + dropped = total.</check>
     <check>A seeded sample of 10 credited enrollments is re-read from LeadSquared stage history and confirmed as first-ever "Course Enrolled" in the window.</check>
+    <check>Call-integrity counts reconcile (flagged and checked calls never exceed eligible calls; caller totals add up) and carry no lead details.</check>
   </validation>
 
   <deliverable>
