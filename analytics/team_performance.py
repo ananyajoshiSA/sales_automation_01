@@ -386,10 +386,10 @@ def main():
         elif all(c["ok"] for c in checks):  # spend the transcript budget only on data that passed
             tx = fetch_transcripts(A, data)
             json.dump(tx, open(tx_path, "w"), indent=1)
-    doc, nums = page.report_html(A, tx, gate.summary_line(len(checks) + 3))  # + the verdict, version and page-count checks below
+    log_path = os.path.join(data, "validation.json")
+    doc, nums = page.report_html(A, tx, gate.summary_line(len(checks) + 3, log_path))  # + verdict, version, page count below
     checks.append(gate.verdict_numbers_check(nums, page.scorecard_cells(A)))
     checks.append({"check": f"'Parameters v{VERSION}' in the Method section", "ok": f"Parameters v{VERSION}." in doc, "detail": ""})
-    log_path = os.path.join(data, "validation.json")
     t = A["totals"]
     print(f"Parameters v{VERSION} · {A['date']} · conversion window to {A['window']['cw_end']}")
     print(f"S1 calls {t['calls']:,} ({t['bots_excluded']} bot calls excluded) · credited enrolments {t['enroll_credited']} "

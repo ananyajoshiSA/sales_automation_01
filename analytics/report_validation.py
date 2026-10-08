@@ -119,6 +119,6 @@ def write_log(checks: list[dict], path: str) -> None:
             fh.write(f"{'PASS' if c['ok'] else 'FAIL'}  {c['check']}: {c['detail']}\n")
 
 
-def summary_line(n_checks: int) -> str:
+def summary_line(n_checks: int, log_path: str) -> str:
     """Printed in the Method section; a report is only written when every check passed."""
-    return f"Validated: all {n_checks} data checks passed before this report was built (log in data/report_DATE/validation.txt)"
+    return f"Validated: all {n_checks} checks passed before this report was built (log: {log_path.replace('.json', '.txt')})"
