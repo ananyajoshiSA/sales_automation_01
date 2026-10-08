@@ -1,10 +1,13 @@
-"""Client for the centralized call-transcript API.
+"""Client for the Salesa / Centrana centralized call-transcript API.
 
 Credentials are read from the environment, never hard-coded:
 
-    TRANSCRIPT_API_BASE                default https://centralized-transcript-api.altlapps.com/api/v1/
-    TRANSCRIPT_API_KEY
-    TRANSCRIPT_MAX_REQUESTS_PER_RUN    default 9 (hard ceiling, must be < 10)
+    SALESA_BASE_URL                 default https://centralized-transcript-api.altlapps.com/api/v1/
+    SALESA_API_KEY
+    SALESA_MAX_REQUESTS_PER_RUN     default 9 (hard ceiling, must be < 10)
+
+The older names TRANSCRIPT_API_BASE / TRANSCRIPT_API_KEY / TRANSCRIPT_MAX_REQUESTS_PER_RUN
+are still read as a fallback.
 
 Request limits:
   * at most 10 numbers per search request (API validation limit);
@@ -28,6 +31,10 @@ IST = timezone(timedelta(hours=5, minutes=30))
 
 MAX_NUMBERS_PER_REQUEST = 10  # API rejects more
 MAX_REQUESTS_PER_RUN = 9      # strict: always fewer than 10 requests per run
+
+
+def _env(name: str, legacy: str) -> str | None:
+    return os.environ.get(name) or os.environ.get(legacy)
 
 
 class TranscriptError(Exception):
@@ -157,10 +164,10 @@ class TranscriptClient:
         max_requests: int | None = None,
         session: requests.Session | None = None,
     ):
-        self.api_key = api_key or os.environ.get("TRANSCRIPT_API_KEY")
+        self.api_key = api_key or _env("SALESA_API_KEY", "TRANSCRIPT_API_KEY")
         if not self.api_key:
-            raise TranscriptError("Missing credentials: set TRANSCRIPT_API_KEY")
-        base = base_url or os.environ.get("TRANSCRIPT_API_BASE") or DEFAULT_BASE
+            raise TranscriptError("Missing credentials: set SALESA_API_KEY")
+        base = base_url or _env("SALESA_BASE_URL", "TRANSCRIPT_API_BASE") or DEFAULT_BASE
         self.base_url = base.rstrip("/") + "/"
         self.timeout = timeout
         self.max_retries = max_retries
@@ -168,7 +175,7 @@ class TranscriptClient:
             raise ValueError(f"batch_size must be 1-{MAX_NUMBERS_PER_REQUEST}")
         self.batch_size = batch_size
         if max_requests is None:
-            max_requests = int(os.environ.get("TRANSCRIPT_MAX_REQUESTS_PER_RUN") or MAX_REQUESTS_PER_RUN)
+            max_requests = int(_env("SALESA_MAX_REQUESTS_PER_RUN", "TRANSCRIPT_MAX_REQUESTS_PER_RUN") or MAX_REQUESTS_PER_RUN)
         if not 1 <= max_requests <= MAX_REQUESTS_PER_RUN:
             raise ValueError(f"max_requests must be 1-{MAX_REQUESTS_PER_RUN} (strictly fewer than 10)")
         self.max_requests = max_requests

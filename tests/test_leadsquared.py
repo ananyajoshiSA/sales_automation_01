@@ -34,6 +34,12 @@ def test_reads_credentials_from_env(monkeypatch):
     assert (c.access_key, c.secret_key, c.host) == ("env-ak", "env-sk", "https://x.leadsquared.com/v2/")
 
 
+@pytest.mark.parametrize("raw", ["api-in21.leadsquared.com", "https://api-in21.leadsquared.com/",
+                                 "https://api-in21.leadsquared.com/v2", "https://api-in21.leadsquared.com/v2/"])
+def test_bare_or_full_host(raw):
+    assert LeadSquaredClient("ak", "sk", host=raw).host == "https://api-in21.leadsquared.com/v2/"
+
+
 def test_helpers():
     assert to_attributes({"FirstName": "A", "Phone": None}) == [
         {"Attribute": "FirstName", "Value": "A"},

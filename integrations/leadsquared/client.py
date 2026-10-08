@@ -4,7 +4,7 @@ Docs: https://apidocs.leadsquared.com/
 Auth is via ``accessKey`` / ``secretKey`` query parameters on every request.
 Credentials are read from the environment, never hard-coded:
 
-    LEADSQUARED_HOST        e.g. https://api-in21.leadsquared.com/v2/
+    LEADSQUARED_HOST        e.g. api-in21.leadsquared.com or https://api-in21.leadsquared.com/v2/
     LEADSQUARED_ACCESS_KEY
     LEADSQUARED_SECRET_KEY
 """
@@ -19,6 +19,16 @@ from typing import Any, Iterable, Iterator, Mapping
 import requests
 
 DEFAULT_HOST = "https://api-in21.leadsquared.com/v2/"
+
+
+def normalize_host(host: str) -> str:
+    """``https://<host>/v2/`` from a bare host (``api-in21.leadsquared.com``) or a full base URL."""
+    host = host.strip().rstrip("/")
+    if "://" not in host:
+        host = "https://" + host
+    if not host.endswith("/v2"):
+        host += "/v2"
+    return host + "/"
 
 
 class LeadSquaredError(Exception):
@@ -122,7 +132,7 @@ class LeadSquaredClient:
                 "Missing credentials: set LEADSQUARED_ACCESS_KEY and LEADSQUARED_SECRET_KEY"
             )
         host = host or os.environ.get("LEADSQUARED_HOST") or DEFAULT_HOST
-        self.host = host.rstrip("/") + "/"
+        self.host = normalize_host(host)
         self.timeout = timeout
         self.max_retries = max_retries
         self.session = session or requests.Session()

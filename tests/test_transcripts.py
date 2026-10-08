@@ -29,9 +29,23 @@ def test_normalize_phone(raw, expected):
 
 
 def test_missing_key(monkeypatch):
+    monkeypatch.delenv("SALESA_API_KEY", raising=False)
     monkeypatch.delenv("TRANSCRIPT_API_KEY", raising=False)
     with pytest.raises(TranscriptError):
         TranscriptClient()
+
+
+def test_env_names(monkeypatch):
+    for k in ["SALESA_API_KEY", "SALESA_BASE_URL", "TRANSCRIPT_API_KEY", "TRANSCRIPT_API_BASE"]:
+        monkeypatch.delenv(k, raising=False)
+    monkeypatch.setenv("TRANSCRIPT_API_KEY", "legacy")
+    monkeypatch.setenv("TRANSCRIPT_API_BASE", "https://legacy.test/api/v1")
+    c = TranscriptClient()
+    assert (c.api_key, c.base_url) == ("legacy", "https://legacy.test/api/v1/")
+    monkeypatch.setenv("SALESA_API_KEY", "new")
+    monkeypatch.setenv("SALESA_BASE_URL", "https://new.test/api/v1")
+    c = TranscriptClient()
+    assert (c.api_key, c.base_url) == ("new", "https://new.test/api/v1/")
 
 
 @responses.activate
