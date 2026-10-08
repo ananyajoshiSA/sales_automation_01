@@ -63,3 +63,13 @@ def test_summary_sheet_counts_new_tiers(tmp_path):
     heads = [c.value for c in ws[4]]
     assert heads[1:3] == ["Return calls (M)", "Unpaid links (P)"]
     assert ws.cell(row=5, column=2).value.startswith('=COUNTIF(') and '"M ·*"' in ws.cell(row=5, column=2).value
+
+
+def test_tier_b_cap_moves_lowest_ranked_extras_to_least_loaded_caller():
+    p = plan(candidates=[cand(f"B{i}") for i in range(5)] + [cand("A1")],
+             tiered=[tiered(f"B{i}", "B", prob=20 - i) for i in range(5)] + [tiered("A1", "A")], tier_b_cap=3)
+    rows = build_rows(p)
+    asha = [r["lead_id"] for r in rows["Asha K"]]
+    ravi = [r["lead_id"] for r in rows["Ravi S"]]
+    assert asha == ["A1", "B0", "B1", "B2"] and sorted(ravi) == ["B3", "B4"]
+    assert all(r["owner"] == "Ravi S" and r["why"].startswith("Moved from Asha K") for r in rows["Ravi S"])
