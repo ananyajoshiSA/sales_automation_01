@@ -7,16 +7,20 @@ Inputs (JSON):
   candidates - lead timelines from analytics.lead_priority (phone, stage, last conversation, ...)
   first      - fresh leads with no real conversation yet (analytics.fresh_leads rows)
   stages     - {lead_id: current stage} refreshed just before building (drops leads enrolled/closed since)
+  carry      - optional: earlier call-plan workbooks; leads marked "Link sent", "Token paid" or "EMI docs
+               pending" there and not paid come back as Tier P ("link sent, not paid")
 
-    python -m analytics.call_plan plan.json out.xlsx
+Leads with a missed call from the lead that nobody returned become Tier M and go first.
+
+    python -m analytics.call_plan plan.json out.xlsx [--carry yesterday.xlsx ...]
 """
 
 from __future__ import annotations
 
+import argparse
 import json
-import sys
 
-from openpyxl import Workbook
+from openpyxl import Workbook, load_workbook
 from openpyxl.comments import Comment
 from openpyxl.formatting.rule import FormulaRule
 from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
@@ -25,25 +29,29 @@ from openpyxl.worksheet.datavalidation import DataValidation
 
 CLOSED = {"Course Enrolled", "Irrelevant lead", "Invalid", "Duplicate"}
 REVIEWED_PROB = {"High": 35, "Medium": 15}  # calibration used for the earlier 48h review
-TIER_ORDER = {"A": 0, "B": 1, "F": 2, "R": 3, "C": 4}
-TIER_LABEL = {"A": "A · Close today", "B": "B · Hot follow-up", "F": "F · New lead, first contact", "R": "R · Revive closure-stage", "C": "C · Nurture"}
-ATTEMPTS = {"A": 4, "B": 3, "F": 3, "R": 2, "C": 1}
-SLOT = {"A": "10:00–11:30, retry 15:00 & 18:30", "B": "12:00–13:30, retry 16:00", "F": "14:15–15:00, retry 17:30",
+TIERS = "MPABFRC"
+TIER_ORDER = {t: i for i, t in enumerate(TIERS)}
+TIER_LABEL = {"M": "M · Return the lead's call", "P": "P · Link sent, not paid", "A": "A · Close today",
+              "B": "B · Hot follow-up", "F": "F · New lead, first contact", "R": "R · Revive closure-stage", "C": "C · Nurture"}
+ATTEMPTS = {"M": 3, "P": 3, "A": 4, "B": 3, "F": 3, "R": 2, "C": 1}
+SLOT = {"M": "First thing; any new missed call within 15 min", "P": "10:00–11:30 with Tier A, retry 15:00 & 18:00",
+        "A": "10:00–11:30, retry 15:00 & 18:30", "B": "12:00–13:30, retry 16:00", "F": "14:15–15:00, retry 17:30",
         "R": "16:00–17:00 (WhatsApp first)", "C": "17:00–18:30 (WhatsApp first)"}
 OUTCOMES = ["Enrolled / paid", "Payment link sent", "Seat blocked / token paid", "Callback fixed", "Spoke – thinking",
             "Not answered", "Switched off / failed", "Busy – call later", "Not interested", "Wrong number"]
 PAYMENT = ["Paid", "Token paid", "Link sent", "EMI docs pending", "Not yet"]
+UNPAID_STARTED = {"Token paid", "Link sent", "EMI docs pending"}
+MISSED_CALL_PROB = 6  # same chance the plan gives a lead who rang in (F tier, inbound)
 
 FONT = "Arial"
 HDR_FILL = PatternFill("solid", fgColor="1F4E46")
 INPUT_FILL = PatternFill("solid", fgColor="FFF4CC")
-TIER_FILL = {"A": "DCEFE6", "B": "E8F0FA", "F": "F3EAF7", "R": "FBEFE3", "C": "F2F2F2"}
+TIER_FILL = {"M": "FBE0DE", "P": "FFF0C2", "A": "DCEFE6", "B": "E8F0FA", "F": "F3EAF7", "R": "FBEFE3", "C": "F2F2F2"}
 THIN = Side(style="thin", color="D0D5D2")
 BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 
 def build_rows(plan: dict) -> dict[str, list[dict]]:
-    cand = {c["lead_id"]: c for c in plan["candidates"]}
     stages = plan.get("stages", {})
     rows: dict[str, dict] = {}
 
@@ -104,6 +112,45 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
             "best_time": "anytime", "objection_to_prepare": "", "last_conv": v["last_activity"], "source_list": "revive",
         }
 
+    for p in plan.get("carry", []):  # payment started on an earlier sheet and not completed
+        prev = rows.get(p["lead_id"], {})
+        if prev.get("tier") == "A":
+            prev["why"] = f"{p['payment_status']} on the {p['sheet_date']} sheet, not paid yet. {prev.get('why', '')}"
+            continue
+        rows[p["lead_id"]] = {
+            **prev, "owner": prev.get("owner") or p["owner"], "lead_id": p["lead_id"], "name": prev.get("name") or p["name"],
+            "tier": "P", "prob_3d": max(prev.get("prob_3d", 0), p.get("prob_3d") or 0), "phone": prev.get("phone") or p.get("phone"),
+            "course": prev.get("course") or p.get("course", ""), "month_end_due": prev.get("month_end_due", False),
+            "why": f"{p['payment_status']} on the {p['sheet_date']} sheet ({p.get('next_step') or 'no pay date logged'}), not paid yet.",
+            "opening_line": f"Hi, this is {(prev.get('owner') or p['owner']).split()[0]} from LawSikho. I'm calling about the payment "
+                            "link I sent you. Shall we complete it together now? It takes two minutes.",
+            "next_action": "Stay on the line while they pay. If it fails, find out why (card limit, EMI approval, family) "
+                           "and fix it on the call, or agree an exact time today.",
+            "best_time": prev.get("best_time", ""), "objection_to_prepare": "Payment failure, EMI approval, card limit",
+            "source_list": "carry",
+        }
+
+    cand = {c["lead_id"]: c for c in plan["candidates"]}
+    for c in plan["candidates"]:  # a lead who rang us and was never called back goes first
+        if not c.get("inbound_missed_unreturned"):
+            continue
+        prev = rows.get(c["lead_id"])
+        if prev and prev["tier"] in ("A", "P"):
+            continue
+        rows[c["lead_id"]] = {
+            **(prev or {}), "owner": (prev or {}).get("owner") or c["owner"], "lead_id": c["lead_id"],
+            "name": (prev or {}).get("name") or c.get("name", ""), "tier": "M",
+            "prob_3d": max((prev or {}).get("prob_3d", 0), MISSED_CALL_PROB), "course": (prev or {}).get("course") or c.get("course", ""),
+            "month_end_due": (prev or {}).get("month_end_due", False),
+            "why": f"Called us {c['inbound_missed_unreturned']} time(s) and nobody called back. "
+                   + ((prev or {}).get("why") or ""),
+            "opening_line": "Hi, this is <name> from LawSikho. You tried to reach us, sorry we missed you. How can I help?",
+            "next_action": (prev or {}).get("next_action") or "Find out why they called; if it's the fee or the batch, answer "
+                           "on the call and send the payment link.",
+            "best_time": (prev or {}).get("best_time", ""), "objection_to_prepare": (prev or {}).get("objection_to_prepare", ""),
+            "source_list": "missed_call",
+        }
+
     by_owner: dict[str, list[dict]] = {}
     for r in rows.values():
         c = cand.get(r["lead_id"], {})
@@ -124,6 +171,33 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
     for o in by_owner:
         by_owner[o].sort(key=lambda r: r["sort"])
     return by_owner
+
+
+def read_carry(paths: list[str]) -> list[dict]:
+    """Leads whose payment was started on an earlier sheet (link sent, token, EMI docs) and not completed."""
+    out: dict[str, dict] = {}
+    for path in paths:
+        wb = load_workbook(path, read_only=True)
+        for ws in wb.worksheets:
+            rows = list(ws.iter_rows(min_row=4, values_only=True))
+            if not rows or "Lead ID" not in rows[0]:
+                continue
+            col = {h: i for i, h in enumerate(rows[0]) if h}
+            title = str(ws["A1"].value or "")
+            sheet_date = title.split("call plan for ", 1)[-1] if "call plan for " in title else path
+            for v in rows[1:]:
+                g = lambda h: v[col[h]] if h in col and col[h] < len(v) else None  # noqa: E731
+                status = g("Payment status")
+                outcomes = {g(f"Attempt {k} outcome") for k in range(1, 5)}
+                if not g("Lead ID") or status not in UNPAID_STARTED or "Enrolled / paid" in outcomes:
+                    continue
+                out[g("Lead ID")] = {  # a later workbook overrides an earlier one
+                    "lead_id": g("Lead ID"), "owner": title.split(" — ")[0] or ws.title, "name": g("Lead") or "",
+                    "phone": g("Phone"), "course": g("Course") or "", "payment_status": status,
+                    "next_step": g("Next step date/time"), "sheet_date": sheet_date,
+                    "prob_3d": round(100 * float(g("Est. chance (3 days)") or 0)),
+                }
+    return list(out.values())
 
 
 CALLER_COLS = [
@@ -157,7 +231,8 @@ def caller_sheet(wb, owner, rows):
     ws["A1"] = f"{owner} — call plan for Thu 8 Oct 2026"
     ws["A1"].font = Font(name=FONT, bold=True, size=14)
     ws["A2"] = ("Work top to bottom. Yellow cells are for the caller to fill after every attempt. "
-                "Tier A leads get up to 4 attempts, B 3, F 3, C 1 call plus WhatsApp.")
+                "M (return the lead's call) and P (link sent, not paid) go first. Tier A leads get up to 4 attempts, "
+                "M, P, B and F 3, C 1 call plus WhatsApp.")
     ws["A2"].font = Font(name=FONT, italic=True, size=9, color="555555")
     n = len(rows)
     first, last = 5, 4 + n
@@ -247,48 +322,52 @@ def summary_sheet(wb, owners, ranges):
                 "The pipeline column is the 3-day expectation from the lead review; a negative gap means even the "
                 "3-day pipeline is short of tomorrow's target.")
     ws["A2"].font = Font(name=FONT, italic=True, size=9, color="555555")
-    heads = ["Caller", "Tier A", "Tier B", "New leads (F)", "Revive + nurture (R, C)", "Leads on sheet",
-             "Pipeline: expected enrollments over 3 days", "Target tomorrow", "3-day pipeline minus target", "Attempts required", "Attempts logged",
-             "Leads not started", "Tier A not started", "Enrolled so far"]
-    _hdr(ws, 4, heads, [20, 8, 8, 10, 10, 10, 12, 8, 10, 11, 11, 11, 11, 11])
+    heads = ["Caller", "Return calls (M)", "Unpaid links (P)", "Tier A", "Tier B", "New leads (F)", "Revive + nurture (R, C)",
+             "Leads on sheet", "Pipeline: expected enrollments over 3 days", "Target tomorrow", "3-day pipeline minus target",
+             "Attempts required", "Attempts logged", "Leads not started", "M, P or A not started", "Enrolled so far"]
+    C = {h: i + 1 for i, h in enumerate(heads)}
+    X = lambda h: get_column_letter(C[h])  # noqa: E731
+    _hdr(ws, 4, heads, [20, 9, 9, 8, 8, 10, 10, 10, 12, 8, 10, 11, 11, 11, 11, 11])
+    L = lambda name: get_column_letter(COL[name])  # noqa: E731
     for i, o in enumerate(owners):
         r = 5 + i
         sh = f"'{o[:31]}'"
         f, l = ranges[o]
-        L = lambda name: get_column_letter(COL[name])  # noqa: E731
         tier = f"{sh}!${L('Tier')}${f}:${L('Tier')}${l}"
-        ws.cell(row=r, column=1, value=o)
-        for col, key in ((2, "A ·*"), (3, "B ·*"), (4, "F ·*")):
-            ws.cell(row=r, column=col, value=f'=COUNTIF({tier},"{key}")')
-        ws.cell(row=r, column=5, value=f'=COUNTIF({tier},"R ·*")+COUNTIF({tier},"C ·*")')
-        ws.cell(row=r, column=6, value=f"=COUNTA({tier})")
-        ws.cell(row=r, column=7, value=f"=SUM({sh}!${L('Est. chance (3 days)')}${f}:${L('Est. chance (3 days)')}${l})")
-        ws.cell(row=r, column=8, value=TARGETS.get(o, 4))
-        ws.cell(row=r, column=9, value=f"=G{r}-H{r}")
-        ws.cell(row=r, column=10, value=f"=SUM({sh}!${L('Attempts required')}${f}:${L('Attempts required')}${l})")
-        ws.cell(row=r, column=11, value=f"=SUM({sh}!${L('Attempts done')}${f}:${L('Attempts done')}${l})")
         st = f"{sh}!${L('Status')}${f}:${L('Status')}${l}"
-        ws.cell(row=r, column=12, value=f'=COUNTIF({st},"Not started")')
-        ws.cell(row=r, column=13, value=f'=COUNTIFS({tier},"A ·*",{st},"Not started")')
-        ws.cell(row=r, column=14, value=f'=COUNTIF({st},"Enrolled")')
-        for c in range(1, 15):
-            cell = ws.cell(row=r, column=c)
-            cell.font = Font(name=FONT, size=10, bold=c == 1, color="0000FF" if c == 8 else "000000")
+        vals = {
+            "Caller": o, "Leads on sheet": f"=COUNTA({tier})",
+            "Revive + nurture (R, C)": f'=COUNTIF({tier},"R ·*")+COUNTIF({tier},"C ·*")',
+            "Pipeline: expected enrollments over 3 days": f"=SUM({sh}!${L('Est. chance (3 days)')}${f}:${L('Est. chance (3 days)')}${l})",
+            "Target tomorrow": TARGETS.get(o, 4),
+            "3-day pipeline minus target": f"={X('Pipeline: expected enrollments over 3 days')}{r}-{X('Target tomorrow')}{r}",
+            "Attempts required": f"=SUM({sh}!${L('Attempts required')}${f}:${L('Attempts required')}${l})",
+            "Attempts logged": f"=SUM({sh}!${L('Attempts done')}${f}:${L('Attempts done')}${l})",
+            "Leads not started": f'=COUNTIF({st},"Not started")',
+            "M, P or A not started": "=" + "+".join(f'COUNTIFS({tier},"{k} ·*",{st},"Not started")' for k in "MPA"),
+            "Enrolled so far": f'=COUNTIF({st},"Enrolled")',
+        }
+        for h, k in (("Return calls (M)", "M"), ("Unpaid links (P)", "P"), ("Tier A", "A"), ("Tier B", "B"), ("New leads (F)", "F")):
+            vals[h] = f'=COUNTIF({tier},"{k} ·*")'
+        for h, v in vals.items():
+            cell = ws.cell(row=r, column=C[h], value=v)
+            cell.font = Font(name=FONT, size=10, bold=h == "Caller", color="0000FF" if h == "Target tomorrow" else "000000")
             cell.border = BORDER
-        ws.cell(row=r, column=7).number_format = "0.0"
-        ws.cell(row=r, column=9).number_format = "0.0"
+        for h in ("Pipeline: expected enrollments over 3 days", "3-day pipeline minus target"):
+            ws.cell(row=r, column=C[h]).number_format = "0.0"
     tr = 5 + len(owners)
     ws.cell(row=tr, column=1, value="Team")
-    for c in range(2, 15):
+    decimals = {C["Pipeline: expected enrollments over 3 days"], C["3-day pipeline minus target"]}
+    for c in range(2, len(heads) + 1):
         col = get_column_letter(c)
         ws.cell(row=tr, column=c, value=f"=SUM({col}5:{col}{tr - 1})")
-        ws.cell(row=tr, column=c).number_format = "0.0" if c in (7, 9) else "0"
-    for c in range(1, 15):
+        ws.cell(row=tr, column=c).number_format = "0.0" if c in decimals else "0"
+    for c in range(1, len(heads) + 1):
         ws.cell(row=tr, column=c).font = Font(name=FONT, bold=True, size=10)
         ws.cell(row=tr, column=c).border = BORDER
-    ws.cell(row=4, column=8).comment = Comment("Set by the business owner: 4 enrollments per caller. "
-                                               "Team leader has no personal target.", "plan")
-    ws.cell(row=4, column=7).comment = Comment(
+    ws.cell(row=4, column=C["Target tomorrow"]).comment = Comment(
+        "Set by the business owner: 4 enrollments per caller. Team leader has no personal target.", "plan")
+    ws.cell(row=4, column=C["Pipeline: expected enrollments over 3 days"]).comment = Comment(
         "Sum of each lead's estimated chance of enrolling within 3 days, from the lead review. "
         "Calibration: A 25–50%, B 8–25%, F ~5%, C 2–8%. An estimate, not a forecast guarantee.", "plan")
     ws.freeze_panes = "B5"
@@ -329,7 +408,7 @@ def guide_sheet(wb):
         ("18:30–19:30  Final attempts on every A not yet closed (working professionals pick up after office). Update LeadSquared.", None),
         ("", None),
         ("Checkpoints for the team leader", "h"),
-        ("12:00  Every Tier A attempted once ('Tier A not started' = 0 on Team summary).", None),
+        ("12:00  Every M, P and A lead attempted once ('M, P or A not started' = 0 on Team summary).", None),
         ("15:00  Every Tier B attempted once; at least 1 enrollment or payment link per caller.", None),
         ("18:00  Every Tier A attempted 3 times; every F attempted twice.", None),
         ("19:30  'Leads not started' = 0 for every caller; every connected call has a next step date/time.", None),
@@ -349,8 +428,14 @@ def guide_sheet(wb):
     ws.column_dimensions["A"].width = 130
 
 
-def main(plan_path, out_path):
-    plan = json.load(open(plan_path))
+def main():
+    ap = argparse.ArgumentParser()
+    ap.add_argument("plan")
+    ap.add_argument("out")
+    ap.add_argument("--carry", nargs="*", default=[], help="earlier call-plan workbooks to carry unpaid payment links from")
+    a = ap.parse_args()
+    plan = json.load(open(a.plan))
+    plan["carry"] = plan.get("carry", []) + read_carry(a.carry)
     by_owner = build_rows(plan)
     owners = [o for o in plan["owner_order"] if by_owner.get(o)]
     wb = Workbook()
@@ -360,13 +445,13 @@ def main(plan_path, out_path):
         _, f, l = caller_sheet(wb, o, by_owner[o])
         ranges[o] = (f, l)
     summary_sheet(wb, owners, ranges)
-    wb.save(out_path)
-    json.dump({o: by_owner[o] for o in owners}, open(out_path.replace(".xlsx", ".json"), "w"), indent=1, default=str)
+    wb.save(a.out)
+    json.dump({o: by_owner[o] for o in owners}, open(a.out.replace(".xlsx", ".json"), "w"), indent=1, default=str)
     for o in owners:
         rs = by_owner[o]
-        tiers = {t: sum(1 for r in rs if r["tier"] == t) for t in "ABFRC"}
+        tiers = {t: sum(1 for r in rs if r["tier"] == t) for t in TIERS}
         print(f"{o:20} {len(rs):3} leads {tiers} expected {sum(r['prob_3d'] for r in rs) / 100:.1f}")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:3])
+    main()

@@ -68,7 +68,7 @@ def lead_rows(rs):
 
 
 def caller_section(owner, rs):
-    t = {k: [r for r in rs if r["tier"] == k] for k in "ABFRC"}
+    t = {k: [r for r in rs if r["tier"] == k] for k in "MPABFRC"}
     p3 = sum(r["prob_3d"] for r in rs) / 100
     tm = tomorrow(rs)
     missed = sum(1 for r in rs if r.get("missed_unreturned"))
@@ -89,6 +89,7 @@ def caller_section(owner, rs):
     <div><b>{p3:.1f}</b><span>3-day pipeline ({gap})</span></div>
   </div>
   <p class="note">First 30 minutes: {missed} missed call(s) to return, {carried} Wednesday-evening callback(s) that were missed, {ni} stage(s) to correct. Then work the list below in order.</p>
+  {f'<h3>First: return the lead\'s call (M) and unpaid links (P) ({len(t["M"]) + len(t["P"])})</h3><table class="leads"><thead><tr><th>#</th><th>Lead</th><th>Why</th><th>Opening line</th><th>What to send / ask</th></tr></thead><tbody>' + lead_rows(t['M'] + t['P']) + '</tbody></table>' if t['M'] or t['P'] else ''}
   <h3>Tier A – close today ({len(t['A'])})</h3>
   {'<table class="leads"><thead><tr><th>#</th><th>Lead</th><th>Why</th><th>Opening line</th><th>What to send / ask</th></tr></thead><tbody>' + lead_rows(t['A']) + '</tbody></table>' if t['A'] else '<p class="note">No Tier A lead. Start with the B list at 10:30.</p>'}
   <h3>Tier B – hot follow-up ({len(t['B'])})</h3>
