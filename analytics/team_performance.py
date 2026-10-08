@@ -65,13 +65,21 @@ def load_run(path: str) -> dict:
             "enrollments": j("enrollments.json"), "payments": j("payments.json")}
 
 
-def map_calls(calls: list[dict], users: list[dict]) -> tuple[list[dict], int, set[str]]:
-    """P10-P12, P14: name and team per call; bot calls removed. Returns (calls, bots, multi-group user ids)."""
+def map_calls(calls: list[dict], users: list[dict], d0: datetime | None = None) -> tuple[list[dict], int, set[str], int]:
+    """P1, P10-P12, P14: name and team per call; bot calls and calls outside the IST day removed.
+
+    The activity API can return calls created weeks earlier but edited on the day, so every call is
+    re-checked against the window. Returns (calls, bots, multi-group user ids, calls outside the day).
+    """
     by_id = {u["ID"]: u for u in users}
     by_name = {_name(u): u for u in users}
-    kept, bots, multi = [], 0, set()
+    kept, bots, multi, outside = [], 0, set(), 0
     for c in calls:
         c = dict(c)
+        c["t"] = utc(c.get("start_utc"))
+        if d0 and not (c["t"] and d0 <= c["t"] < d0 + timedelta(days=1)):
+            outside += 1
+            continue
         u = by_id.get(c.get("user_id")) or by_name.get((c.get("caller") or "").strip())
         if u:
             c["name"], gs = _name(u), u.get("MemberOfGroups") or []
@@ -83,12 +91,11 @@ def map_calls(calls: list[dict], users: list[dict]) -> tuple[list[dict], int, se
         if BOT.search(c["name"]):
             bots += 1
             continue
-        c["t"] = utc(c.get("start_utc"))
         c["ans"] = c.get("status") == "Answered"
         c["real"] = c["ans"] and (c.get("duration") or 0) >= REAL_SECS
         kept.append(c)
     kept.sort(key=lambda c: c["t"] or datetime.min.replace(tzinfo=timezone.utc))
-    return kept, bots, multi
+    return kept, bots, multi, outside
 
 
 def credit_enrollments(enrollments: list[dict], calls: list[dict], users: list[dict], cw_end: datetime | None = None) -> list[dict]:
@@ -156,7 +163,7 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
     meta = run["meta"]
     d0 = datetime.fromisoformat(meta["d0"])
     cw_end = min(datetime.fromisoformat(meta["cw_end"]), as_of) if as_of else datetime.fromisoformat(meta["cw_end"])
-    calls, bots, multi = map_calls(run["calls"], run["users"])
+    calls, bots, multi, outside = map_calls(run["calls"], run["users"], d0)
     E = credit_enrollments(run["enrollments"], calls, run["users"], cw_end)
     cred_t = Counter(e["team"] for e in E if e["team"])
     cred_p = Counter((e["team"], e["caller"]) for e in E if e["team"])
@@ -188,7 +195,7 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
         "best_front_line": front[0] if front else None,
         "rec": rec, "coach_case": max(cases, key=lambda p: p["real"]) if cases else None, "assets": assets,
         "enrollments": E,
-        "totals": {"calls_raw": len(calls) + bots, "bots_excluded": bots, "calls": len(calls), "outbound": len(out_calls),
+        "totals": {"calls_raw": len(run["calls"]), "outside_window_excluded": outside, "bots_excluded": bots, "calls": len(calls), "outbound": len(out_calls),
                    "inbound": len(calls) - len(out_calls), "answered_out": sum(c["ans"] for c in out_calls),
                    "zip_total": len(run["zips"]), "zip_attr": len(Z), "zip_dropped": dropped, "enroll_window": len(E),
                    "enroll_credited": sum(cred_t.values()), "payments": len(run["payments"]),
