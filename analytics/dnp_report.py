@@ -1,5 +1,8 @@
 """Account-wide calling health: DNP (did-not-pick) ratios, effort and red flags.
 
+Caller-days where half or more of the dials failed at the telephony layer are listed in
+dialer_days.csv and left out of that caller's rates (plan action 5: fix the dialer first).
+
     python -m analytics.dnp_report data/all_calls.jsonl data/users_all.json exports/dnp
 """
 
@@ -17,6 +20,10 @@ SALES_GROUP_HINTS = ("team", "us ", "closure", "id", "elite", "bootcamp", "dsv",
                      "women", "corporate", "trainee", "group", "gourp")
 
 
+WORKING_DAY_DIALS = 20
+DIALER_FAILURE_SHARE = 0.5
+
+
 def team_of_user(u):
     gs = u.get("MemberOfGroups") or []
     return gs[0] if gs else "(no group)"
@@ -24,6 +31,25 @@ def team_of_user(u):
 
 def pct(a, b):
     return round(100 * a / b, 1) if b else 0.0
+
+
+def dialer_days(outbound: list[dict]) -> list[dict]:
+    """Caller-days with 20+ dials where 50%+ ended in CallFailure: a dialer problem to fix before judging the caller.
+
+    Same-second failures across several leads are counted too, since they point at the line, not the lead.
+    """
+    per = defaultdict(list)
+    for c in outbound:
+        per[(c["name"], c["day"])].append(c)
+    out = []
+    for (name, day), cs in sorted(per.items()):
+        fails = [c for c in cs if c["status"] == "CallFailure"]
+        if len(cs) >= WORKING_DAY_DIALS and len(fails) >= DIALER_FAILURE_SHARE * len(cs):
+            same_sec = Counter(c["start_utc"] for c in fails)
+            out.append({"caller": name, "team": cs[0]["team"], "day": day, "dials": len(cs), "failures": len(fails),
+                        "failure_%": pct(len(fails), len(cs)),
+                        "same_second_failures": sum(v for v in same_sec.values() if v >= 2)})
+    return out
 
 
 def main(calls_path, users_path, out_dir):
@@ -83,16 +109,21 @@ def main(calls_path, users_path, out_dir):
         team_rows.append(s)
     team_rows.sort(key=lambda r: -r["dials"])
 
+    dialer = dialer_days(out)
+    bad = {(d["caller"], d["day"]) for d in dialer}
     callers = defaultdict(list)
     for c in out:
         callers[c["name"]].append(c)
     caller_rows = []
-    for name, cs in callers.items():
+    for name, all_cs in callers.items():
+        # a dialer-failure day says nothing about the caller, so it is left out of their rates
+        cs = [c for c in all_cs if (name, c["day"]) not in bad] or all_cs
         days = {c["day"] for c in cs}
         s = stat(cs)
         active = len([d for d in days if sum(1 for c in cs if c["day"] == d) >= 20]) or 1
         ci = [c for c in inb if c["name"] == name]
-        s.update(caller=name, team=cs[0]["team"], active_days=active, dials_per_day=round(len(cs) / active),
+        s.update(caller=name, team=cs[0]["team"], dialer_failure_days=sum(1 for n, _ in bad if n == name),
+                 active_days=active, dials_per_day=round(len(cs) / active),
                  talk_hrs_per_day=round(s["talk_hrs"] / active, 2),
                  real_calls_per_day=round(sum(1 for c in cs if c["status"] == "Answered" and c["duration"] >= 120) / active, 1),
                  inbound=len(ci), inbound_missed_pct=pct(sum(1 for c in ci if c["status"] != "Answered"), len(ci)))
@@ -123,13 +154,15 @@ def main(calls_path, users_path, out_dir):
 
     os.makedirs(out_dir, exist_ok=True)
     for name, data in (("teams.csv", team_rows), ("callers.csv", caller_rows), ("hours.csv", hours), ("days.csv", days),
-                       ("numbers.csv", num_rows)):
+                       ("numbers.csv", num_rows), ("dialer_days.csv", dialer)):
+        if not data:
+            continue
         with open(os.path.join(out_dir, name), "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=list(data[0]))
             w.writeheader()
             w.writerows(data)
     res = {"overall": overall, "teams": team_rows, "hours": hours, "days": days, "numbers": num_rows,
-           "failure_bursts_calls": burst, "callers": caller_rows}
+           "failure_bursts_calls": burst, "dialer_days": dialer, "callers": caller_rows}
     json.dump(res, open(os.path.join(out_dir, "dnp.json"), "w"), indent=1)
     print(json.dumps({k: v for k, v in res.items() if k != "callers"}, indent=1))
 
