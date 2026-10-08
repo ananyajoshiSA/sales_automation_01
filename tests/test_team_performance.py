@@ -90,7 +90,8 @@ def test_gate_catches_bad_data():
     r["calls"].append(call("u1", "W1", "2026-10-06 09:00:00"))              # next IST day
     A = analyse(r)
     failed = {c["check"] for c in data_checks(r, A) if not c["ok"]}
-    assert "No duplicate activity IDs" in failed and "Every call and note is inside the IST day" in failed
+    assert failed == {"No duplicate activity IDs", "Zipteams included, under 5% of notes dropped"}
+    assert A["totals"]["outside_window_excluded"] == 1                    # the next-day call is dropped, not counted
 
 
 def test_spot_check_against_stage_history():
