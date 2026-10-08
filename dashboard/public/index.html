@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Sales Dashboard</title>
+  <link rel="stylesheet" href="style.css">
+</head>
+<body>
+  <header>
+    <div>
+      <h1>Sales Dashboard</h1>
+      <p id="meta" class="muted">Loading…</p>
+    </div>
+    <nav id="ranges" aria-label="Date range">
+      <button data-range="today" class="on">Today</button>
+      <button data-range="yesterday">Yesterday</button>
+      <button data-range="7d">Last 7 days</button>
+      <button data-range="30d">Last 30 days</button>
+    </nav>
+  </header>
+
+  <section id="alerts" aria-live="polite"></section>
+
+  <section class="tiles">
+    <div class="tile"><span class="label">New leads</span><span class="value" id="t-leads">–</span></div>
+    <div class="tile"><span class="label">First-time enrollments</span><span class="value" id="t-enroll">–</span></div>
+    <div class="tile"><span class="label">Outbound dials</span><span class="value" id="t-dials">–</span></div>
+    <div class="tile"><span class="label">Connect rate</span><span class="value" id="t-connect">–</span></div>
+    <div class="tile"><span class="label">Real conversations (2+ min)</span><span class="value" id="t-real">–</span></div>
+    <div class="tile warn"><span class="label">Callers lagging</span><span class="value" id="t-lagging">–</span></div>
+    <div class="tile bad"><span class="label">Dialer / line issues</span><span class="value" id="t-dialer">–</span></div>
+  </section>
+
+  <section class="card">
+    <div class="card-head">
+      <h2>Callers</h2>
+      <select id="status-filter" aria-label="Filter callers">
+        <option value="attention">Lagging + dialer issues</option>
+        <option value="watch">Watchlist (one weak metric)</option>
+        <option value="all">All callers</option>
+      </select>
+    </div>
+    <p class="muted small">Compared with their own team's median (whole account for teams under 3 callers). Working day = 20+ dials.
+      Lagging = 2+ flags incl. dialing/conversations/talk time, over 2+ working days. Pick a multi-day range to judge callers.</p>
+    <div class="scroll"><table id="callers"></table></div>
+  </section>
+
+  <div class="grid">
+    <section class="card wide"><h2>Teams</h2><div class="scroll"><table id="teams"></table></div></section>
+    <section class="card wide"><h2>Zipteams call quality</h2><div class="scroll"><table id="zip"></table></div></section>
+    <section class="card"><h2>New leads by source</h2><div class="scroll"><table id="lead-sources"></table></div></section>
+    <section class="card"><h2>New leads by team</h2><div class="scroll"><table id="lead-teams"></table></div></section>
+    <section class="card"><h2>Enrollments by team</h2><div class="scroll"><table id="enroll-teams"></table></div></section>
+    <section class="card"><h2>Enrollments by owner</h2><div class="scroll"><table id="enroll-owners"></table></div></section>
+  </div>
+
+  <section class="card">
+    <h2>Data sync</h2>
+    <div class="scroll"><table id="sync"></table></div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>

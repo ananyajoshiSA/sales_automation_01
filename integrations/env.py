@@ -1,7 +1,6 @@
 """Load credentials from the project's single secrets file into ``os.environ``.
 
-The one credential file is ``skillarbitrage-mcp.secrets.template.env`` in the repo
-root (git-ignored; shared with the Skillarbitrage MCP server). Point
+The one credential file is ``.env`` in the repo root (git-ignored). Point
 ``SALES_SKILL_ENV_FILE`` at another path to use a copy kept elsewhere.
 
 Stdlib only. Values are taken literally (no ``$`` expansion, so keys like
@@ -15,7 +14,7 @@ import os
 from pathlib import Path
 
 REPO_ROOT = Path(__file__).resolve().parent.parent
-SECRETS_FILE = REPO_ROOT / "skillarbitrage-mcp.secrets.template.env"
+SECRETS_FILE = REPO_ROOT / ".env"
 
 
 def secrets_path() -> Path:

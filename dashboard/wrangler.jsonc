@@ -1,0 +1,31 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "sales-dashboard",
+  "main": "src/index.ts",
+  "compatibility_date": "2025-09-01",
+  // Free tier: one cron trigger (5 allowed per account); each run does one small task.
+  "triggers": { "crons": ["* * * * *"] },
+  // Dashboard page: static assets are free and don't invoke the Worker.
+  "assets": { "directory": "./public" },
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "sales_dashboard",
+      // Created with: npx wrangler d1 create sales_dashboard
+      "database_id": "2f27d60b-3b45-41bc-a7b4-106a7ea8b1a0",
+      "migrations_dir": "migrations"
+    }
+  ],
+  "vars": {
+    "LEADSQUARED_HOST": "api-in21.leadsquared.com",
+    "CALL_RECORDS_PER_RUN": "200",
+    "CALL_PAGE_SIZE": "100",
+    "ZIP_RECORDS_PER_RUN": "80",
+    "ZIP_PAGE_SIZE": "40",
+    "LEAD_PAGE_SIZE": "500",
+    "ENROLL_LEADS_PER_RUN": "12",
+    "WRITE_BUDGET": "90000"
+  },
+  // Secrets (never in this file): npx wrangler secret put LEADSQUARED_ACCESS_KEY / LEADSQUARED_SECRET_KEY
+  "observability": { "enabled": true }
+}

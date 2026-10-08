@@ -9,8 +9,7 @@ python3 -m venv .venv
 .venv/bin/pip install -r requirements-dev.txt
 ```
 
-**Credentials live in one file only:** `skillarbitrage-mcp.secrets.template.env` in the
-repo root (git-ignored; the same file the Skillarbitrage MCP server uses). Importing
+**Credentials live in one file only:** `.env` in the repo root (git-ignored). Importing
 `integrations` loads it automatically: values are taken literally, blank values are
 skipped, and variables already set in the environment win. To keep the file elsewhere,
 set `SALES_SKILL_ENV_FILE=/path/to/file`. In Claude Code cloud sessions, set the same
@@ -102,6 +101,13 @@ zt.upsert_customer("asha@example.com", name="Ravi", phone_number="9876543210")
 
 Every call writes to Zipteams (phones go out as E.164). Zipteams' analysis comes back
 into LeadSquared as "Zipteams Notes" activities, which is what `analytics/` reads.
+
+## Live dashboard
+
+[dashboard/](dashboard/) is a Cloudflare Worker (free tier) that pulls LeadSquared every minute and
+shows leads, first-time enrollments, calling activity, lagging callers, dialer issues and Zipteams
+call quality. Setup, limits and definitions: [dashboard/README.md](dashboard/README.md).
+History is loaded with `scripts/d1_backfill.py`.
 
 ## Tests
 
