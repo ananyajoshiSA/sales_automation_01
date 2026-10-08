@@ -8,6 +8,7 @@ Inputs (JSON):
   first      - fresh leads with no real conversation yet (analytics.fresh_leads rows)
   stages     - {lead_id: current stage} refreshed just before building (drops leads enrolled/closed since)
   tier_b_cap - optional: most Tier B leads per caller; extras move to the least-loaded callers
+  team, date_label, targets, default_target - optional sheet titles and per-caller targets
   carry      - optional: earlier call-plan workbooks; leads marked "Link sent", "Token paid" or "EMI docs
                pending" there and not paid come back as Tier P ("link sent, not paid")
 
@@ -44,6 +45,7 @@ OUTCOMES = ["Enrolled / paid", "Payment link sent", "Seat blocked / token paid",
 PAYMENT = ["Paid", "Token paid", "Link sent", "EMI docs pending", "Not yet"]
 UNPAID_STARTED = {"Token paid", "Link sent", "EMI docs pending"}
 MISSED_CALL_PROB = 6  # same chance the plan gives a lead who rang in (F tier, inbound)
+DEFAULT_TARGET = 4    # enrolments per caller per day, set by the business owner
 
 FONT = "Arial"
 HDR_FILL = PatternFill("solid", fgColor="1F4E46")
@@ -55,6 +57,7 @@ BORDER = Border(left=THIN, right=THIN, top=THIN, bottom=THIN)
 
 def build_rows(plan: dict) -> dict[str, list[dict]]:
     stages = plan.get("stages", {})
+    chance = plan.get("chances", {})  # measured per-tier chances (analytics.tier_outcomes), when there are enough
     rows: dict[str, dict] = {}
 
     for t in plan["tiered"]:
@@ -63,7 +66,7 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         t = dict(t)
         ch = (t.get("changed") or "").strip()
         if ch and not ch.lower().startswith("unchanged"):
-            t["why"] = f"Updated from Wed night: {ch}. {t.get('why', '')}"
+            t["why"] = f"Updated since the last review: {ch}. {t.get('why', '')}"
         rows[t["lead_id"]] = {**t, "source_list": "tiered"}
     for r in plan["reviewed"]:  # the deeper 48h review wins over the broader tiering
         tier = "A" if r["likelihood"] == "High" else "B"
@@ -85,7 +88,7 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
             continue
         rows[f["lead_id"]] = {
             "owner": f["owner"], "lead_id": f["lead_id"], "name": f["name"], "tier": "F",
-            "prob_3d": 5 if f["source"] != "Inbound Phone call" else 6, "month_end_due": False,
+            "prob_3d": chance.get("F") or (5 if f["source"] != "Inbound Phone call" else 6), "month_end_due": False,
             "course": f.get("course", ""),
             "why": (f"New {f['source']} lead created {f['created_ist']}; {f['dials']} dial(s), "
                     f"{f['answered_calls']} answered, no real conversation yet."),
@@ -103,7 +106,7 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
             continue
         per_owner_revive[v["owner"]] = per_owner_revive.get(v["owner"], 0) + 1
         rows[v["lead_id"]] = {
-            "owner": v["owner"], "lead_id": v["lead_id"], "name": v["name"], "tier": "R", "prob_3d": 4,
+            "owner": v["owner"], "lead_id": v["lead_id"], "name": v["name"], "tier": "R", "prob_3d": chance.get("R") or 4,
             "month_end_due": False, "course": v.get("course", ""), "phone": v.get("phone"), "stage": v["stage"],
             "why": (f"Still at '{v['stage']}' but last activity was {v['days']} days ago "
                     f"({v.get('last_activity_name') or 'activity'} on {v['last_activity']}). Check if the deal is alive."),
@@ -142,7 +145,7 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         rows[c["lead_id"]] = {
             **(prev or {}), "owner": (prev or {}).get("owner") or c["owner"], "lead_id": c["lead_id"],
             "name": (prev or {}).get("name") or c.get("name", ""), "tier": "M",
-            "prob_3d": max((prev or {}).get("prob_3d", 0), MISSED_CALL_PROB), "course": (prev or {}).get("course") or c.get("course", ""),
+            "prob_3d": max((prev or {}).get("prob_3d", 0), chance.get("M") or MISSED_CALL_PROB), "course": (prev or {}).get("course") or c.get("course", ""),
             "month_end_due": (prev or {}).get("month_end_due", False),
             "why": f"Called us {c['inbound_missed_unreturned']} time(s) and nobody called back. "
                    + ((prev or {}).get("why") or ""),
@@ -173,7 +176,8 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
     for o in by_owner:
         by_owner[o].sort(key=lambda r: r["sort"])
     if plan.get("tier_b_cap"):
-        rebalance(by_owner, [o for o in plan.get("owner_order", by_owner) if TARGETS.get(o, 4)], plan["tier_b_cap"])
+        targets, default = plan.get("targets", {}), plan.get("default_target", DEFAULT_TARGET)
+        rebalance(by_owner, [o for o in plan.get("owner_order", by_owner) if targets.get(o, default)], plan["tier_b_cap"])
     return by_owner
 
 
@@ -253,9 +257,9 @@ def _hdr(ws, row, values, widths=None):
             ws.column_dimensions[get_column_letter(i)].width = widths[i - 1]
 
 
-def caller_sheet(wb, owner, rows):
+def caller_sheet(wb, owner, rows, day="tomorrow"):
     ws = wb.create_sheet(owner[:31])
-    ws["A1"] = f"{owner} — call plan for Thu 8 Oct 2026"
+    ws["A1"] = f"{owner} — call plan for {day}"
     ws["A1"].font = Font(name=FONT, bold=True, size=14)
     ws["A2"] = ("Work top to bottom. Yellow cells are for the caller to fill after every attempt. "
                 "M (return the lead's call) and P (link sent, not paid) go first. Tier A leads get up to 4 attempts, "
@@ -338,14 +342,13 @@ def caller_sheet(wb, owner, rows):
     return ws, first, last
 
 
-TARGETS = {"Shivangi Sahu": 0}  # team leader: monitors the team, no personal target
-
-
-def summary_sheet(wb, owners, ranges):
+def summary_sheet(wb, owners, ranges, team="Team", day="tomorrow", targets=None, default_target=DEFAULT_TARGET):
+    """``targets`` overrides the per-caller target, e.g. 0 for a team leader who only monitors."""
+    targets = targets or {}
     ws = wb.create_sheet("Team summary", 1)
-    ws["A1"] = "Team Elite Calling — Thu 8 Oct targets and live progress"
+    ws["A1"] = f"{team} — {day} targets and live progress"
     ws["A1"].font = Font(name=FONT, bold=True, size=14)
-    ws["A2"] = ("Updates automatically as callers fill their sheets. Target: 4 enrollments per caller tomorrow. "
+    ws["A2"] = (f"Updates automatically as callers fill their sheets. Target: {default_target} enrollments per caller. "
                 "The pipeline column is the 3-day expectation from the lead review; a negative gap means even the "
                 "3-day pipeline is short of tomorrow's target.")
     ws["A2"].font = Font(name=FONT, italic=True, size=9, color="555555")
@@ -366,7 +369,7 @@ def summary_sheet(wb, owners, ranges):
             "Caller": o, "Leads on sheet": f"=COUNTA({tier})",
             "Revive + nurture (R, C)": f'=COUNTIF({tier},"R ·*")+COUNTIF({tier},"C ·*")',
             "Pipeline: expected enrollments over 3 days": f"=SUM({sh}!${L('Est. chance (3 days)')}${f}:${L('Est. chance (3 days)')}${l})",
-            "Target tomorrow": TARGETS.get(o, 4),
+            "Target tomorrow": targets.get(o, default_target),
             "3-day pipeline minus target": f"={X('Pipeline: expected enrollments over 3 days')}{r}-{X('Target tomorrow')}{r}",
             "Attempts required": f"=SUM({sh}!${L('Attempts required')}${f}:${L('Attempts required')}${l})",
             "Attempts logged": f"=SUM({sh}!${L('Attempts done')}${f}:${L('Attempts done')}${l})",
@@ -393,25 +396,25 @@ def summary_sheet(wb, owners, ranges):
         ws.cell(row=tr, column=c).font = Font(name=FONT, bold=True, size=10)
         ws.cell(row=tr, column=c).border = BORDER
     ws.cell(row=4, column=C["Target tomorrow"]).comment = Comment(
-        "Set by the business owner: 4 enrollments per caller. Team leader has no personal target.", "plan")
+        f"Set by the business owner: {default_target} enrollments per caller. A team leader has no personal target.", "plan")
     ws.cell(row=4, column=C["Pipeline: expected enrollments over 3 days"]).comment = Comment(
         "Sum of each lead's estimated chance of enrolling within 3 days, from the lead review. "
         "Calibration: A 25–50%, B 8–25%, F ~5%, C 2–8%. An estimate, not a forecast guarantee.", "plan")
     ws.freeze_panes = "B5"
 
 
-def guide_sheet(wb):
+def guide_sheet(wb, team="Team", day="tomorrow"):
     ws = wb.active
     ws.title = "How to use"
     lines = [
-        ("Team Elite Calling — daily call plan, Thu 8 Oct 2026", "title"),
+        (f"{team} — daily call plan, {day}", "title"),
         ("", None),
         ("What is in this file", "h"),
-        ("One sheet per caller, leads in call order. Tier A = can close today, B = hot follow-up, "
-         "F = new lead (1–7 Oct) still needing a first real conversation, R = older lead still parked at Follow Up For "
-         "Closure / Counselled (check if alive, else move it out), C = nurture (WhatsApp + one call).", None),
-        ("Leads come from: every open lead with a real conversation 22 Sep–7 Oct, month-end leads who said "
-         "'next month / after salary / after Navratri', new leads from 1–7 Oct, and missed calls never returned.", None),
+        ("One sheet per caller, leads in call order. M = return the lead's missed call, P = payment link sent and not "
+         "paid, A = can close today, B = hot follow-up, F = new lead still needing a first real conversation, "
+         "R = open-stage lead gone quiet (check if alive, else move it out), C = nurture (WhatsApp + one call).", None),
+        ("Leads come from: every open lead with a real conversation in the last 15 days, unpaid links from earlier "
+         "sheets, new leads from the last 7 days, open-stage leads gone quiet, and missed calls never returned.", None),
         ("'Est. chance' is the estimated chance of enrollment within 3 days from reading each lead's call "
          "summaries and LeadSquared history. Zip intent was cross-checked, not trusted on its own.", None),
         ("", None),
@@ -428,7 +431,7 @@ def guide_sheet(wb):
         ("11:30–12:00  Overnight new leads and every missed call from a lead (callback within 15 min all day).", None),
         ("12:00–13:30  Tier B first attempts.", None),
         ("13:30–14:15  Lunch (stagger so inbound is always covered).", None),
-        ("14:15–15:00  Tier F: new leads from 1–7 Oct that never had a real conversation.", None),
+        ("14:15–15:00  Tier F: new leads that never had a real conversation.", None),
         ("15:00–17:00  Second attempts on A and B; month-end promise leads; leads whose 'Best time' is afternoon.", None),
         ("16:00–17:00  Tier R: WhatsApp recap, then one call; re-stage dead deals.", None),
         ("17:00–18:30  Tier C (WhatsApp first, then one call); F second attempts.", None),
@@ -455,6 +458,24 @@ def guide_sheet(wb):
     ws.column_dimensions["A"].width = 130
 
 
+def write_workbook(plan: dict, out: str) -> dict[str, list[dict]]:
+    """Build the workbook (and a JSON copy of the rows next to it); returns the rows per caller."""
+    by_owner = build_rows(plan)
+    owners = [o for o in plan["owner_order"] if by_owner.get(o)]
+    wb = Workbook()
+    team, day = plan.get("team", "Team"), plan.get("date_label", "tomorrow")
+    guide_sheet(wb, team, day)
+    ranges = {}
+    for o in owners:
+        _, f, l = caller_sheet(wb, o, by_owner[o], day)
+        ranges[o] = (f, l)
+    summary_sheet(wb, owners, ranges, team, day, plan.get("targets"), plan.get("default_target", DEFAULT_TARGET))
+    wb.save(out)
+    by_owner = {o: by_owner[o] for o in owners}
+    json.dump(by_owner, open(out.replace(".xlsx", ".json"), "w"), indent=1, default=str)
+    return by_owner
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("plan")
@@ -463,19 +484,8 @@ def main():
     a = ap.parse_args()
     plan = json.load(open(a.plan))
     plan["carry"] = plan.get("carry", []) + read_carry(a.carry)
-    by_owner = build_rows(plan)
-    owners = [o for o in plan["owner_order"] if by_owner.get(o)]
-    wb = Workbook()
-    guide_sheet(wb)
-    ranges = {}
-    for o in owners:
-        _, f, l = caller_sheet(wb, o, by_owner[o])
-        ranges[o] = (f, l)
-    summary_sheet(wb, owners, ranges)
-    wb.save(a.out)
-    json.dump({o: by_owner[o] for o in owners}, open(a.out.replace(".xlsx", ".json"), "w"), indent=1, default=str)
-    for o in owners:
-        rs = by_owner[o]
+    by_owner = write_workbook(plan, a.out)
+    for o, rs in by_owner.items():
         tiers = {t: sum(1 for r in rs if r["tier"] == t) for t in TIERS}
         print(f"{o:20} {len(rs):3} leads {tiers} expected {sum(r['prob_3d'] for r in rs) / 100:.1f}")
 
