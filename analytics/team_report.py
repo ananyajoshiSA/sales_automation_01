@@ -3,7 +3,11 @@
 Input is a snapshot written by ``scripts/fetch_team_data.py``. All times are
 reported in IST.
 
-    python -m analytics.team_report data/snapshot.json 2026-10-02 2026-10-06 exports/report
+    python -m analytics.team_report data/snapshot.json 2026-10-02 2026-10-06 exports/report [data/hist.jsonl]
+
+The optional history file (``scripts/fetch_lead_histories.py``) dates each enrolment by its first
+stage change to Course Enrolled and finds the owner at that moment; without it the enrolment date
+field and the current owner are used, and each row says which.
 """
 
 from __future__ import annotations
@@ -17,7 +21,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from analytics.definitions import BUCKETS, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
+from analytics.definitions import BUCKETS, ENROLLED, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
 from analytics.definitions import speed_bucket as bucket_minutes
 
 IST = timezone(timedelta(hours=5, minutes=30))
@@ -35,6 +39,37 @@ ZIP_SCORES = {
 
 
 # ------------------------------------------------------------------ helpers
+
+def activity_data(a: dict) -> dict:
+    return {d.get("Key"): d.get("Value") for d in a.get("Data") or []}
+
+
+def enrolment_credit(lead: dict, acts: list[dict] | None, answered: list[tuple]) -> dict | None:
+    """When a lead first enrolled, who owned it then, and who closed it (plan step 5).
+
+    ``acts`` is the lead's activity history (or None); ``answered`` is its answered team calls as
+    sorted (time, caller) pairs. The closer is the last answered caller at or before enrolment.
+    """
+    t = owner = None
+    if acts:
+        stages = sorted((utc(a["CreatedOn"]), activity_data(a)) for a in acts
+                        if a.get("EventName") == "StageChange" and utc(a.get("CreatedOn")))
+        t = next((ts for ts, d in stages if d.get("CurrentStage") == ENROLLED), None)
+        for at, d in sorted((utc(a["CreatedOn"]), activity_data(a)) for a in acts
+                            if a.get("EventName") == "LeadAssigned" and utc(a.get("CreatedOn"))):
+            if t and at <= t:
+                owner = d.get("CurrentOwner") or owner
+    source = "stage history" if t else "enrolment date field"
+    t = t or utc(lead.get("mx_Enrollment_date"))
+    if not t:
+        return None
+    prior = [name for at, name in answered if at <= t]
+    return {"lead_id": lead["ProspectID"], "enrolled_ist": t.astimezone(IST).strftime("%Y-%m-%d %H:%M"), "t": t,
+            "owner_now": lead.get("OwnerIdName") or "",
+            "owner_at_enrolment": owner or lead.get("OwnerIdName") or "",
+            "owner_source": "assignment history" if owner else "current owner",
+            "closer": prior[-1] if prior else "", "date_source": source}
+
 
 def utc(s: str | None) -> datetime | None:
     """Parse LeadSquared's ``YYYY-MM-DD HH:MM:SS[.fff]`` UTC strings."""
@@ -304,7 +339,17 @@ def analyse(snap: dict, start: str, end: str) -> dict:
             "call_not_picking": st.get("Call Not Picking Up", 0),
             "still_new": st.get("New Lead", 0),
         })
-    enrolled_in_window = [l for l in leads.values() if in_window(utc(l.get("mx_Enrollment_date")))]
+    histories = snap.get("histories") or {}
+    answered = defaultdict(list)
+    for c in calls:
+        if c["answered"] and c["team"] and c["t"]:
+            answered[c["lead_id"]].append((c["t"], users[c["user_id"]]))
+    enrolment_rows = []
+    for lid, l in leads.items():
+        e = enrolment_credit(l, histories.get(lid), answered.get(lid, []))
+        if e and in_window(e.pop("t")):
+            enrolment_rows.append(e)
+    enrolment_rows.sort(key=lambda e: e["enrolled_ist"])
 
     return {
         "window": f"{start} to {end}",
@@ -320,7 +365,10 @@ def analyse(snap: dict, start: str, end: str) -> dict:
         "follow_ups": fu_rows,
         "quality": quality_rows,
         "outcomes": outcome_rows,
-        "enrolled_in_window": Counter(l.get("OwnerIdName") for l in enrolled_in_window),
+        # credited to the owner at enrolment and to the last answered caller, never the owner now
+        "enrolment_rows": enrolment_rows,
+        "enrolled_by_owner": Counter(e["owner_at_enrolment"] for e in enrolment_rows),
+        "enrolled_by_closer": Counter(e["closer"] or "(no answered call)" for e in enrolment_rows),
     }
 
 
@@ -341,11 +389,24 @@ def write_csv(path, rows):
         w.writerows(rows)
 
 
-def main(snapshot, start, end, out_dir):
-    r = analyse(json.load(open(snapshot)), start, end)
+def load_histories(path: str) -> dict[str, list]:
+    """lead_id -> activities from a fetch_lead_histories.py file, skipping leads whose fetch errored."""
+    out = {}
+    for line in open(path):
+        d = json.loads(line)
+        if d.get("activities") is not None and not d.get("error"):
+            out[d["lead_id"]] = d["activities"]
+    return out
+
+
+def main(snapshot, start, end, out_dir, histories=None):
+    snap = json.load(open(snapshot))
+    if histories:
+        snap["histories"] = load_histories(histories)
+    r = analyse(snap, start, end)
     os.makedirs(out_dir, exist_ok=True)
     for key in ("callers", "daily", "speed_to_lead_rows", "speed_to_lead_by_owner", "missed_inbound",
-                "follow_ups", "quality", "outcomes"):
+                "follow_ups", "quality", "outcomes", "enrolment_rows"):
         write_csv(os.path.join(out_dir, f"{key}.csv"), r[key])
     json.dump(r, open(os.path.join(out_dir, "report.json"), "w"), indent=1, default=str)
     print(json.dumps({k: v for k, v in r.items() if not k.endswith("_rows") and k not in ("daily", "missed_inbound", "follow_ups")},
@@ -353,4 +414,4 @@ def main(snapshot, start, end, out_dir):
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:5])
+    main(*sys.argv[1:6])

@@ -17,9 +17,11 @@ def main(ids_path, out_path, threads=5):
     if os.path.exists(out_path):
         for line in open(out_path):
             try:
-                done.add(json.loads(line)["lead_id"])
-            except (ValueError, KeyError):
-                pass
+                d = json.loads(line)
+            except ValueError:
+                continue
+            if d.get("activities") is not None and not d.get("error"):  # errored leads are retried
+                done.add(d["lead_id"])
     todo = [i for i in ids if i not in done]
     print(f"{len(ids)} leads, {len(done)} already fetched, {len(todo)} to go", flush=True)
     c = LeadSquaredClient()
