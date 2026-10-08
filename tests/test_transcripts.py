@@ -75,9 +75,9 @@ def test_search_batches_and_parses(client):
 @responses.activate
 def test_generate_transcripts_sends_10_digit_numbers(client):
     responses.post(BASE + "webhook/generate-transcripts-by-phone", json={"ok": True})
-    client.generate_transcripts(["+91 98765 43210", "8001950065"])
+    client.generate_transcripts(["+91 98765 43210", "9000000000"])
     assert json.loads(responses.calls[0].request.body) == [
-        {"student_phone": "9876543210"}, {"student_phone": "8001950065"},
+        {"student_phone": "9876543210"}, {"student_phone": "9000000000"},
     ]
 
 
