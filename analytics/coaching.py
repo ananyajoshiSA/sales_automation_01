@@ -21,7 +21,7 @@ import sys
 import time
 from collections import Counter, defaultdict
 
-from analytics.call_markers import MARKERS, NEXT_STEP, PAYMENT_STEP, markers_in
+from analytics.call_markers import MARKERS, NEXT_STEP, PAYMENT_STEP, markers_in, summary_has_payment_step
 from analytics.lead_priority import strip_html
 from analytics.team_report import IST, utc, zip_score
 
@@ -84,7 +84,7 @@ def quality(snap: dict) -> list[dict]:
         for key, field in (("probing_%", "mx_Custom_5"), ("pitch_%", "mx_Custom_4"), ("objection_handling_%", "mx_Custom_6")):
             if (s := zip_score(a.get(field))) is not None:
                 q[key].append(s)
-        q["payment_step_%"].append(100 * (PAYMENT_STEP in markers_in(strip_html(a.get("ActivityEvent_Note")))))
+        q["payment_step_%"].append(100 * summary_has_payment_step(strip_html(a.get("ActivityEvent_Note"))))
     for l in snap["leads"]:
         lid = l["ProspectID"]
         if callers.get(lid) and (s := zip_score(l.get("mx_Zip_Quality_Score"))) is not None:

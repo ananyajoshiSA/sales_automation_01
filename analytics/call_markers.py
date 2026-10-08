@@ -23,6 +23,16 @@ PAYMENT_STEP = "Payment step (link, pay now, balance)"
 NEXT_STEP = "Fixed next step (date/time)"
 _RX = {k: re.compile(v, re.I) for k, v in MARKERS.items()}
 
+# Zipteams summaries describe calls in the third person ("opted for NEFT payment", "payment options
+# (NEFT, scanner, payment link)"), so the plan tracker and coaching pack use this wider pattern on them.
+# It is not a P33 marker and never feeds the daily report's figures.
+SUMMARY_PAYMENT_STEP = re.compile(
+    r"payment link|pay(ment)? (now|today|tonight)|complete the payment|make the payment|balance (amount|payment)"
+    r"|opted for (neft|upi|emi|card)|chose .{0,25}payment|(neft|upi|scanner|razorpay|card) .{0,25}payment"
+    r"|payment .{0,25}(made|completed|done|initiated|received)|booking (fee|amount)|token (amount|payment)"
+    r"|seat (block|blocking)|registration (fee|amount)", re.I)
+_CONVERSATION_LINK = re.compile(r"link to the conversation:\s*\S+", re.I)
+
 
 def markers_in(text: str | None) -> set[str]:
     return {k for k, rx in _RX.items() if rx.search(text or "")}
@@ -30,6 +40,10 @@ def markers_in(text: str | None) -> set[str]:
 
 def has_payment_step(text: str | None) -> bool:
     return bool(_RX[PAYMENT_STEP].search(text or ""))
+
+
+def summary_has_payment_step(summary: str | None) -> bool:
+    return bool(SUMMARY_PAYMENT_STEP.search(_CONVERSATION_LINK.sub(" ", summary or "")))
 
 
 def marker_rates(texts: list[str]) -> dict[str, int | None]:

@@ -24,7 +24,7 @@ import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
-from analytics.call_markers import MARKERS, PAYMENT_STEP, has_payment_step, marker_rates
+from analytics.call_markers import MARKERS, PAYMENT_STEP, marker_rates, summary_has_payment_step
 from analytics.lead_priority import strip_html
 from analytics.team_report import IST, utc, zip_score
 
@@ -136,7 +136,7 @@ def attribute_zip(zips: list[dict], calls: list[dict]) -> tuple[list[dict], int]
                     "intent": (a.get("mx_Custom_1") or "NOT_AVAILABLE").upper(),
                     "probe": zip_score(a.get("mx_Custom_5")), "pitch": zip_score(a.get("mx_Custom_4")),
                     "obj": zip_score(a.get("mx_Custom_6")),
-                    "payment_step": has_payment_step(strip_html(a.get("ActivityEvent_Note")) + " " + (a.get("mx_Custom_2") or ""))})
+                    "payment_step": summary_has_payment_step(strip_html(a.get("ActivityEvent_Note")) + " " + (a.get("mx_Custom_2") or ""))})
     return out, dropped
 
 
