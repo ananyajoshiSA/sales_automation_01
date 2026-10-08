@@ -16,6 +16,7 @@ import json
 import os
 import random
 import re
+import shutil
 import statistics
 import subprocess
 import sys
@@ -27,7 +28,8 @@ from analytics.call_markers import MARKERS, PAYMENT_STEP, has_payment_step, mark
 from analytics.lead_priority import strip_html
 from analytics.team_report import IST, utc, zip_score
 
-VERSION = "1.0"
+VERSION = "1.1"
+ENROLLED = "Course Enrolled"
 REAL_SECS = 120
 LONG_NON_CONVERTED_SECS = 300
 BOT = re.compile(r"\b(system|bot|welcome|reminder|webinar|ivr)\b", re.I)
@@ -48,6 +50,13 @@ def short(team: str) -> str:
 
 def _name(u: dict) -> str:
     return f"{u.get('FirstName', '')} {u.get('LastName', '')}".strip()
+
+
+def first_enrollment(history: list[dict]) -> datetime | None:
+    """Time of the lead's first ever stage change to Course Enrolled (stage-change activities, event 3002)."""
+    firsts = sorted(t for h in history if (t := utc(h.get("CreatedOn")))
+                    and {d.get("Key"): d.get("Value") for d in h.get("Data") or []}.get("CurrentStage") == ENROLLED)
+    return firsts[0] if firsts else None
 
 
 def load_run(path: str) -> dict:
@@ -186,18 +195,6 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
                    "multi_group_callers": len({c.get("user_id") for c in calls} & multi)},
         "_calls": calls, "_zip": Z,
     }
-
-
-def validate(A: dict) -> list[tuple[str, bool]]:
-    """Section 10 checks that can be computed from the data (the PDF page count is checked after rendering)."""
-    t = A["totals"]
-    return [
-        (f"S1 calls {t['calls']:,} equal the sum of team dials and inbound",
-         t["calls"] == sum(s["dials"] + s["inbound"] for s in A["teams"].values())),
-        (f"Zipteams notes attributed {t['zip_attr']:,} of {t['zip_total']:,}, dropped < 5%",
-         t["zip_total"] > 0 and t["zip_dropped"] < 0.05 * t["zip_total"]),
-        ("At least one team is eligible for ranking", bool(A["rank"])),
-    ]
 
 
 # ------------------------------------------------------------------ transcripts (P30-P33)
@@ -347,6 +344,7 @@ def render_pdf(html_path: str, pdf_path: str) -> int | None:
 
 
 def main():
+    from analytics import report_validation as gate
     from analytics import team_performance_html as page
 
     ap = argparse.ArgumentParser()
@@ -363,42 +361,68 @@ def main():
         cmd = [sys.executable, "scripts/fetch_report_day.py", a.date, "--out", data] + (["--as-of", a.as_of] if a.as_of else [])
         subprocess.run(cmd, check=True, env={**os.environ, "PYTHONPATH": "."})
     as_of = datetime.strptime(a.as_of, "%Y-%m-%d %H:%M").replace(tzinfo=IST) if a.as_of else None
-    A = analyse(load_run(data), as_of)
+    run = load_run(data)
+    A = analyse(run, as_of)
+
+    # ---- validation gate: every check must pass before anything is rendered
+    from integrations.leadsquared import LeadSquaredClient
+    ls = LeadSquaredClient()
+    checks = [{"check": "LeadSquared preflight", "ok": bool(ls.get_lead_metadata()), "detail": "API reachable with the configured keys"}]
+    checks += gate.data_checks(run, A)
+    checks.append(gate.spot_check(A, lambda lead: (ls.get_lead_activities(lead, activity_event=3002, row_count=100) or {})
+                                  .get("ProspectActivities") or []))
     tx_path = os.path.join(data, "tx_summary.json")
-    if a.no_transcripts:
-        tx = None
-    elif os.path.exists(tx_path) and not a.fetch:
-        tx = json.load(open(tx_path))
-    else:
-        tx = fetch_transcripts(A, data)
-        json.dump(tx, open(tx_path, "w"), indent=1)
-    tracker = plan_tracker(A, tx)
-
-    os.makedirs(a.out, exist_ok=True)
-    json.dump({k: v for k, v in A.items() if not k.startswith("_")}, open(os.path.join(data, "agg.json"), "w"), indent=1, default=str)
-    pdf = os.path.join(a.out, a.name or f"team_calling_report_{a.date}.pdf")
-    html_path = os.path.join(data, "report.html")
-    open(html_path, "w", encoding="utf-8").write(page.report_html(A, tx))
-    pages = render_pdf(html_path, pdf)
-    tr_pdf = os.path.join(a.out, f"plan_tracker_{a.date}.pdf")
-    tr_html = os.path.join(data, "plan_tracker.html")
-    open(tr_html, "w", encoding="utf-8").write(page.tracker_html(tracker))
-    render_pdf(tr_html, tr_pdf)
-    json.dump(tracker, open(os.path.join(data, "plan_tracker.json"), "w"), indent=1)
-
-    checks = validate(A) + [(f"PDF has {pages} page(s)", pages in (1, 2)), (f"'Parameters v{VERSION}' in Method", True)]
+    tx = None
+    if not a.no_transcripts:
+        if os.path.exists(tx_path) and not a.fetch:
+            tx = json.load(open(tx_path))
+        elif all(c["ok"] for c in checks):  # spend the transcript budget only on data that passed
+            tx = fetch_transcripts(A, data)
+            json.dump(tx, open(tx_path, "w"), indent=1)
+    doc, nums = page.report_html(A, tx, gate.summary_line(len(checks) + 3))  # + the verdict, version and page-count checks below
+    checks.append(gate.verdict_numbers_check(nums, page.scorecard_cells(A)))
+    checks.append({"check": f"'Parameters v{VERSION}' in the Method section", "ok": f"Parameters v{VERSION}." in doc, "detail": ""})
+    log_path = os.path.join(data, "validation.json")
     t = A["totals"]
     print(f"Parameters v{VERSION} · {A['date']} · conversion window to {A['window']['cw_end']}")
-    print(f"calls {t['calls']:,} ({t['bots_excluded']} bot calls excluded) · credited enrolments {t['enroll_credited']} "
+    print(f"S1 calls {t['calls']:,} ({t['bots_excluded']} bot calls excluded) · credited enrolments {t['enroll_credited']} "
           f"of {t['enroll_window']} · payments {t['payments']}")
+
+    def finish(ok: bool) -> None:
+        gate.write_log(checks, log_path)
+        for c in checks:
+            print(("PASS " if c["ok"] else "FAIL ") + f"{c['check']}: {c['detail']}")
+        if not ok:
+            print(f"\nBLOCKED: no report written. Failed: {'; '.join(c['check'] for c in checks if not c['ok'])}. "
+                  f"Full log: {log_path}", file=sys.stderr)
+            sys.exit(2)
+
+    if not all(c["ok"] for c in checks):
+        finish(False)
+    html_path = os.path.join(data, "report.html")
+    open(html_path, "w", encoding="utf-8").write(doc)
+    draft = os.path.join(data, "report_draft.pdf")
+    pages = render_pdf(html_path, draft)
+    checks.append({"check": "PDF has 1 or 2 pages", "ok": pages in (1, 2), "detail": f"{pages} page(s)"})
+    if not checks[-1]["ok"]:
+        finish(False)
+    finish(True)
+    os.makedirs(a.out, exist_ok=True)
+    pdf = os.path.join(a.out, a.name or f"team_calling_report_{a.date}.pdf")
+    shutil.copyfile(draft, pdf)
+    os.remove(draft)
+
+    tracker = plan_tracker(A, tx)
+    json.dump(tracker, open(os.path.join(data, "plan_tracker.json"), "w"), indent=1)
+    json.dump({k: v for k, v in A.items() if not k.startswith("_")}, open(os.path.join(data, "agg.json"), "w"), indent=1, default=str)
+    tr_html = os.path.join(data, "plan_tracker.html")
+    open(tr_html, "w", encoding="utf-8").write(page.tracker_html(tracker))
+    tr_pdf = os.path.join(a.out, f"plan_tracker_{a.date}.pdf")
+    render_pdf(tr_html, tr_pdf)
     for i, team in enumerate(A["rank"], 1):
         s = A["teams"][team]
         print(f"{i:2}. {short(team)[:30]:30} credited {s['credited']:3}  conv {s['conv_pct']:5}%  real {s['real']:4}  warm={s['warm']}")
-    for label, ok in checks:
-        print(("PASS " if ok else "FAIL ") + label)
-    print(f"report: {pdf}\nplan tracker: {tr_pdf}")
-    if not all(ok for _, ok in checks):
-        sys.exit(1)
+    print(f"report: {pdf}\nplan tracker: {tr_pdf}\nvalidation log: {log_path}")
 
 
 if __name__ == "__main__":

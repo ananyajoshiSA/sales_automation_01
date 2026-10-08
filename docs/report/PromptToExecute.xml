@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  Daily team calling report: reusable prompt.
+  Fill in TARGET_DATE (YYYY-MM-DD) and paste the whole file as the prompt.
+  The full definitions live in report_parameters.md (same version). This file and that one must
+  carry the same values; change both and bump the version together.
+-->
+<report_prompt version="1.1" updated="2026-10-08">
+
+  <inputs>
+    <target_date>TARGET_DATE</target_date>
+    <timezone>IST (UTC+05:30)</timezone>
+    <repository branch="main">github.com/ananyajoshiSA/sales_automation_01</repository>
+  </inputs>
+
+  <role>
+    You are a sales-analytics analyst. Build a 1–2 page PDF report on which sales teams and callers
+    performed best on the target day in terms of converting potential clients into enrolled customers.
+    Use only the data sources, definitions and format below. Do not invent or substitute definitions.
+    Where a parameter cannot be met, stop and state which parameter failed and why.
+  </role>
+
+  <preflight>
+    <step>Run from the repository root with PYTHONPATH=. and install requirements.txt with pip.</step>
+    <step>Confirm LEADSQUARED_ACCESS_KEY, LEADSQUARED_SECRET_KEY and SALESA_API_KEY are set. Never print their values.</step>
+    <step>Run `python -m integrations.leadsquared check`. If it fails, stop and report the error.</step>
+    <step>Write all fetched data under the git-ignored data/ folder. Make no repository commits.</step>
+    <step>The whole run is one command: `python -m analytics.team_performance TARGET_DATE`. It fetches, validates, and only then renders.</step>
+  </preflight>
+
+  <parameters>
+    <scope>
+      <param id="P1" name="window">Target day 00:00:00–23:59:59 IST = previous day 18:30:00 to target day 18:29:59 UTC.</param>
+      <param id="P2" name="timezone">Show every time in IST. LeadSquared CreatedOn is UTC.</param>
+      <param id="P3" name="conversion_window">Target day through target day + 3 days (IST), capped at now. Print it on the report.</param>
+    </scope>
+
+    <sources mandatory="all">
+      <source id="S1" name="calls">LeadSquared activities, event 22 (outbound) and 21 (inbound), parsed with parse_phone_call. Never use lead edits or "leads modified" as calls.</source>
+      <source id="S2" name="users">LeadSquaredClient().get_users() with MemberOfGroups.</source>
+      <source id="S3" name="zipteams">"Zipteams Notes", event 237, created in the window. Required: a report without it is invalid.</source>
+      <source id="S4" name="enrollments">Leads in ProspectStage "Course Enrolled" plus stage-change history (event 3002), following the first-time-enrollment logic in scripts/d1_backfill.py.</source>
+      <source id="S5" name="transcripts">integrations.transcripts.TranscriptClient.search.</source>
+      <source id="S6" name="payments" use="context-only">"Payment Successful", event 213. Report the count only.</source>
+    </sources>
+
+    <team_mapping>
+      <param id="P10">Match a call to a user by user_id, then by exact caller full name.</param>
+      <param id="P11">Team = the first group in MemberOfGroups. Each caller is in exactly one team.</param>
+      <param id="P12">No group → "Unassigned". Caller not a LeadSquared user → "Not a user". Show both in totals; never rank them.</param>
+      <param id="P13">Rank only teams with at least 3 callers and at least 25 real conversations.</param>
+      <param id="P14">Exclude automated welcome, reminder and webinar bots from all figures.</param>
+    </team_mapping>
+
+    <calling_metrics source="S1">
+      <metric id="P20" name="dials">Count of outbound (event 22) calls.</metric>
+      <metric id="P21" name="answer_rate">Outbound with status "Answered" ÷ dials, percentage to 1 decimal.</metric>
+      <metric id="P22" name="real_conversation">Any call with status "Answered" and duration ≥ 120 s.</metric>
+      <metric id="P23" name="leads_reached">Distinct lead_id with at least one real conversation.</metric>
+      <metric id="P24" name="talk_minutes">Sum of answered call durations ÷ 60, rounded.</metric>
+      <metric id="P25" name="callers">Distinct callers with at least one outbound call.</metric>
+      <forbidden id="P26">Do not define "connected" by lead stage, lead edits or owner counts.</forbidden>
+    </calling_metrics>
+
+    <conversion_metrics source="S4">
+      <metric id="P27" name="enrollment">The lead's FIRST ever stage change to "Course Enrolled", timestamped inside the conversion window. A lead that already sits in an enrolled stage is not an enrollment.</metric>
+      <metric id="P28" name="credit">Credit each enrollment to the caller with the most answered talk time on that lead on the target day. A lead with no target-day conversation is not credited.</metric>
+      <metric id="P29a" name="conversion_rate" primary="true">Credited enrollments ÷ leads reached, percentage to 1 decimal.</metric>
+      <metric id="P29b" name="same_day_by_owner">Enrollments timestamped on the target day, by the lead owner's team. Context only.</metric>
+      <metric id="P29c" name="warm_lead_flag">Mark teams that mainly call bootcamp registrants or post-enrolment leads (currently Elite Changemakers and the DSV teams) as "warm leads" in the table.</metric>
+    </conversion_metrics>
+
+    <zipteams_metrics source="S3">
+      <metric id="P40" name="attribution">Credit each note to the caller of the lead's last answered call at or before the note's CreatedOn. Drop and count notes with no such call.</metric>
+      <metric id="P41" name="probing_pct">Mean of mx_Custom_5 (0/100).</metric>
+      <metric id="P42" name="pitch_pct">Mean of mx_Custom_4 (0/100).</metric>
+      <metric id="P43" name="objection_pct">Mean of mx_Custom_6 (0/100).</metric>
+      <metric id="P44" name="high_moderate_intent_pct">(HIGH + MODERATE) ÷ notes rated, where mx_Custom_1 is not NOT_AVAILABLE.</metric>
+      <rule id="P45">Show "–" for teams with no notes. Never treat a missing score as 0.</rule>
+      <rule id="P46">Do not use mx_Custom_7 (not populated).</rule>
+    </zipteams_metrics>
+
+    <transcripts source="S5">
+      <rule id="P30">At most 10 numbers per request, at most 9 requests per client run, at most 10 requests per minute: wait at least 7 s between requests and 60 s after earlier calls. Use max_retries=0 and catch errors per chunk.</rule>
+      <rule id="P31">Sample up to 90 leads: up to 40 converted (P27/P28, longest target-day call first) and up to 50 non-converted with an answered call of 300 s or more, 10 at random (seed 5) from each of the 5 ranked teams with the most real conversations.</rule>
+      <rule id="P32">Keep only calls whose IST start date is the target day. Per lead, analyse the longest transcript of 120 s or more.</rule>
+      <rule id="P33">Report the % of converted vs non-converted calls containing each marker (case-insensitive regex): price/fee/EMI; discount/scholarship/offer; payment step (payment link, pay now, balance payment); urgency (deadline, seats, last date); discovery questions; batch/LMS/onboarding; career/ROI; fixed next step (date or time).</rule>
+      <rule id="P34">At most 3 short quotes, each tied to a named caller and team. Never include customer phone numbers or names.</rule>
+    </transcripts>
+
+    <ranking>
+      <rule id="P50">Sort eligible teams by credited enrollments, then conversion rate, then real conversations.</rule>
+      <rule id="P51">Name the best team, a runner-up, and the best non-warm front-line team.</rule>
+      <rule id="P52">Recognise up to 9 callers, sorted by credited enrollments then real conversations. Add the highest-volume caller with at most 1 enrollment as a coaching case.</rule>
+      <rule id="P53">Coaching assets: up to 4 callers with at least 15 Zipteams notes, sorted by probing + pitch + objection.</rule>
+    </ranking>
+
+    <output>
+      <rule id="P60">PDF, A4 portrait, 1–2 pages, saved as /mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf.</rule>
+      <rule id="P61">Render HTML with headless Chromium (--print-to-pdf --no-pdf-header-footer). Check the page count before delivering.</rule>
+      <rule id="P62">Page 1 must be readable at a glance: title with weekday and date; 4 KPI tiles (calls, answered, Zipteams-scored calls, credited enrollments); verdict box; 1. Teams ranked (conversion bar, enrolled, real convs); 2. Callers to recognise (P52, incl. the coaching case); 3. Do next (the top three actions). Page 2: 4. Team scorecard (P63); 5. Why the top teams won; 6. Where other teams lost revenue; Method and limits with the validation summary.</rule>
+      <rule id="P63">Scorecard columns: Team, Callers, Dials, Answer %, Real convs, Talk min, Enrolled (credited), Conversion %, Enrolled same day (owner), Probing, Pitch, Objection, High/mod intent.</rule>
+      <rule id="P64">Footnotes must state: the conversion window, the enrollment and credit definitions, the Zipteams coverage gap, the team-mapping rule with the count of multi-group callers, the warm-lead flag, the validation summary, and "Parameters v1.1".</rule>
+      <rule id="P65">Compute the weekday from the date. Never write it from memory.</rule>
+      <rule id="P66">Make no repository commits or pushes without the owner's approval.</rule>
+    </output>
+  </parameters>
+
+  <validation gate="blocking">
+    <!-- Every check runs before rendering; one failure means no PDF and a message naming the failed check. Full log: data/report_{TARGET_DATE}/validation.txt -->
+    <check>The preflight passed.</check>
+    <check>The total S1 call count is printed and equals the sum of all team dials and inbound calls, including Unassigned and Not a user.</check>
+    <check>Zipteams notes attributed ÷ total is printed, and fewer than 5% were dropped.</check>
+    <check>Every number in the verdict appears in the scorecard.</check>
+    <check>The PDF has 1 or 2 pages.</check>
+    <check>"Parameters v1.1" appears in the Method section.</check>
+    <check>No duplicate call or Zipteams activity IDs.</check>
+    <check>Every call and Zipteams note falls inside the target IST day.</check>
+    <check>Calls from callers who are not LeadSquared users stay under 5%.</check>
+    <check>Each enrollment is counted once, and every credited caller had an answered call with that lead on the target day.</check>
+    <check>Every rate is within 0–100 and no call has a negative duration.</check>
+    <check>Totals reconcile: calls = team dials + inbound; credited = sum of team credited = sum of their callers; Zipteams attributed + dropped = total.</check>
+    <check>A seeded sample of 10 credited enrollments is re-read from LeadSquared stage history and confirmed as first-ever "Course Enrolled" in the window.</check>
+  </validation>
+
+  <deliverable>
+    The PDF at the P60 path, plus a 5-line chat summary: the best team with its conversion rate, the runner-up,
+    the top 3 callers, the single biggest gap found, and any parameter that could not be met.
+  </deliverable>
+
+</report_prompt>

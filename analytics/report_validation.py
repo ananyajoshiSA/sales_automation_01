@@ -1,0 +1,122 @@
+"""Validation gate for the daily team performance report. Runs before any PDF is written.
+
+Every check is pass/fail with a one-line detail; one failure blocks the report. Covers the
+Parameters checklist (section 10) plus data checks: duplicate activities, calls outside the IST
+window, unmapped callers, enrolment double-counting and credit, impossible values, totals that
+must reconcile, and a spot-check of credited enrolments against the raw LeadSquared stage history.
+"""
+
+from __future__ import annotations
+
+import json
+import os
+import random
+from collections import Counter
+from datetime import datetime, timedelta
+
+from analytics.team_report import utc
+
+NOT_A_USER_MAX_PCT = 5      # calls whose caller is not a LeadSquared user (IVR etc.) after bots are removed
+ZIP_DROPPED_MAX_PCT = 5     # P40 / checklist 3
+SPOT_CHECK_N, SPOT_CHECK_SEED = 10, 5
+
+
+def _check(name: str, ok: bool, detail: str) -> dict:
+    return {"check": name, "ok": bool(ok), "detail": detail}
+
+
+def data_checks(run: dict, A: dict) -> list[dict]:
+    calls, T, tot = A["_calls"], A["teams"], A["totals"]
+    out = []
+
+    ids = Counter(c.get("activity_id") for c in run["calls"] if c.get("activity_id"))
+    zids = Counter(z.get("ProspectActivityId") for z in run["zips"] if z.get("ProspectActivityId"))
+    dup = sum(v - 1 for v in ids.values() if v > 1) + sum(v - 1 for v in zids.values() if v > 1)
+    out.append(_check("No duplicate activity IDs", dup == 0, f"{dup} duplicate call/Zipteams activity IDs"))
+
+    d0 = datetime.fromisoformat(A["window"]["d0"])
+    d1 = d0 + timedelta(days=1)
+    outside = sum(1 for c in calls if not c["t"] or not d0 <= c["t"] < d1)
+    zout = sum(1 for z in run["zips"] if not (t := utc(z.get("CreatedOn"))) or not d0 <= t < d1)
+    out.append(_check("Every call and note is inside the IST day", outside == 0 and zout == 0,
+                      f"{outside} calls and {zout} Zipteams notes outside {d0:%d %b} 00:00–23:59 IST"))
+
+    nu = T.get("Not a user", {})
+    nu_calls = nu.get("dials", 0) + nu.get("inbound", 0)
+    pct = 100 * nu_calls / len(calls) if calls else 0
+    out.append(_check("Callers map to a team", pct < NOT_A_USER_MAX_PCT and all(c.get("team") for c in calls),
+                      f"{nu_calls} calls ({pct:.1f}%) from callers who are not LeadSquared users; limit {NOT_A_USER_MAX_PCT}%"))
+
+    E = A["enrollments"]
+    leads = Counter(e["lead"] for e in E)
+    doubled = [l for l, n in leads.items() if n > 1]
+    out.append(_check("Each enrolment counted once", not doubled, f"{len(doubled)} leads counted more than once"))
+
+    spoke = {(c["lead_id"], c["name"]) for c in calls if c["ans"]}
+    bad = [e for e in E if e["caller"] and (e["lead"], e["caller"]) not in spoke]
+    out.append(_check("Credited callers spoke to the lead that day", not bad,
+                      f"{len(bad)} of {sum(1 for e in E if e['caller'])} credited enrolments have no answered call by that caller"))
+
+    rates = [(t, k, s[k]) for t, s in T.items() for k in ("answer_pct", "conv_pct", "probe", "pitch", "obj", "hi_mod_pct")
+             if s[k] is not None and not 0 <= s[k] <= 100]
+    neg = sum(1 for c in run["calls"] if (c.get("duration") or 0) < 0)
+    out.append(_check("Rates within 0–100 and no negative durations", not rates and neg == 0,
+                      f"{len(rates)} rates out of range, {neg} negative durations"))
+
+    people = A["people"]
+    recon = {
+        "calls = team dials + inbound": tot["calls"] == sum(s["dials"] + s["inbound"] for s in T.values()),
+        "credited = sum of team credited": tot["enroll_credited"] == sum(s["credited"] for s in T.values()),
+        "team credited = sum of its callers": all(s["credited"] == sum(p["credited"] for p in people if p["team"] == t)
+                                                  for t, s in T.items() if t != "Not a user"),
+        "team real convs = sum of its callers": all(s["real"] == sum(p["real"] for p in people if p["team"] == t)
+                                                    for t, s in T.items() if t != "Not a user"),
+        "Zipteams attributed + dropped = total": tot["zip_attr"] + tot["zip_dropped"] == tot["zip_total"],
+    }
+    failed = [k for k, ok in recon.items() if not ok]
+    out.append(_check("Totals reconcile across teams and callers", not failed, "; ".join(failed) or f"{len(recon)} identities hold"))
+
+    zp = 100 * tot["zip_dropped"] / tot["zip_total"] if tot["zip_total"] else 100
+    out.append(_check("Zipteams included, under 5% of notes dropped", tot["zip_total"] > 0 and zp < ZIP_DROPPED_MAX_PCT,
+                      f"{tot['zip_attr']:,} of {tot['zip_total']:,} notes attributed, {tot['zip_dropped']} dropped ({zp:.1f}%)"))
+    out.append(_check("At least one team eligible for ranking", bool(A["rank"]), f"{len(A['rank'])} ranked teams"))
+    return out
+
+
+def spot_check(A: dict, history) -> dict:
+    """Re-read the stage history of a sample of credited enrolments and confirm the first 'Course Enrolled'.
+
+    ``history(lead_id)`` returns the lead's stage-change activities (event 3002).
+    """
+    from analytics.team_performance import first_enrollment
+
+    credited = sorted(e["lead"] for e in A["enrollments"] if e["team"])
+    random.seed(SPOT_CHECK_SEED)
+    sample = random.sample(credited, min(SPOT_CHECK_N, len(credited)))
+    d0, end = datetime.fromisoformat(A["window"]["d0"]), datetime.fromisoformat(A["window"]["cw_end"])
+    bad = []
+    for lead in sample:
+        first = first_enrollment(history(lead))
+        if not first or not d0 <= first <= end:
+            bad.append(lead)
+    return _check("Spot-check of credited enrolments against stage history", sample and not bad,
+                  f"{len(sample) - len(bad)} of {len(sample)} sampled enrolments confirmed as first-ever 'Course Enrolled' in the window")
+
+
+def verdict_numbers_check(verdict_numbers: list[str], scorecard_cells: set[str]) -> dict:
+    missing = [n for n in verdict_numbers if n not in scorecard_cells]
+    return _check("Every number in the verdict appears in the scorecard", not missing,
+                  f"missing: {', '.join(missing)}" if missing else f"{len(verdict_numbers)} numbers matched")
+
+
+def write_log(checks: list[dict], path: str) -> None:
+    os.makedirs(os.path.dirname(path), exist_ok=True)
+    json.dump(checks, open(path, "w"), indent=1)
+    with open(path.replace(".json", ".txt"), "w", encoding="utf-8") as fh:
+        for c in checks:
+            fh.write(f"{'PASS' if c['ok'] else 'FAIL'}  {c['check']}: {c['detail']}\n")
+
+
+def summary_line(n_checks: int) -> str:
+    """Printed in the Method section; a report is only written when every check passed."""
+    return f"Validated: all {n_checks} data checks passed before this report was built (log in data/report_DATE/validation.txt)"

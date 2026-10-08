@@ -15,18 +15,12 @@ import os
 import sys
 from datetime import datetime, timedelta, timezone
 
+from analytics.team_performance import ENROLLED, first_enrollment
+from analytics.team_report import utc
 from integrations.leadsquared import PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, format_datetime, parse_phone_call
 
 IST = timezone(timedelta(hours=5, minutes=30))
 ZIP_NOTES, PAYMENT_SUCCESS, STAGE_CHANGE = 237, 213, 3002
-ENROLLED = "Course Enrolled"
-
-
-def utc(s: str | None) -> datetime | None:
-    try:
-        return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc) if s else None
-    except ValueError:
-        return None
 
 
 def log(*a):
@@ -39,12 +33,6 @@ def windows(date: str, as_of: str | None = None) -> tuple[datetime, datetime, da
     d1 = d0 + timedelta(days=1) - timedelta(seconds=1)
     cap = datetime.strptime(as_of, "%Y-%m-%d %H:%M").replace(tzinfo=IST) if as_of else datetime.now(timezone.utc)
     return d0, d1, min(d0 + timedelta(days=4) - timedelta(seconds=1), cap)
-
-
-def first_enrollment(history: list[dict]) -> datetime | None:
-    firsts = sorted(t for h in history if (t := utc(h.get("CreatedOn")))
-                    and {d.get("Key"): d.get("Value") for d in h.get("Data") or []}.get("CurrentStage") == ENROLLED)
-    return firsts[0] if firsts else None
 
 
 def main():
