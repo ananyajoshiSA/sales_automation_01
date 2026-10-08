@@ -11,7 +11,7 @@ from __future__ import annotations
 import html
 from datetime import datetime
 
-from analytics.team_performance import VERSION, short
+from analytics.team_performance import IST, VERSION, short
 
 e = html.escape
 CSS = """
@@ -151,7 +151,8 @@ def _lost(A: dict) -> str:
 def report_html(A: dict, tx: dict | None, validation: str = "") -> tuple[str, list[str]]:
     """Returns (html, the verdict's numbers)."""
     T, tot, r = A["teams"], A["totals"], A["rank"]
-    d0, cw_end = datetime.fromisoformat(A["window"]["d0"]), datetime.fromisoformat(A["window"]["cw_end"])
+    d0 = datetime.fromisoformat(A["window"]["d0"]).astimezone(IST)
+    cw_end = datetime.fromisoformat(A["window"]["cw_end"]).astimezone(IST)
     title_day = f"{d0:%A} {d0.day} {d0:%B %Y}"  # P65: weekday computed from the date
     gaps = _gap(tx)
     verdict, nums = _verdict(A, gaps[0][0] if gaps and gaps[0][1] > gaps[0][2] else None)

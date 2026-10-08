@@ -102,3 +102,10 @@ def test_spot_check_against_stage_history():
     hist["M3"].insert(0, {"CreatedOn": "2026-09-01 06:00:00", "Data": [{"Key": "CurrentStage", "Value": "Course Enrolled"}]})
     assert not spot_check(A, lambda l: hist[l])["ok"]                       # enrolled before: not first-time
     assert not verdict_numbers_check(["99.9"], scorecard_cells(A))["ok"]
+
+
+def test_conversion_window_is_shown_in_ist():
+    r = run()
+    r["meta"]["cw_end"] = "2026-10-08T18:06:40+00:00"
+    html, _ = report_html(analyse(r), None, "Validated")
+    assert "8 Oct 23:36 IST" in html
