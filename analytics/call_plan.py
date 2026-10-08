@@ -7,6 +7,7 @@ Inputs (JSON):
   candidates - lead timelines from analytics.lead_priority (phone, stage, last conversation, ...)
   first      - fresh leads with no real conversation yet (analytics.fresh_leads rows)
   stages     - {lead_id: current stage} refreshed just before building (drops leads enrolled/closed since)
+  tier_b_cap - optional: most Tier B leads per caller; extras move to the least-loaded callers
   carry      - optional: earlier call-plan workbooks; leads marked "Link sent", "Token paid" or "EMI docs
                pending" there and not paid come back as Tier P ("link sent, not paid")
 
@@ -170,7 +171,32 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         by_owner.setdefault(r["owner"], []).append(r)
     for o in by_owner:
         by_owner[o].sort(key=lambda r: r["sort"])
+    if plan.get("tier_b_cap"):
+        rebalance(by_owner, [o for o in plan.get("owner_order", by_owner) if TARGETS.get(o, 4)], plan["tier_b_cap"])
     return by_owner
+
+
+def rebalance(by_owner: dict[str, list[dict]], callers: list[str], cap: int) -> list[tuple[str, str, str]]:
+    """Cap Tier B per caller so hot follow-ups get worked; move the lowest-ranked extras to the callers with
+    the fewest M/P/A/B leads. Tier M, P and A leads stay with their owner, so no warm relationship moves.
+    The move is on the sheet only: change the owner in LeadSquared by hand. Returns (lead, from, to)."""
+    load = lambda o: sum(1 for r in by_owner.get(o, []) if r["tier"] in "MPAB")  # noqa: E731
+    moves = []
+    for o in sorted(callers, key=load, reverse=True):
+        bs = [r for r in by_owner.get(o, []) if r["tier"] == "B"]
+        for r in sorted(bs, key=lambda r: r["sort"], reverse=True)[: max(len(bs) - cap, 0)]:
+            to = min((c for c in callers if c != o and sum(1 for x in by_owner.get(c, []) if x["tier"] == "B") < cap),
+                     key=load, default=None)
+            if not to:
+                break
+            by_owner[o].remove(r)
+            r["why"] = f"Moved from {o} (over {cap} Tier B leads); change the owner in LeadSquared. {r.get('why', '')}"
+            r["owner"] = to
+            by_owner.setdefault(to, []).append(r)
+            moves.append((r["lead_id"], o, to))
+    for o in by_owner:
+        by_owner[o].sort(key=lambda r: r["sort"])
+    return moves
 
 
 def read_carry(paths: list[str]) -> list[dict]:
