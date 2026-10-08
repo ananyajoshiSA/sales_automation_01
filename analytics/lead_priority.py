@@ -98,8 +98,10 @@ def build_timelines(snap: dict, days: int) -> list[dict]:
         cs = sorted(calls[lid], key=lambda c: c["t"])
         zs = sorted(zips[lid], key=lambda z: z["t"])
         conv = [c for c in cs if c["answered"] and c["duration"] >= 60]
-        if not conv and not zs:
-            continue  # never had a real conversation in the window: not a closing candidate
+        missed = any(c["direction"] == "inbound" and not c["answered"]
+                     and not any(d["direction"] == "outbound" and d["t"] > c["t"] for d in cs) for c in cs)
+        if not conv and not zs and not missed:
+            continue  # no conversation and no unreturned call from the lead: not a closing candidate
         out.append(_features(lead, cs, zs, conv, users, now))
     return out
 

@@ -59,3 +59,10 @@ def test_merge_snapshots_dedupes():
                                                              call("L", "2026-10-05 06:00:00", aid="c2")], [])
     m = merge_snapshots([b, a])
     assert m["leads"][0]["ProspectStage"] == "new" and len(m["calls"]) == 2
+
+
+def test_lead_who_rang_and_was_never_called_back_is_kept_without_a_conversation():
+    leads = [{"ProspectID": "R", "OwnerIdName": "A B", "ProspectStage": "New Lead"}]
+    calls = [call("R", "2026-10-06 06:00:00", direction="inbound", status="Missed", dur=0)]
+    r = by_id(build_timelines(snap(leads, calls, []), 15))
+    assert r["R"]["inbound_missed_unreturned"] == 1
