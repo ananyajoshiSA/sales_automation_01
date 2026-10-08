@@ -24,7 +24,7 @@ Fetches the day, checks the data, and writes `team_calling_report_{DATE}.pdf` (2
 tracker PDF. Page 1 gives the verdict, the teams ranked by conversion, the callers to recognise and
 three actions. Page 2 holds the full scorecard and the method.
 
-- The rules are in [docs/report/report_parameters.md](report/report_parameters.md) (Parameters v1.1).
+- The rules are in [docs/report/report_parameters.md](report/report_parameters.md) (Parameters v1.2).
   A call is a LeadSquared call activity started that day in IST. An enrolment is a lead's first-ever
   "Course Enrolled" within the day plus 3 days, credited to the caller with the most talk time.
 - The validation gate blocks the PDF if any data check fails (duplicates, calls outside the day,
@@ -44,6 +44,7 @@ three actions. Page 2 holds the full scorecard and the method.
 | 5. Dialer failures | `python -m analytics.dnp_report data/all_calls.jsonl data/users_all.json exports/dnp` |
 | 6. Revenue | `python -m analytics.revenue data/report_2026-10-05 exports/revenue --avg-fee N` |
 | Lost leads | `python -m analytics.lost_leads data/snapshot.json --out exports/lost` |
+| Call integrity (fake, stretched or empty calls) | `python -m analytics.call_integrity 2026-10-05 --limit 10`, then the daily report shows it in section 7 |
 | Calibrate the tiers | `python -m analytics.tier_outcomes exports/plans/call_plan_*.json --snapshot data/later.json --histories data/hist.jsonl` |
 
 ## Nightly call plan for any team

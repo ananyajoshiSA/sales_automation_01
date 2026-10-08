@@ -71,9 +71,9 @@ def test_plan_tracker_and_html():
     assert team["payment_step_zip_pct"] == 100 and team["missed_inbound_leads"] == 1
     assert team["called_back_same_day_pct"] == 100 and team["median_callback_min"] == 30
     html, nums = report_html(A, None, "Validated")
-    assert "Monday 5 October 2026" in html and "Parameters v1.1." in html
+    assert "Monday 5 October 2026" in html and "Parameters v1.2." in html
     assert verdict_numbers_check(nums, scorecard_cells(A))["ok"]
-    assert "Parameters v1.1" in tracker_html(P)
+    assert "Parameters v1.2" in tracker_html(P)
 
 
 def test_markers():

@@ -29,7 +29,7 @@ from analytics.lead_priority import strip_html
 from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS
 from analytics.team_report import IST, utc, zip_score
 
-VERSION = "1.1"
+VERSION = "1.2"
 REAL_SECS = REAL_CONVERSATION_SECS
 LONG_NON_CONVERTED_SECS = 300
 BOT = re.compile(r"\b(system|bot|welcome|reminder|webinar|ivr)\b", re.I)
@@ -376,6 +376,11 @@ def main():
     ls = LeadSquaredClient()
     checks = [{"check": "LeadSquared preflight", "ok": bool(ls.get_lead_metadata()), "detail": "API reachable with the configured keys"}]
     checks += gate.data_checks(run, A)
+    from analytics import call_integrity
+    ip = os.path.join(data, "integrity.json")  # transcript signals come from `python -m analytics.call_integrity`
+    A["integrity"] = json.load(open(ip)) if os.path.exists(ip) and not a.fetch else \
+        {k: v for k, v in call_integrity.analyse(A["_calls"]).items() if k != "calls"}
+    checks.append(gate.integrity_check(A["integrity"]))
     checks.append(gate.spot_check(A, lambda lead: (ls.get_lead_activities(lead, activity_event=3002, row_count=100) or {})
                                   .get("ProspectActivities") or []))
     tx_path = os.path.join(data, "tx_summary.json")
@@ -421,7 +426,8 @@ def main():
 
     tracker = plan_tracker(A, tx)
     json.dump(tracker, open(os.path.join(data, "plan_tracker.json"), "w"), indent=1)
-    json.dump({k: v for k, v in A.items() if not k.startswith("_")}, open(os.path.join(data, "agg.json"), "w"), indent=1, default=str)
+    json.dump({k: v for k, v in A.items() if not k.startswith("_") and k != "integrity"},
+              open(os.path.join(data, "agg.json"), "w"), indent=1, default=str)
     tr_html = os.path.join(data, "plan_tracker.html")
     open(tr_html, "w", encoding="utf-8").write(page.tracker_html(tracker))
     tr_pdf = os.path.join(a.out, f"plan_tracker_{a.date}.pdf")

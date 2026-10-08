@@ -122,3 +122,21 @@ def write_log(checks: list[dict], path: str) -> None:
 def summary_line(n_checks: int, log_path: str) -> str:
     """Printed in the Method section; a report is only written when every check passed."""
     return f"Validated: all {n_checks} checks passed before this report was built (log: {log_path.replace('.json', '.txt')})"
+
+
+def integrity_check(I: dict) -> dict:
+    """P74: the call-integrity counts reconcile and carry no lead details."""
+    problems = []
+    if I["flagged_calls"] > I["long_calls"]:
+        problems.append("more flagged calls than long calls")
+    if sum(r["long_calls"] for r in I["callers"]) != I["long_calls"]:
+        problems.append("caller long calls don't add up to the total")
+    if any(r["flagged"] > r["long_calls"] or r["checked"] > r["long_calls"] for r in I["callers"]):
+        problems.append("a caller has more flagged or checked calls than long calls")
+    if I.get("transcripts_matched", 0) > I.get("sampled", 0):
+        problems.append("more transcripts matched than calls sampled")
+    if any(k in json.dumps(I) for k in ("lead_number", "lead_id", "display_number")):
+        problems.append("lead details in the summary")
+    return {"check": "Call-integrity counts reconcile, no lead details", "ok": not problems,
+            "detail": "; ".join(problems) or f"{I['flagged_calls']} of {I['long_calls']} long calls flagged; "
+                      f"{I.get('transcripts_matched', 0)} of {I.get('sampled', 0)} sampled calls matched a transcript"}

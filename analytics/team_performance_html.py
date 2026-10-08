@@ -17,7 +17,7 @@ e = html.escape
 CSS = """
 @page{size:A4;margin:11mm 12mm} body{font-family:Arial,Helvetica,sans-serif;font-size:9.4pt;color:#1d2433;line-height:1.35;margin:0}
 h1{font-size:17pt;margin:0;color:#0f2b5b} h2{font-size:11.5pt;color:#0f2b5b;margin:11px 0 4px}
-.sub{color:#5b6475;font-size:8.4pt;margin:2px 0 8px} .page2{break-before:page}
+.sub{color:#5b6475;font-size:8.4pt;margin:2px 0 8px} .page2{break-before:page} .page2 h2{margin:8px 0 3px}
 .kpis{display:flex;gap:6px;margin-bottom:8px} .k{flex:1;background:#f5f7fb;border:1px solid #dfe5f0;border-radius:5px;padding:6px 8px;font-size:8.2pt;color:#5b6475}
 .k b{font-size:15pt;color:#0f2b5b;display:block;line-height:1.2}
 .box{background:#eef3fb;border-left:4px solid #0f5bd8;padding:7px 10px;margin:6px 0 4px;font-size:9.6pt}
@@ -148,6 +148,24 @@ def _lost(A: dict) -> str:
     return "<ul>" + "".join(f"<li>{i}</li>" for i in items) + "</ul>"
 
 
+def _integrity(A: dict) -> str:
+    """P67-P74: long calls flagged for review, never proof."""
+    I = A.get("integrity")
+    if not I:
+        return '<div class="note">Not run for this day.</div>'
+    labels = {"overlap": "overlapping another call", "repeat": "3+ long calls to one lead", "just_over": "just over 2 min",
+              "no_content": "no transcript content", "thin": "little talk for the time", "machine": "recorded message",
+              "loop": "repeating text"}
+    parts = ", ".join(f"{v} {labels[k]}" for k, v in I["by_flag"].items() if v) or "none"
+    top = [r for r in I["callers"] if r["ranked"] and r["flagged"]][:5]
+    who = "; ".join(f"{e(r['caller'])} ({e(short(r['team']))}) {r['flagged']}/{r['long_calls']}" for r in top) or "none"
+    tx = (f"Transcripts checked for {I['transcripts_matched']} of {I['sampled']} sampled calls."
+          if I.get("sampled") else "Transcripts not checked this run (call-log signals only).")
+    return (f'<div class="note"><b>{I["flagged_calls"]} of {I["long_calls"]:,}</b> answered calls of 2+ min flagged: {parts}. '
+            f"{tx} Most flagged (10+ long calls; flagged/long): {who}. A flag means listen to the recording; it is not proof. "
+            "Per-call evidence: integrity_calls.csv in the data folder.</div>")
+
+
 def report_html(A: dict, tx: dict | None, validation: str = "") -> tuple[str, list[str]]:
     """Returns (html, the verdict's numbers)."""
     T, tot, r = A["teams"], A["totals"], A["rank"]
@@ -196,6 +214,8 @@ def report_html(A: dict, tx: dict | None, validation: str = "") -> tuple[str, li
 {_why_won(gaps, tx)}
 <h2>6. Where other teams lost revenue</h2>
 {_lost(A)}
+<h2>7. Call integrity: calls to review</h2>
+{_integrity(A)}
 <h2>Method and limits</h2>
 <div class="note"><span class="ok">{e(validation)}</span>. Window {d0.day} {d0:%b} 00:00–23:59 IST. Calls: LeadSquared events 21/22 started in the window; {tot['bots_excluded']} automated calls and {tot['outside_window_excluded']} calls that started on another day (returned because they were edited on the day) excluded. Real conversation = answered and 120 s or longer. Enrolment = a lead's first-ever stage change to "Course Enrolled" from {cw} ({tot['enroll_window']} found), credited to the caller with the most answered talk time on that lead on the target day ({tot['enroll_credited']} credited). Conversion = credited ÷ leads reached. "Payment Successful" activities in the window: {tot['payments']}{', so enrolments are the conversion measure' if not tot['payments'] else ''}. Zipteams: {tot['zip_attr']:,} of {tot['zip_total']:,} notes attributed to the caller of the last answered call before the note ({tot['zip_dropped']} dropped){'; no Zipteams notes for ' + ', '.join(e(t) for t in no_zip) + ' ("–")' if no_zip else ''}. Team = caller's first LeadSquared group; {tot['multi_group_callers']} callers belong to more than one group. {tx_note} Parameters v{VERSION}.</div>
 </div>
