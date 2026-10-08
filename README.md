@@ -64,7 +64,7 @@ The older names `TRANSCRIPT_API_BASE` / `TRANSCRIPT_API_KEY` / `TRANSCRIPT_MAX_R
 from integrations.transcripts import TranscriptClient
 
 tc = TranscriptClient()
-calls = tc.search(["+91-9876543210", "8001950065"])   # any phone format; batched 10 per request
+calls = tc.search(["+91-9876543210", "9000000000"])   # any phone format; batched 10 per request
 for c in calls:
     print(c.kind, c.agent_name, c.start_time, c.duration, c.has_transcript)
 tc.generate_transcripts([c.phone for c in calls if not c.has_transcript])
