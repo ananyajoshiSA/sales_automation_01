@@ -20,29 +20,11 @@ import re
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+from analytics.definitions import BUYING_SIGNALS, CLOSED_STAGES, NEGATIVE_SIGNALS, REAL_CONVERSATION_SECS, signals
 from analytics.team_report import IST, utc, zip_score
 
-CLOSED_STAGES = {"Course Enrolled", "Irrelevant lead", "Invalid lead", "Duplicate"}
 NEGATIVE_STAGES = {"Not Interested"}
 INTENT_RANK = {"HIGH": 3, "MODERATE": 2, "NEUTRAL": 1, "LOW": 0, "NOT_QUALIFIED": -1}
-
-# phrases in Zip summaries/reasons that signal a buying decision is close
-BUYING_SIGNALS = {
-    "fee": r"\bfee|\bprice|cost|how much",
-    "emi_or_loan": r"\bemi\b|instal|loan|financ",
-    "payment": r"payment link|pay(ment)? (today|tomorrow|now)|will pay|make the payment|transfer",
-    "decision_maker": r"parent|father|mother|husband|wife|family|discuss with",
-    "start_date": r"batch|start date|when (does|will) (it|the course) start|next cohort|join(ing)? date",
-    "enroll_intent": r"\benrol|\bregister|sign up|join the (course|program)",
-    "refund_or_guarantee": r"refund|guarantee|placement|job assistance",
-}
-NEGATIVE_SIGNALS = {
-    "joined_elsewhere": r"already (joined|enrolled|purchased|took)|another (course|institute)|other institute",
-    "not_interested": r"not interested|no interest|do not call|don't call|stop calling",
-    "no_budget": r"can'?t afford|no budget|too expensive|not able to pay",
-    "wrong_person": r"wrong number|not (the )?(right|same) person|didn'?t (fill|enquire|register)",
-}
-
 
 def strip_html(h: str | None) -> str:
     t = re.sub(r"<(br|/p|/li|/h\d)[^>]*>", "\n", h or "")
@@ -97,7 +79,7 @@ def build_timelines(snap: dict, days: int) -> list[dict]:
         lead = leads[lid]
         cs = sorted(calls[lid], key=lambda c: c["t"])
         zs = sorted(zips[lid], key=lambda z: z["t"])
-        conv = [c for c in cs if c["answered"] and c["duration"] >= 60]
+        conv = [c for c in cs if c["answered"] and c["duration"] >= REAL_CONVERSATION_SECS]
         missed = any(c["direction"] == "inbound" and not c["answered"]
                      and not any(d["direction"] == "outbound" and d["t"] > c["t"] for d in cs) for c in cs)
         if not conv and not zs and not missed:
@@ -117,8 +99,8 @@ def _features(lead, cs, zs, conv, users, now):
     last_intent = rated[-1]["intent"] if rated else None
     best_intent = max((z["intent"] for z in rated), key=INTENT_RANK.get, default=None)
     text = " ".join((z["reason"] + " " + z["summary"]) for z in zs).lower()
-    buying = sorted(k for k, rx in BUYING_SIGNALS.items() if re.search(rx, text))
-    negative = sorted(k for k, rx in NEGATIVE_SIGNALS.items() if re.search(rx, text))
+    buying = signals(text, BUYING_SIGNALS)
+    negative = signals(text, NEGATIVE_SIGNALS, negatable=False)
     stage = lead.get("ProspectStage") or ""
     fu = utc(lead.get("mx_Next_follow_up_date")) or utc(lead.get("mx_Follow_up_date_and_time"))
     longest = max((c["duration"] for c in cs if c["answered"]), default=0)

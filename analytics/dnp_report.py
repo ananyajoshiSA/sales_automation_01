@@ -14,14 +14,11 @@ import os
 import sys
 from collections import Counter, defaultdict
 
+from analytics.definitions import DIALER_FAILURE_SHARE, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
 from analytics.team_report import IST, utc
 
 SALES_GROUP_HINTS = ("team", "us ", "closure", "id", "elite", "bootcamp", "dsv", "community", "counsel", "academic",
                      "women", "corporate", "trainee", "group", "gourp")
-
-
-WORKING_DAY_DIALS = 20
-DIALER_FAILURE_SHARE = 0.5
 
 
 def team_of_user(u):
@@ -88,7 +85,7 @@ def main(calls_path, users_path, out_dir):
             "dials_per_lead": round(n / len(leads), 1) if leads else 0,
             "lead_days_with_6plus_dials": sum(1 for v in per_day.values() if v >= 6),
             "answered_under_30s_%": pct(sum(1 for c in ans if c["duration"] < 30), len(ans)),
-            "answered_2min_plus_%": pct(sum(1 for c in ans if c["duration"] >= 120), len(ans)),
+            "answered_2min_plus_%": pct(sum(1 for c in ans if c["duration"] >= REAL_CONVERSATION_SECS), len(ans)),
             "talk_hrs": round(sum(c["duration"] for c in ans) / 3600, 1),
         }
 
@@ -120,12 +117,12 @@ def main(calls_path, users_path, out_dir):
         cs = [c for c in all_cs if (name, c["day"]) not in bad] or all_cs
         days = {c["day"] for c in cs}
         s = stat(cs)
-        active = len([d for d in days if sum(1 for c in cs if c["day"] == d) >= 20]) or 1
+        active = len([d for d in days if sum(1 for c in cs if c["day"] == d) >= WORKING_DAY_DIALS]) or 1
         ci = [c for c in inb if c["name"] == name]
         s.update(caller=name, team=cs[0]["team"], dialer_failure_days=sum(1 for n, _ in bad if n == name),
                  active_days=active, dials_per_day=round(len(cs) / active),
                  talk_hrs_per_day=round(s["talk_hrs"] / active, 2),
-                 real_calls_per_day=round(sum(1 for c in cs if c["status"] == "Answered" and c["duration"] >= 120) / active, 1),
+                 real_calls_per_day=round(sum(1 for c in cs if c["status"] == "Answered" and c["duration"] >= REAL_CONVERSATION_SECS) / active, 1),
                  inbound=len(ci), inbound_missed_pct=pct(sum(1 for c in ci if c["status"] != "Answered"), len(ci)))
         caller_rows.append(s)
     caller_rows.sort(key=lambda r: -r["dials"])

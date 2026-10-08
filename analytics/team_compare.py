@@ -21,11 +21,12 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
+from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
 from analytics.team_report import IST, utc, zip_score
 from integrations.leadsquared import parse_activity_note
 
-REAL = 120
-WON = "Course Enrolled"
+REAL = REAL_CONVERSATION_SECS
+WON = ENROLLED
 PIPE = ["Discovery Call Done", "Roadmap\xa0Done", "Counselled lead", "Follow Up For Closure", WON]
 
 
@@ -165,7 +166,7 @@ def caller_stats(calls, team_of, d0, d1):
         times[name][day].append(t.astimezone(IST))
     rows = []
     for name, days in per.items():
-        active = [d for d, k in days.items() if k["dials"] >= 10]
+        active = [d for d, k in days.items() if k["dials"] >= WORKING_DAY_DIALS]
         tot = Counter()
         for d in active:
             tot.update(days[d])

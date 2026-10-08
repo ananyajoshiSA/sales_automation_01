@@ -17,15 +17,14 @@ import sys
 from collections import Counter
 from datetime import datetime, timedelta, timezone
 
+from analytics.definitions import BUCKETS, DEAD_STAGES as DEAD, ENROLLED, PIPELINE_STAGES as PIPELINE
+from analytics.definitions import REAL_CONVERSATION_SECS
+from analytics.definitions import speed_bucket as bucket
 from analytics.team_report import IST, utc, zip_score
 from integrations.leadsquared import parse_activity_note
 
 WORK_START, WORK_END = 10, 20
-REAL_CONVERSATION_SECS = 120
-WON = {"Course Enrolled"}
-PIPELINE = {"Follow Up For Closure", "Counselled lead", "Discovery Call Done", "Roadmap\xa0Done", "May buy later",
-            "Opportunity Created"}
-DEAD = {"Not Interested", "Irrelevant lead", "Invalid"}
+WON = {ENROLLED}
 
 
 def _data(a: dict) -> dict:
@@ -50,18 +49,6 @@ def _call(a: dict) -> dict:
 
 def mins(a, b):
     return round((b - a).total_seconds() / 60) if a and b else None
-
-
-def bucket(m):
-    if m is None:
-        return "never"
-    for lim, lab in ((5, "≤5 min"), (30, "5–30 min"), (60, "30–60 min"), (240, "1–4 h"), (1440, "4–24 h")):
-        if m <= lim:
-            return lab
-    return ">24 h"
-
-
-BUCKETS = ["≤5 min", "5–30 min", "30–60 min", "1–4 h", "4–24 h", ">24 h", "never"]
 
 
 def analyse_lead(lead: dict, acts: list[dict], team: set[str], now: datetime) -> dict:

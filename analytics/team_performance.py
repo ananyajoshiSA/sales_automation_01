@@ -26,11 +26,11 @@ from datetime import datetime, timedelta, timezone
 
 from analytics.call_markers import MARKERS, PAYMENT_STEP, marker_rates, summary_has_payment_step
 from analytics.lead_priority import strip_html
+from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS
 from analytics.team_report import IST, utc, zip_score
 
 VERSION = "1.1"
-ENROLLED = "Course Enrolled"
-REAL_SECS = 120
+REAL_SECS = REAL_CONVERSATION_SECS
 LONG_NON_CONVERTED_SECS = 300
 BOT = re.compile(r"\b(system|bot|welcome|reminder|webinar|ivr)\b", re.I)
 WARM = {"Elite Changemakers", "DSV - UK (Aditya)", "DSV-Domestic-(Shivam Sharma)"}
