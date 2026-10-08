@@ -2,6 +2,9 @@
 
 Integrations with sales platforms.
 
+**Revenue plan:** the daily team report, nightly call plan and the plan's other actions are in
+[docs/revenue_plan.md](docs/revenue_plan.md).
+
 ## Setup
 
 ```bash
