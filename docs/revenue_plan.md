@@ -44,7 +44,7 @@ three actions. Page 2 holds the full scorecard and the method.
 | 5. Dialer failures | `python -m analytics.dnp_report data/all_calls.jsonl data/users_all.json exports/dnp` |
 | 6. Revenue | `python -m analytics.revenue data/report_2026-10-05 exports/revenue --avg-fee N` |
 | Lost leads | `python -m analytics.lost_leads data/snapshot.json --out exports/lost` |
-| Calibrate the tiers | `python -m analytics.tier_outcomes exports/plans/call_plan_*.json --snapshot data/later.json` |
+| Calibrate the tiers | `python -m analytics.tier_outcomes exports/plans/call_plan_*.json --snapshot data/later.json --histories data/hist.jsonl` |
 
 ## Nightly call plan for any team
 
@@ -72,17 +72,18 @@ leads. After that, the measured rate is used.
 
 `python scripts/fetch_team_data.py "Team" 2026-09-23 2026-10-07 data/snapshot.json` fetches a team's
 leads, calls and Zipteams notes. Coaching, lost leads, `team_report` and `tier_outcomes` read this
-file. If you also pass a lead-history file from `scripts/fetch_lead_histories.py`, `team_report`
-credits each enrolment to the lead's owner at the time and to the last caller who spoke to the
-lead, not to whoever owns it today.
+file. LeadSquared's enrolment date field is usually blank, so enrolments are dated from each lead's
+stage history (`scripts/fetch_lead_histories.py ids.json data/hist.jsonl`). `tier_outcomes` needs that
+file. Passed to `team_report`, it credits each enrolment to the lead's owner at the time and to the
+last caller who spoke to the lead, not to whoever owns it today.
 
 ## Not done, or needs input
 
 - **Dashboard work is out of scope for now.** That covers plan step 4 and the dashboard and Worker
   parts of steps 7 and 10.
-- **No payment activities (event 213) were logged for 5–8 Oct.** The revenue reader works, but it
-  has nothing to read until payments are recorded in LeadSquared or another payment source is
-  connected.
+- **The LeadSquared API returned no payment activities (event 213) for 5–8 Oct.** The revenue
+  reader works, but it has nothing to read until payments come through the API or another payment
+  source is connected.
 - **The average fee per enrolment is not set**, so no rupee figures are shown. Set it with
   `--avg-fee` or `REVENUE_AVG_FEE_INR`.
 - **The narrative plan PDF is a one-off for 8 Oct.** `scripts/build_plan_pdf.py` was written for
