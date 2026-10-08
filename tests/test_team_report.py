@@ -46,3 +46,30 @@ def test_analyse():
     q = r["quality"][0]
     assert (q["caller"], q["product_pitch_%"], q["probing_%"], q["high_or_moderate_intent_%"]) == ("A B", 80, 60, 100)
     assert r["outcomes"][0]["enrolled"] == 1
+
+
+def _act(event, t, **data):
+    return {"EventName": event, "CreatedOn": t, "Data": [{"Key": k, "Value": v} for k, v in data.items()]}
+
+
+def test_enrolment_credited_to_owner_then_and_closer_not_owner_now():
+    snap = {**SNAP, "users": SNAP["users"] + [{"ID": "u2", "FirstName": "C", "LastName": "D"}]}
+    snap["leads"] = [{**SNAP["leads"][0], "OwnerIdName": "Onboarding Desk"}, SNAP["leads"][1]]
+    snap["calls"] = SNAP["calls"] + [call("L1", "u2", "2026-10-06 08:00:00")]
+    snap["histories"] = {"L1": [
+        _act("StageChange", "2026-10-06 09:00:00", CurrentStage="Course Enrolled"),
+        _act("LeadAssigned", "2026-10-06 05:00:00", CurrentOwner="A B"),
+        _act("LeadAssigned", "2026-10-06 10:00:00", CurrentOwner="Onboarding Desk"),
+        _act("StageChange", "2026-10-06 12:00:00", CurrentStage="Course Enrolled"),
+    ]}
+    r = analyse(snap, "2026-10-06", "2026-10-06")
+    (e,) = r["enrolment_rows"]
+    assert (e["owner_now"], e["owner_at_enrolment"], e["closer"]) == ("Onboarding Desk", "A B", "C D")
+    assert e["enrolled_ist"] == "2026-10-06 14:30" and e["date_source"] == "stage history"
+    assert r["enrolled_by_owner"] == {"A B": 1} and r["enrolled_by_closer"] == {"C D": 1}
+
+
+def test_enrolment_without_history_uses_date_field_and_says_so():
+    snap = {**SNAP, "leads": [{**SNAP["leads"][0], "mx_Enrollment_date": "2026-10-06 07:00:00"}]}
+    (e,) = analyse(snap, "2026-10-06", "2026-10-06")["enrolment_rows"]
+    assert (e["owner_source"], e["date_source"], e["closer"]) == ("current owner", "enrolment date field", "A B")

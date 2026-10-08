@@ -22,7 +22,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
-from analytics.team_report import IST, utc, zip_score
+from analytics.team_report import IST, enrolment_credit, utc, zip_score
 from integrations.leadsquared import parse_activity_note
 
 REAL = REAL_CONVERSATION_SECS
@@ -122,22 +122,17 @@ def load_hist(path, ids):
     out = {}
     for line in open(path):
         d = json.loads(line)
-        if d["lead_id"] in ids and d.get("activities") is not None:
+        if d["lead_id"] in ids and d.get("activities") is not None and not d.get("error"):
             out[d["lead_id"]] = d["activities"]
     return out
 
 
 def enrollment_credit(lead, acts, team_names):
     """Owner at the moment of enrollment (from assignment history), else current owner."""
-    stages = [(a["CreatedOn"], _data(a)) for a in acts if a.get("EventName") == "StageChange"]
-    t = next((ts for ts, d in stages if d.get("CurrentStage") == WON), None)
-    if not t:
+    e = enrolment_credit(lead, acts, [])
+    if not e or e["date_source"] != "stage history":
         return None, None
-    owner = None
-    for a in sorted((a for a in acts if a.get("EventName") == "LeadAssigned"), key=lambda a: a["CreatedOn"]):
-        if a["CreatedOn"] <= t:
-            owner = _data(a).get("CurrentOwner")
-    return utc(t), owner or lead.get("OwnerIdName")
+    return e["t"], e["owner_at_enrolment"]
 
 
 def caller_stats(calls, team_of, d0, d1):
