@@ -336,6 +336,8 @@ def guide_sheet(wb):
         ("", None),
         ("Rules", "h"),
         ("Never mark a lead 'Call Not Picking Up' before 6 attempts across 3 days. Never mark Not Interested without a real conversation.", None),
+        ("Close every real conversation (2 min+) with a payment step: say the exact amount, offer the EMI split, send the "
+         "payment link on WhatsApp during the call, and agree a date and time to pay (docs/call_playbook.md).", None),
         ("Every connected call ends with a dated next step in LeadSquared: a callback time, a payment link or a seat block.", None),
         ("Answer fee questions on the call with the EMI split; don't push them to 'later'.", None),
         ("If 2+ attempts fail at the same second as other leads (CallFailure), switch line or WhatsApp — it's the dialer, not the lead.", None),
