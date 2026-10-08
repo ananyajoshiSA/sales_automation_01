@@ -17,9 +17,12 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta, timezone
 
+from analytics.definitions import BUCKETS, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
+from analytics.definitions import speed_bucket as bucket_minutes
+
 IST = timezone(timedelta(hours=5, minutes=30))
 WORK_START, WORK_END = 10, 20  # IST hours used for "assigned during working hours"
-MEANINGFUL_SECS = 120          # a connected call shorter than this is treated as not a real conversation
+MEANINGFUL_SECS = REAL_CONVERSATION_SECS  # a connected call shorter than this is not a real conversation
 
 # Zipteams scores each skill pass/fail (0 or 100) per call, so the mean is "% of calls
 # where the skill was shown". "Clear Call to Action" (mx_Custom_7) is defined but not
@@ -49,18 +52,6 @@ def ist_day(dt: datetime | None) -> str | None:
 
 def minutes(a: datetime, b: datetime) -> float:
     return (b - a).total_seconds() / 60
-
-
-def bucket_minutes(m: float | None) -> str:
-    if m is None:
-        return "never"
-    for limit, label in ((5, "≤5 min"), (15, "5–15 min"), (60, "15–60 min"), (240, "1–4 h"), (1440, "4–24 h")):
-        if m <= limit:
-            return label
-    return ">24 h"
-
-
-BUCKETS = ["≤5 min", "5–15 min", "15–60 min", "1–4 h", "4–24 h", ">24 h", "never"]
 
 
 def zip_score(raw: str | None) -> float | None:
@@ -126,10 +117,11 @@ def analyse(snap: dict, start: str, end: str) -> dict:
     caller_rows = []
     for name in sorted(users.values()):
         days = per_day.get(name, {})
+        # working days (20+ dials) only; a caller with none is still shown, averaged over the days they called
+        active = [d for d in days if days[d]["dials"] >= WORKING_DAY_DIALS] or [d for d in days if days[d]["dials"] + days[d]["inbound"]]
         tot = Counter()
-        for k in days.values():
-            tot.update(k)
-        active = [d for d in days if days[d]["dials"] + days[d]["inbound"]]
+        for d in active:
+            tot.update(days[d])
         starts = [min(first_last[name][d]).astimezone(IST) for d in active]
         ends = [max(first_last[name][d]).astimezone(IST) for d in active]
         n = len(active) or 1
@@ -137,6 +129,7 @@ def analyse(snap: dict, start: str, end: str) -> dict:
         caller_rows.append({
             "caller": name,
             "active_days": len(active),
+            "below_working_day": not any(days[d]["dials"] >= WORKING_DAY_DIALS for d in days),
             "dials_per_day": round(tot["dials"] / n),
             "connected_per_day": round(tot["connected"] / n),
             "connect_rate_%": pct(tot["connected"], attempts),

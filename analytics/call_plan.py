@@ -28,7 +28,8 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter
 from openpyxl.worksheet.datavalidation import DataValidation
 
-CLOSED = {"Course Enrolled", "Irrelevant lead", "Invalid", "Duplicate"}
+from analytics.definitions import CLOSED_STAGES
+
 REVIEWED_PROB = {"High": 35, "Medium": 15}  # calibration used for the earlier 48h review
 TIERS = "MPABFRC"
 TIER_ORDER = {t: i for i, t in enumerate(TIERS)}
@@ -160,7 +161,7 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         r["stage"] = stages.get(r["lead_id"]) or c.get("stage") or r.get("stage", "")
         r["last_conv"] = c.get("last_conversation_ist") or r.get("last_conv", "")
         r["missed_unreturned"] = c.get("inbound_missed_unreturned", 0)
-        if r["stage"] in CLOSED:
+        if r["stage"] in CLOSED_STAGES:
             continue
         if not (r.get("opening_line") or "").strip():
             r["opening_line"] = (f"Hi, this is {r['owner'].split()[0]} from LawSikho — we spoke recently about "
