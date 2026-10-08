@@ -7,7 +7,8 @@ reported in IST.
 
 The optional history file (``scripts/fetch_lead_histories.py``) dates each enrolment by its first
 stage change to Course Enrolled and finds the owner at that moment; without it the enrolment date
-field and the current owner are used, and each row says which.
+field and the current owner are used, and each row says which. That field is often blank in
+LeadSquared, so pass the history file whenever enrolment credit matters.
 """
 
 from __future__ import annotations
@@ -403,6 +404,9 @@ def main(snapshot, start, end, out_dir, histories=None):
     snap = json.load(open(snapshot))
     if histories:
         snap["histories"] = load_histories(histories)
+    else:
+        print("No lead-history file: enrolments are read from the enrolment date field, which is often blank.",
+              file=sys.stderr)
     r = analyse(snap, start, end)
     os.makedirs(out_dir, exist_ok=True)
     for key in ("callers", "daily", "speed_to_lead_rows", "speed_to_lead_by_owner", "missed_inbound",
