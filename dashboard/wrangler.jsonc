@@ -36,8 +36,8 @@
     "READ_BUDGET": "4500000",
     "SUMMARY_TTL_SECONDS": "60",
     // From Zero Trust once the Access app exists (not secrets). Empty = the API refuses all data.
-    "ACCESS_TEAM_DOMAIN": "",
-    "ACCESS_AUD": ""
+    "ACCESS_TEAM_DOMAIN": "still-credit-1ce4.cloudflareaccess.com",
+    "ACCESS_AUD": "fb2121250a3b3e65a465eba6eb342a6b5e44e6c39b667297bb2d0202f792d14f"
   },
   // Secrets (never in this file): LEADSQUARED_ACCESS_KEY, LEADSQUARED_SECRET_KEY, RUN_TOKEN
   "observability": { "enabled": true }
