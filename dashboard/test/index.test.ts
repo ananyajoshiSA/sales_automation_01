@@ -8,7 +8,7 @@ import { fakeD1 } from "./fake_d1.mjs";
 const mkEnv = (over: Partial<Env> = {}) => ({ DB: fakeD1(), LEADSQUARED_HOST: "h", LEADSQUARED_ACCESS_KEY: "k",
   LEADSQUARED_SECRET_KEY: "s", ...over }) as Env & { DB: ReturnType<typeof fakeD1> };
 const call = (env: Env, path: string, init?: RequestInit) =>
-  worker.fetch(new Request(`https://sales-dashboard.example.workers.dev${path}`, init), env);
+  worker.fetch(new Request(`https://sales-automation-01.example.workers.dev${path}`, init), env);
 const rowsIn = (env: { DB: ReturnType<typeof fakeD1> }, table: string) =>
   (env.DB.sqlite.prepare(`SELECT rows FROM ${table} WHERE day = ?`).all(utcDay())[0]?.rows as number) ?? 0;
 

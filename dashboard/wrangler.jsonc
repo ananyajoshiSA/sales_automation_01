@@ -1,11 +1,12 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
-  "name": "sales-dashboard",
-  // The target Cloudflare account (not a secret). Pins deploys to it, so a login to another
-  // account can't land the Worker there. Set before the first deploy (README, "Deploy").
-  // "account_id": "<CLOUDFLARE_ACCOUNT_ID>",
+  // Must match the Worker that Workers Builds deploys to (Workers & Pages → sales-automation-01).
+  "name": "sales-automation-01",
+  // The target Cloudflare account (not a secret): pins deploys to it, so a login to another
+  // account can't land the Worker there.
+  "account_id": "35563947961bb7f8690daa28fa3f3944",
   "main": "src/index.ts",
-  // Served at https://sales-dashboard.<subdomain>.workers.dev, behind Cloudflare Access.
+  // Served at https://sales-automation-01.<subdomain>.workers.dev, behind Cloudflare Access.
   "workers_dev": true,
   // No per-version preview URLs: they would be extra hostnames without the Access policy.
   "preview_urls": false,
