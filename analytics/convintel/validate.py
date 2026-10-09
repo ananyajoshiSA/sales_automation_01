@@ -23,7 +23,7 @@ import re
 import unicodedata
 
 from analytics.convintel.prompt import band_for
-from analytics.convintel.schema import SEMANTIC_COMPONENTS, SEMANTIC_SCHEMA
+from analytics.convintel.schema import QUALITY_DIMENSIONS, SEMANTIC_COMPONENTS, SEMANTIC_SCHEMA
 
 APOSTROPHES = frozenset("'`‘’´")
 RANGES = {("intent", "readiness_score"): (0, 100), ("speaker_turns", "caller_share_pct"): (0, 100),
@@ -77,6 +77,18 @@ class _Finder:
         if p < 0:
             return None
         return self.idx[p], self.idx[p + len(needle) - 1] + 1
+
+
+    def count(self, excerpt: str) -> int:
+        """Whole-word occurrences of the excerpt in the transcript, matched the same way as ``span``."""
+        needle = _normalize(excerpt or "")[0].strip()
+        if not needle:
+            return 0
+        n, p = 0, self.hay.find(f" {needle} ")
+        while p >= 0:
+            n += 1
+            p = self.hay.find(f" {needle} ", p + len(needle) + 1)
+        return n
 
 
 def find_excerpt(excerpt: str, transcript: str) -> int:
@@ -213,6 +225,27 @@ class _Checker:
         return n
 
 
+def _word_analysis(wa: dict, chk: _Checker) -> None:
+    """A phrase is its excerpt, so one not found in the transcript is removed; a repetition count is replaced by the
+    transcript's own count, and an entry that does not occur twice word for word is removed."""
+    phrases = [p for p in wa["phrases"] if p["excerpt"]]
+    if len(phrases) < len(wa["phrases"]):
+        chk.value_fixes.append(f"word_analysis.phrases: removed {len(wa['phrases']) - len(phrases)} phrase(s) "
+                               "not found in the transcript")
+    wa["phrases"] = phrases
+    kept = []
+    for i, r in enumerate(wa["repeated"]):
+        n = chk.finder.count(r["excerpt"]) if r["excerpt"] else 0
+        if n < 2:
+            chk.value_fixes.append(f"word_analysis.repeated.{i}: removed, it does not occur twice word for word")
+            continue
+        if r["times"] != n:
+            chk.range_fixes.append(f"word_analysis.repeated.{i}.times: {r['times']} set to {n}, the transcript's count")
+            r["times"] = n
+        kept.append(r)
+    wa["repeated"] = kept
+
+
 def validate_semantic(output: dict, transcript: str) -> tuple[dict, list[str], int]:
     """(cleaned output with ``_validation`` and finding offsets, missing component names, dropped excerpt count)."""
     chk = _Checker(transcript)
@@ -241,6 +274,13 @@ def validate_semantic(output: dict, transcript: str) -> tuple[dict, list[str], i
         if not f["excerpt"] and str(raw.get("excerpt") or "").strip() and f["confidence"] != "low":
             chk.value_fixes.append(f"findings.{i}.confidence: set to 'low', its excerpt is not in the transcript")
             f["confidence"] = "low"
+    wa = clean.get("word_analysis")
+    if wa:
+        _word_analysis(wa, chk)
+    q = clean.get("quality")
+    if q and q["overall"] is not None and all(q[d]["score"] is None for d in QUALITY_DIMENSIONS):
+        chk.value_fixes.append("quality.overall: set to null, no skill was scored on this call")
+        q["overall"] = None
     it = clean.get("intent")
     if it and it["readiness_band"] != "unclear" and band_for(it["readiness_score"]) != it["readiness_band"]:
         band = band_for(it["readiness_score"])

@@ -32,8 +32,8 @@ LOOKUP_LAG = timedelta(minutes=20)           # give the dialer and the transcrib
 RECHECK_AFTER = (timedelta(hours=2), timedelta(hours=24), timedelta(hours=72), timedelta(days=7))
 RETRY_AFTER = (timedelta(minutes=5), timedelta(minutes=30), timedelta(hours=2), timedelta(hours=12), timedelta(hours=24))
 STALE_CLAIM = timedelta(minutes=30)          # an in-progress claim older than this was interrupted
-BATCH_STALE = timedelta(hours=25)            # the Batches API finishes or expires within 24 h
-LAYER_VERSIONS = {S.KEYWORD: S.KEYWORD_VERSION, S.SEMANTIC: S.SEMANTIC_VERSION}
+BATCH_STALE = timedelta(hours=25)            # a reading round not read by then is handed out again
+LAYER_VERSIONS = {S.SEMANTIC: S.SEMANTIC_VERSION}
 
 CALL_COLUMNS = ("call_id", "lead_id", "lead_number", "number", "caller_number", "direction", "call_status", "answered",
                 "start_utc", "ist_day", "duration_s", "duration_raw", "call_class", "class_reason", "caller_id",
@@ -128,12 +128,14 @@ def _backoff(attempts: int, table=RETRY_AFTER) -> timedelta:
     return table[min(max(attempts, 1), len(table)) - 1]
 
 
-def derive_status(call: dict, jobs: dict[str, dict], now: datetime, required: Iterable[str] = S.REQUIRED_LAYERS,
-                  blocked: dict[str, str] | None = None) -> tuple[str, list[str], str]:
-    """(analysis status, missing layers, reason) for one call. ``jobs`` maps layer -> job row; ``blocked`` maps a
-    layer that can't run at all right now (e.g. no model access) to the reason, which is shown instead of
-    "not run yet"."""
-    required, blocked = list(required), blocked or {}
+def _labels(layers) -> str:
+    return ", ".join(S.LAYER_LABELS.get(l, l) for l in layers)
+
+
+def derive_status(call: dict, jobs: dict[str, dict], now: datetime,
+                  required: Iterable[str] = S.REQUIRED_LAYERS) -> tuple[str, list[str], str]:
+    """(analysis status, missing layers, reason) for one call. ``jobs`` maps layer -> job row."""
+    required = list(required)
     t = call.get("transcript_state") or S.T_NOT_LOOKED_UP
     if t == S.T_FOUND:
         current = {l: j for l, j in jobs.items() if j and j.get("version") == LAYER_VERSIONS.get(l)}
@@ -144,23 +146,23 @@ def derive_status(call: dict, jobs: dict[str, dict], now: datetime, required: It
         claimed = [l for l in missing if (current.get(l) or {}).get("state") == "in_progress"
                    and (c := parse_ts(current[l].get("claimed_utc"))) and now - c < STALE_CLAIM]
         if claimed:
-            return S.ANALYSIS_IN_PROGRESS, missing, f"{', '.join(claimed)} layer running"
+            return S.ANALYSIS_IN_PROGRESS, missing, f"{_labels(claimed)} running"
         batched = [l for l in missing if (current.get(l) or {}).get("state") == "batched"
                    and (c := parse_ts(current[l].get("claimed_utc"))) and now - c < BATCH_STALE]
         if batched:
-            return S.ANALYSIS_IN_PROGRESS, missing, f"{', '.join(batched)} layer sent in a batch, waiting for results"
+            return S.ANALYSIS_IN_PROGRESS, missing, "; ".join(
+                f"{_labels([l])} handed out in round {current[l].get('batch_id')}, waiting for it" for l in batched)
         failed = [l for l in missing if (current.get(l) or {}).get("state") == "failed"]
         if failed:
-            errs = "; ".join(f"{l}: {(current[l].get('error') or '')[:120]}" for l in failed)
+            errs = "; ".join(f"{_labels([l])}: {(current[l].get('error') or '')[:120]}" for l in failed)
             when = "retry scheduled" if all(current[l].get("next_utc") for l in failed) else "not retried automatically"
             return S.ANALYSIS_FAILED, missing, f"failed, {when} ({errs})"
         partial = [l for l in missing if (current.get(l) or {}).get("state") == "incomplete"]
         if done or partial:
-            why = [f"{l} missing {', '.join(json.loads(current[l].get('missing') or '[]'))}" for l in partial]
-            why += [f"{l} layer waiting: {blocked[l]}" if l in blocked else f"{l} not run yet"
-                    for l in missing if l not in partial]
+            why = [f"{_labels([l])} missing {', '.join(json.loads(current[l].get('missing') or '[]'))}" for l in partial]
+            why += [f"{_labels([l])} not done yet" for l in missing if l not in partial]
             return S.ANALYSIS_INCOMPLETE, missing, "; ".join(why)
-        return S.PENDING_ANALYSIS, missing, "transcript found, waiting for analysis"
+        return S.PENDING_ANALYSIS, missing, f"transcript found, waiting for the {_labels(missing)}"
     if not call.get("transcript_expected"):
         return S.NO_TRANSCRIPT_EXPECTED, [], "not connected, so nothing was recorded"
     if t == S.T_NOT_LOOKED_UP:
@@ -410,7 +412,8 @@ class Registry:
         return state
 
     def mark_batched(self, call_ids: Iterable[str], layer: str, batch_id: str, now: datetime) -> None:
-        """Claimed calls sent to the Batches API: kept out of other runs until results come back (or 25 h pass)."""
+        """Claimed calls handed out to a Claude reading round: kept out of other rounds until their readings are
+        collected (or 25 h pass)."""
         ids = list(call_ids)
         for i in range(0, len(ids), 500):
             chunk = ids[i:i + 500]
@@ -428,8 +431,8 @@ class Registry:
 
     def fail(self, call_id: str, layer: str, error: str, now: datetime, engine: str | None = None,
              retry: bool = True) -> None:
-        """A failed layer, retried after a growing wait, or not automatically when ``retry`` is False (e.g. the
-        model declined the same transcript twice); ``retry_failed`` queues those again."""
+        """A failed layer, retried after a growing wait, or not automatically when ``retry`` is False;
+        ``retry_failed`` queues those again."""
         job = self.jobs(call_id).get(layer) or {}
         attempts = (job.get("attempts") or 0) + 1
         self.db.execute(
@@ -470,6 +473,17 @@ class Registry:
 
     # ------------------------------------------------------------------ statuses
 
+    def upgrade(self, now: datetime) -> bool:
+        """After the analysis version changed: derive every call's status again, and drop the old note on why the
+        analysis could not run ("no model access": Claude reads the calls, so nothing blocks it now). True when it
+        ran."""
+        if self.get_meta("analysis_version") == S.ANALYSIS_VERSION:
+            return False
+        self.set_meta("blocked_layers", {})
+        self.refresh(None, now)
+        self.set_meta("analysis_version", S.ANALYSIS_VERSION)
+        return True
+
     def refresh(self, call_ids: Iterable[str] | None, now: datetime) -> Counter:
         """Re-derive and store the analysis status of the given calls (all calls when None)."""
         if call_ids is None:
@@ -486,9 +500,9 @@ class Registry:
                 calls += self.q(f"SELECT * FROM transcript_coverage_registry WHERE call_id IN ({marks})", chunk)
                 for j in self.q(f"SELECT * FROM conversation_analysis_jobs WHERE call_id IN ({marks})", chunk):
                     jobs.setdefault(j["call_id"], {})[j["layer"]] = j
-        out, blocked = Counter(), self.get_meta("blocked_layers", {})
+        out = Counter()
         for c in calls:
-            status, missing, reason = derive_status(c, jobs.get(c["call_id"], {}), now, blocked=blocked)
+            status, missing, reason = derive_status(c, jobs.get(c["call_id"], {}), now)
             out[status] += 1
             if (status, json.dumps(missing), reason) != (c["analysis_status"], c["missing_layers"], c["status_reason"]):
                 self.db.execute(

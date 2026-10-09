@@ -1,9 +1,8 @@
 """Coaching from analysed calls: per call, per caller (recurring strengths and gaps, three actions), a weekly
 manual-review sample, and per team (gaps shared by 2+ callers, what the strongest callers do well).
 
-The model's reading (semantic layer) gives quality scores, objections and how they were handled, buying signals
-the caller acted on or missed, and the call's outcome. Without it, only clearly labelled keyword-based hints are
-given ("real call with buying signals but no payment step"): keywords can't tell who said what. Items are fixed
+Claude's reading of each call gives quality scores, objections and how they were handled, buying signals the
+caller acted on or missed, and the call's outcome; a call Claude has not read yet gets no coaching. Items are fixed
 plain labels so they can be counted across calls and callers; an item is a strength or a gap only when it recurs
 (RECURRING calls), and a quality dimension only when its average over RECURRING+ scored calls is GOOD+ or WEAK-.
 Shared logins, automation and non-users get no coaching: nobody in particular can act on it.
@@ -26,8 +25,7 @@ GOOD, WEAK = 7, 4     # quality averages (0-10) at or above / at or below
 RECURRING = 2         # calls an item needs before it counts as a habit
 SAMPLE = 5
 TOP_ACTIONS = 3
-KW_BASIS = "keyword-based hints, not a full reading of the call"
-SEM_BASIS = "the model's reading of the transcript"
+SEM_BASIS = "Claude's reading of the transcript"
 
 DIM_LABEL = {"questioning": "asking questions", "active_listening": "listening", "objection_handling": "handling objections",
              "product_explanation": "explaining the course", "pricing_explanation": "explaining the fee",
@@ -79,10 +77,6 @@ NO_DATED = "no dated next step"
 NO_PAY_READY = "no payment step with a ready lead"
 PAY_STEP = "payment step taken"
 DATED = "dated next step agreed"
-KW_NO_PAY = "buying signals but no payment step (keyword check)"
-KW_NO_DATED = "no dated next step (keyword check)"
-KW_PAY = "payment step on a real call (keyword check)"
-KW_DATED = "dated next step fixed (keyword check)"
 ACTIONS = {
     **{DIM_LABEL[d]: a for d, a in DIM_ACTION.items()},
     **{f"missed buying signal: {SIGNAL_LABEL[s]}": a for s, a in SIGNAL_ACTION.items()},
@@ -90,9 +84,7 @@ ACTIONS = {
     UNANSWERED: "Note every question the lead asks and answer each before the call ends, or promise a dated answer.",
     PRESSURE: "Ease off: give the lead room to decide and agree a dated follow-up instead of pushing.",
     NO_DATED: "End every real call with a date and time for the next step.",
-    NO_PAY_READY: "When a lead is ready, send the payment link during the call and agree the date to pay.",
-    KW_NO_PAY: "When the lead shows buying signals, move to the payment step on the call: amount, link, date.",
-    KW_NO_DATED: "End every real call with a date and time for the next step."}
+    NO_PAY_READY: "When a lead is ready, send the payment link during the call and agree the date to pay."}
 
 
 def _num(x) -> int | float | None:
@@ -139,39 +131,12 @@ def _semantic(c: dict) -> dict:
             "priorityAction": co.get("priority_action") or None, "hints": []}
 
 
-def _keyword(c: dict) -> dict:
-    sig = c["kw"].get("signals") or {}
-    real = c.get("call_class") == S.REAL_CALL
-    strengths, weaknesses, hints = [], [], []
-    buying = [SIGNAL_LABEL.get(b, b) for b in sig.get("buying") or []]
-    if real and buying and not sig.get("payment_step"):
-        weaknesses.append(KW_NO_PAY)
-        hints.append(f"Real call with buying signals ({', '.join(buying)}) but no payment step heard: quote the "
-                     "amount and send the payment link on the call.")
-    elif real and sig.get("payment_step"):
-        strengths.append(KW_PAY)
-    if sig.get("dated_next_step"):
-        strengths.append(KW_DATED)
-    elif real or sig.get("callback_requested"):
-        weaknesses.append(KW_NO_DATED)
-        hints.append("A callback came up but no day or time was heard: fix one before ending the call."
-                     if sig.get("callback_requested") else
-                     "Real call with no dated next step heard: agree a date and time before ending the call.")
-    if objs := [OBJECTION_LABEL[o] for o in sig.get("objections") or [] if o in OBJECTION_LABEL]:
-        hints.append(f"Objection words heard ({', '.join(objs)}): listen to how they were answered.")
-    return {"source": S.KEYWORD, "basis": KW_BASIS, "overall": None, "scores": None, "strengths": strengths,
-            "weaknesses": weaknesses, "modelStrengths": [], "improvements": [], "missedSignals": [],
-            "priorityAction": ACTIONS.get(weaknesses[0]) if weaknesses else None, "hints": hints}
-
-
 def call_coaching(call: dict) -> dict | None:
-    """Coaching for one call: from the model's reading when there is one, else keyword-based hints (labelled by
-    "source" and "basis"); None when the call has neither or was made from a shared login or by automation."""
-    if not is_person(call):
+    """Coaching for one call from Claude's reading (labelled by "source" and "basis"); None when Claude has not read
+    the call or it was made from a shared login or by automation."""
+    if not is_person(call) or not call.get("sem"):
         return None
-    if call.get("sem"):
-        return _semantic(call)
-    return _keyword(call) if call.get("kw") else None
+    return _semantic(call)
 
 
 def _week(c: dict) -> str | None:
@@ -248,7 +213,7 @@ def caller_coaching(calls: list[dict]) -> dict[str, dict]:
 
 def team_coaching(calls: list[dict], per_caller: dict) -> list[dict]:
     """The snapshot's coachingTeams: per team, gaps shared by 2+ callers ("callers" = how many, "who" = their
-    names, "n" = calls), practices from the strongest third of its callers (best average model quality score,
+    names, "n" = calls), practices from the strongest third of its callers (best average quality score in Claude's readings,
     then most strengths; "from" = their names) and up to 3 priorities. A caller belongs to the team of their
     latest call."""
     team_of, seen = {}, {}

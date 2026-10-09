@@ -183,7 +183,7 @@ cd dashboard && npx wrangler d1 execute sales_dashboard --remote --file ../data/
 ```
 
 Without `--push --yes` nothing is sent. A snapshot built with `--excerpts` (verbatim transcript lines) is
-refused: excerpts stay in the local copy. A phone number quoted in free text (a model summary or reasoning) is
+refused: excerpts stay in the local copy. A phone number quoted in free text (a summary or reasoning from Claude's reading) is
 replaced with "[number removed]" before loading, and a snapshot with a phone-number field is refused. The key must be one of the range keys above (give `--key` for a
 multi-day report). Apply migration `0004` first (`npm run db:migrate:remote`, or `npm run deploy:prod`).
 

@@ -6,7 +6,7 @@ import pytest
 
 from analytics.convintel import schema as S
 from analytics.convintel.classify import classify
-from analytics.convintel.coaching import (ACTIONS, DIM_ACTION, KW_BASIS, KW_NO_PAY, call_coaching, caller_coaching,
+from analytics.convintel.coaching import (ACTIONS, DIM_ACTION, SEM_BASIS, call_coaching, caller_coaching,
                                           team_coaching, weekly_sample)
 from analytics.convintel.crosscall import lead_journeys, trend
 from analytics.convintel.integrity import (CALL_IDS_CAP, ROW_COLUMNS, call_flags, flag_rows, integrity_summary,
@@ -29,21 +29,8 @@ def call(cid, at=T0, dur=200, status="Answered", caller="u1", lead="L1", team="T
            "call_class": cls, "class_reason": why, "caller_id": caller, "caller_name": NAMES[caller],
            "caller_kind": kind, "team": team, "transcript_expected": 1, "transcript_state": S.T_FOUND,
            "transcript_words": 400, "transcript_api_duration": dur, "lookup_attempts": 1, "next_lookup_utc": None,
-           "kw": None, "sem": None, "zip": None, "t": at}
+           "sem": None, "zip": None, "t": at}
     return {**row, **extra}
-
-
-def kwout(flags=(), score=50, band="warm", buying=(), objections=(), payment_step=False, dated=False, callback=False,
-          words=300, wpm=120, loop=0.01):
-    return {"language": {"primary": "english", "devanagari_share": 0.0, "hinglish_markers": 0, "code_switching": False},
-            "word_level": {"words": words, "wpm": wpm, "categories": {}, "repeated_phrases": []},
-            "sentence_level": {"sentences": 10, "questions": 2, "labelled": [], "labelled_total": 0},
-            "signals": {"buying": list(buying), "objections": list(objections), "negative": [],
-                        "payment_step": payment_step, "dated_next_step": dated, "callback_requested": callback,
-                        "amounts": [], "course_mentions": [], "readiness_score": score, "readiness_band": band,
-                        "markers": []},
-            "integrity": {"words": words, "wpm": wpm, "loop_share": loop, "machine_text": "", "flags": list(flags)},
-            "findings": []}
 
 
 def semout(score=60, band="warm", real="yes", iflags=(), reason="", objections=(), signals=(), commitments=(),
@@ -92,30 +79,40 @@ def test_179_seconds_is_short_and_180_is_not_flagged():
     assert "b" not in fl
 
 
-@pytest.mark.parametrize("flag", ["no_content", "thin", "machine", "loop"])
-def test_keyword_integrity_flags_are_suspect_on_real_calls_only(flag):
-    fl = call_flags([call("r", dur=300, kw=kwout(flags=[flag], words=12, wpm=20, loop=0.4)),
-                     call("s", at=T0 + timedelta(hours=1), dur=100, kw=kwout(flags=[flag]))])
-    assert flagmap(fl, "r")[flag]["tier"] == "suspect"
-    assert flagmap(fl, "r")[flag]["reason"].startswith("keyword check")
+# Every sign Claude's reading may name (thin included) must be honoured by the integrity view.
+CLAUDE_FLAGS = S.SEMANTIC_SCHEMA["properties"]["integrity"]["properties"]["flags"]["items"]["enum"]
+
+
+@pytest.mark.parametrize("flag", CLAUDE_FLAGS)
+def test_claudes_integrity_flags_are_suspect_on_real_calls_only(flag):
+    fl = call_flags([call("r", dur=300, sem=semout(real="doubtful", iflags=[flag])),
+                     call("s", at=T0 + timedelta(hours=1), dur=100, sem=semout(real="doubtful", iflags=[flag])),
+                     call("unread", at=T0 + timedelta(hours=2), dur=300, lead="L2")])
+    assert set(flagmap(fl, "r")) == {flag} and flagmap(fl, "r")[flag]["tier"] == "suspect"
+    assert flagmap(fl, "r")[flag]["reason"].startswith(
+        f"Claude's reading: {S.INTEGRITY_FLAGS[flag]}; Claude doubts it was a real conversation")
     assert set(flagmap(fl, "s")) == {"under_3_min"}
+    assert "unread" not in fl                      # no reading, no transcript flag: nothing else judges the words
 
 
-def test_keyword_flag_notes_when_the_model_found_a_real_conversation():
-    fl = call_flags([call("r", dur=300, kw=kwout(flags=["thin"], wpm=40), sem=semout(real="yes"))])
-    assert "model judged it a real conversation" in flagmap(fl, "r")["thin"]["reason"]
+def test_a_flag_on_a_call_claude_judged_real_says_so():
+    fl = call_flags([call("r", dur=300, sem=semout(real="yes", iflags=["thin"], reason="Lead mostly silent"))])
+    reason = flagmap(fl, "r")["thin"]["reason"]
+    assert reason.startswith("Claude's reading: very little talk for the time; Claude judged it a real conversation")
+    assert "(Lead mostly silent)" in reason and reason.endswith("(needs review, not proof)")
 
 
-def test_semantic_integrity_flags_and_merge_with_keyword():
+def test_claudes_verdict_without_a_sign_and_one_flag_per_sign():
     calls = [call("no", dur=300, sem=semout(real="no", reason="Wrong number")),
              call("one", dur=300, sem=semout(real="doubtful", iflags=["one_sided"]), caller="u2"),
-             call("both", dur=300, kw=kwout(flags=["machine"]), sem=semout(real="no", iflags=["machine"]), caller="u3"),
+             call("twice", dur=300, sem=semout(real="no", iflags=["machine", "machine"]), caller="u3"),
              call("fine", dur=300, sem=semout(real="yes"), caller="u4")]
     fl = call_flags(calls)
     assert set(flagmap(fl, "no")) == {"not_sales_talk"} and "Wrong number" in fl["no"][0]["reason"]
     assert flagmap(fl, "one")["one_sided"]["tier"] == "suspect"
-    machine = [f for f in fl["both"] if f["flag"] == "machine"]
-    assert len(machine) == 1 and "keyword check" in machine[0]["reason"] and "model reading" in machine[0]["reason"]
+    assert set(flagmap(fl, "twice")) == {"machine"}          # a named sign is not also filed under not_sales_talk
+    machine = flagmap(fl, "twice")["machine"]["reason"]
+    assert machine.count("Claude's reading") == 1 and "Claude judged it not a real conversation" in machine
     assert "fine" not in fl
 
 
@@ -227,11 +224,11 @@ def test_summary_sorting_caps_totals_and_no_phone_numbers():
     m = timedelta(minutes=10)
     calls = [call(f"s{i}", at=T0 + i * m, dur=30 + i) for i in range(60)]                     # u1: 60 short calls
     h = timedelta(hours=1)
-    calls += [call("x1", at=T0 - h, dur=300, kw=kwout(flags=["machine"]), lead="L2"),
+    calls += [call("x1", at=T0 - h, dur=300, sem=semout(iflags=["machine"]), lead="L2"),
               call("x2", at=T0 - 2 * h, dur=900, transcript_state=S.T_NOT_TRANSCRIBED, lead="L3"),
               call("x3", at=T0 - 3 * h, dur=300, lead="L4")]
-    calls += [call("y1", caller="u2", dur=300, kw=kwout(flags=["thin"])), call("y2", at=T0 + h, caller="u2", dur=300)]
-    calls += [call("z1", caller="rj", dur=300, kw=kwout(flags=["loop"]))]
+    calls += [call("y1", caller="u2", dur=300, sem=semout(iflags=["thin"])), call("y2", at=T0 + h, caller="u2", dur=300)]
+    calls += [call("z1", caller="rj", dur=300, sem=semout(iflags=["loop"]))]
     calls += [call("n1", caller="u3", dur=20, status="NotAnswered")]
     fl = call_flags(calls)
     summary = integrity_summary(calls, fl)
@@ -253,7 +250,7 @@ def test_summary_sorting_caps_totals_and_no_phone_numbers():
 
 
 def test_flag_rows_carry_caller_and_dialled_numbers_most_serious_first(tmp_path):
-    calls = [call("s1", dur=100), call("r1", at=T0 + timedelta(hours=1), dur=300, kw=kwout(flags=["no_content"]),
+    calls = [call("s1", dur=100), call("r1", at=T0 + timedelta(hours=1), dur=300, sem=semout(iflags=["no_content"]),
                                        direction="inbound"), call("ok", at=T0 + timedelta(hours=2), dur=300)]
     fl = call_flags(calls)
     rows = flag_rows(calls, fl)
@@ -305,7 +302,7 @@ def test_journey_readiness_trend_and_repeated_objections():
     calls = [call("a", at=T0, sem=semout(score=30, objections=[("price", "no")])),
              call("b", at=T0 + h, sem=semout(score=40, objections=[("price", "partly"), ("time", "yes")])),
              call("c", at=T0 + 2 * h, sem=semout(score=75, objections=[("price", "yes")])),
-             call("d", at=T0 + 3 * h, dur=100, kw=kwout(score=10)),               # later, keyword only
+             call("d", at=T0 + 3 * h, dur=100),                                   # later, not read by Claude yet
              call("e", at=T0 + 4 * h, sem=semout(score=0, band="unclear"))]         # too thin to judge: ignored
     j = lead_journeys(calls, {"L1": {"stage": "Counselled lead", "course": "Diploma X", "owner_name": "Asha Rao"}},
                       [], NOW)["L1"]
@@ -317,15 +314,18 @@ def test_journey_readiness_trend_and_repeated_objections():
     assert j["nextAction"].startswith("Close on the next call: readiness 75/100")
 
 
-def test_journey_keyword_fallback_and_one_engine_per_trend():
+def test_journey_reads_only_claudes_readings():
     h = timedelta(hours=3)
-    calls = [call("a", at=T0, kw=kwout(score=70)), call("b", at=T0 + h, kw=kwout(score=40)),
-             call("c", at=T0 + 2 * h, kw=kwout(score=20), sem=semout(score=90))]
+    calls = [call("a", at=T0, sem=semout(score=70)), call("b", at=T0 + h),                 # b: not read yet
+             call("c", at=T0 + 2 * h, sem=semout(score=40, band="cool"))]
     j = lead_journeys(calls, {}, [], NOW)["L1"]
-    assert (j["readiness"], j["readinessSource"]) == (90, "semantic")
-    assert (j["readinessTrend"], j["trendSource"]) == ("falling", "keyword")
-    only_kw = lead_journeys([call("a", kw=kwout(score=45))], {}, [], NOW)["L1"]
-    assert (only_kw["readiness"], only_kw["readinessSource"], only_kw["readinessTrend"]) == (45, "keyword", "single call")
+    assert (j["readiness"], j["readinessSource"], j["readinessBand"]) == (40, "semantic", "cool")
+    assert (j["readinessTrend"], j["trendSource"]) == ("falling", "semantic")
+    assert "readiness falling" in j["flags"] and j["nextAction"].startswith("Ask what has changed")
+    unread = lead_journeys([call("a")], {}, [], NOW)["L1"]                                  # a real call, no reading
+    assert (unread["readiness"], unread["readinessSource"], unread["readinessBand"]) == (None, None, None)
+    assert (unread["readinessTrend"], unread["trendSource"]) == ("unknown", None)
+    assert unread["nextAction"].startswith("No analysed call yet")
     none = lead_journeys([call("a", dur=20, status="NotAnswered")], {}, [], NOW)["L1"]
     assert none["readiness"] is None and none["readinessTrend"] == "unknown" and none["readinessSource"] is None
     assert "3+ minutes" in none["nextAction"]
@@ -339,7 +339,7 @@ def test_journey_keyword_fallback_and_one_engine_per_trend():
     (("Answered", 50), 72, 1),                       # answered, but after 48 h
 ])
 def test_missed_commitment_timing(follow_up, now_h, missed):
-    calls = [call("a", kw=kwout(callback=True)), until(T0 + timedelta(hours=now_h))]
+    calls = [call("a", sem=semout(commitments=["caller"])), until(T0 + timedelta(hours=now_h))]
     if follow_up:
         calls.append(call("b", at=T0 + timedelta(hours=follow_up[1]), status=follow_up[0], dur=60))
     j = lead_journeys(calls, {}, [], T0 + timedelta(hours=now_h))["L1"]
@@ -385,24 +385,23 @@ def test_hot_lead_quiet_and_enrolled_leads():
 
 # ------------------------------------------------------------------ coaching
 
-def test_call_coaching_keyword_only_is_labelled_hints():
-    cc = call_coaching(call("a", dur=400, kw=kwout(buying=["fee_question"], objections=["price"])))
-    assert cc["source"] == "keyword" and cc["basis"] == KW_BASIS and cc["scores"] is None and cc["overall"] is None
-    assert KW_NO_PAY in cc["weaknesses"] and cc["priorityAction"] == ACTIONS[KW_NO_PAY]
-    assert any("buying signals (fee question)" in h for h in cc["hints"])
-    assert any("Objection words heard (price)" in h for h in cc["hints"])
-    paid = call_coaching(call("b", dur=400, kw=kwout(buying=["fee_question"], payment_step=True, dated=True)))
-    assert paid["weaknesses"] == [] and "payment step on a real call (keyword check)" in paid["strengths"]
-    assert call_coaching(call("c")) is None
-    assert call_coaching(call("d", caller="rj", kw=kwout())) is None
-    assert call_coaching(call("e", caller="sys", kw=kwout())) is None
+def test_call_coaching_needs_claudes_reading():
+    assert call_coaching(call("c", dur=400)) is None                       # not read by Claude yet: no coaching
+    assert call_coaching(call("d", caller="rj", sem=semout())) is None
+    assert call_coaching(call("e", caller="sys", sem=semout())) is None
+    paid = call_coaching(call("b", dur=400, sem=semout(score=80, payment_step="link_sent", dated=True)))
+    assert (paid["source"], paid["basis"]) == ("semantic", SEM_BASIS) and "Claude" in SEM_BASIS
+    assert paid["weaknesses"] == [] and paid["strengths"] == ["payment step taken", "dated next step agreed"]
+    assert paid["overall"] == 6
+    no_overall = call_coaching(call("n", dur=400, sem=semout(overall=None, dims={"closing": 5})))
+    assert no_overall["overall"] is None and no_overall["scores"]["closing"] == 5
 
 
 def test_call_coaching_semantic():
     sem = semout(score=80, signals=[("fee_question", "no"), ("start_date", "yes")],
                  objections=[("price", "no"), ("time", "yes")], dims={"questioning": 8, "closing": 2},
                  unanswered=["refund"], payment_step="none", dated=False)
-    cc = call_coaching(call("a", dur=400, sem=sem, kw=kwout()))
+    cc = call_coaching(call("a", dur=400, sem=sem))
     assert cc["source"] == "semantic" and cc["scores"]["questioning"] == 8 and cc["scores"]["active_listening"] is None
     assert set(cc["weaknesses"]) == {"missed buying signal: fee question", "objection not handled well: price",
                                      "lead's questions left unanswered", "no payment step with a ready lead",
@@ -445,11 +444,20 @@ def test_caller_and_team_coaching():
     assert teams["Team Beta"]["gaps"] == [] and teams["Team Beta"]["priorities"] == []
 
 
-def test_caller_coaching_keyword_only_items_recur():
-    calls = [call(f"k{i}", at=T0 + timedelta(hours=i), lead=f"L{i}", dur=400, kw=kwout(buying=["fee_question"]))
-             for i in range(2)]
+def test_caller_coaching_counts_only_calls_claude_has_read():
+    calls = [call(f"k{i}", at=T0 + timedelta(hours=i), lead=f"L{i}", dur=400,
+                  sem=semout(signals=[("fee_question", "no")], overall=None if i == 0 else 6)) for i in range(2)]
+    calls += [call("unread", at=T0 + timedelta(hours=3), lead="L9", dur=400),
+              call("m0", caller="u2", lead="L8", dur=400)]                      # Ravi: no call read yet
     per = caller_coaching(calls)
-    assert per["u1"]["weaknesses"][0]["item"] == KW_NO_PAY and per["u1"]["qualityAvg"] is None
+    u1 = per["u1"]
+    assert u1["analysedCalls"] == 2 and u1["qualityAvg"] == 6.0             # a reading with no overall is left out
+    assert {"item": "missed buying signal: fee question", "n": 2} in u1["weaknesses"]
+    assert ACTIONS["missed buying signal: fee question"] in u1["actions"]
+    ravi = per["u2"]
+    assert (ravi["analysedCalls"], ravi["qualityAvg"], ravi["strengths"], ravi["weaknesses"], ravi["actions"]) == (
+        0, None, [], [], [])
+    assert ravi["weeklySample"] == {"2026-10-05": ["m0"]}                 # still sampled for a manual listen
 
 
 def test_weekly_sample_five_longest_real_calls_per_monday_ist_week():

@@ -7,7 +7,7 @@ from pathlib import Path
 
 from analytics.convintel import export, integrity
 from analytics.convintel import schema as S
-from analytics.convintel.analyze import keyword_pass
+from analytics.convintel.analyze import store_semantic
 from analytics.convintel.attribution import Directory
 from analytics.convintel.fetch import save_text
 from analytics.convintel.inventory import from_activity
@@ -53,7 +53,6 @@ def build(tmp_path):
     reg.set_transcript("c2", S.T_NOT_TRANSCRIBED, NOW, transcript_ref=None, transcript_source_id="s-c2",
                        lookup_note="the recording exists but has no transcript text yet")
     reg.refresh(None, NOW)
-    keyword_pass(reg, NOW)
     leads = {f"L{n}": {"stage": "Prospect", "course": "Diploma in Contract Drafting", "owner_id": "u1",
                        "owner_name": "Asha Rao", "score": 40} for n in range(1, 7)}
     enrol = [{"lead_id": "L4", "at_utc": "2026-10-08 09:00:00", "ist_day": "2026-10-08", "owner_id": "u2",
@@ -163,6 +162,34 @@ def test_a_caller_named_by_phone_number_is_not_shown(tmp_path):
     assert Directory(USERS).person("zz", "+91 98765 00000")["name"] == "(a phone number, not a LeadSquared user)"
 
 
-def test_snapshot_says_when_the_model_layer_has_not_run(tmp_path):
+def test_snapshot_says_when_claude_has_not_read_the_period(tmp_path):
     reg, ds = build(tmp_path)
-    assert export.snapshot(ds, reg, "2d", "Two days")["definitions"]["semanticEngine"].startswith("not run yet")
+    assert "has not read" in export.snapshot(ds, reg, "2d", "Two days")["definitions"]["semanticEngine"]
+
+
+def _reading(score=80):
+    """A Claude reading of TEXT in the schema's shape, with one phrase and one repeat."""
+    from tests.test_convintel_semantic import _minimal
+    out = _minimal(S.SEMANTIC_SCHEMA)
+    out["intent"].update(readiness_score=score, readiness_band="hot")
+    out["word_analysis"] = {"phrases": [{"category": "payment_intent", "excerpt": "please send the payment link today",
+                                         "speaker": "customer", "note": "asks for the link"}],
+                            "repeated": [{"excerpt": "fees kitni hai", "speaker": "customer", "times": 6, "what": "x"}]}
+    out["summary"] = "The customer asked for the payment link."
+    return out
+
+
+def test_claude_readings_feed_the_snapshot_as_counts_without_transcript_words(tmp_path):
+    reg, _ = build(tmp_path)
+    c = reg.call("c1")
+    assert store_semantic(reg, c, TEXT, {"output": _reading()}, "claude-code", NOW) == "done"
+    ds = export.dataset(reg, "2026-10-07", "2026-10-08", USERS, {}, [], [], [], NOW)
+    snap = export.snapshot(ds, reg, "2d", "Two days")
+    row = next(r for r in snap["calls"] if r["callId"] == "c1")
+    assert (row["readiness"], row["engine"], row["words"], row["repeats"]) == (80, "semantic", {"payment_intent": 1}, 1)
+    assert snap["words"]["org"] == {"payment_intent": 1} and snap["words"]["byTeam"]
+    assert snap["definitions"]["semanticEngine"].startswith("Claude, reading each transcript")
+    body = json.dumps(snap)
+    assert "please send the payment link" not in body and "phrases" not in row
+    private = next(r for r in export.snapshot(ds, reg, "2d", "Two days", excerpts=True)["calls"] if r["callId"] == "c1")
+    assert private["phrases"][0]["excerpt"].lower() == "please send the payment link today"

@@ -81,62 +81,52 @@ def _measured(score, band) -> int | float | None:
 
 
 def readiness(call: dict) -> tuple[int | float | None, str | None, str | None]:
-    """(score 0-100 or None, band, engine) from the semantic layer when it ran, else the keyword layer; engine is
-    "semantic" or "keyword", all None when neither has a reading. Band "unclear" means not measured: the score is
-    None, because the semantic schema cannot hold a null score and its 0 there is not a real 0."""
-    sem, kw = call.get("sem"), call.get("kw")
-    for engine, part in (("semantic", sem.get("intent") if isinstance(sem, dict) else None),
-                         ("keyword", kw.get("signals") if isinstance(kw, dict) else None)):
-        if isinstance(part, dict) and (part.get("readiness_band") or _num(part.get("readiness_score"))):
-            band = part.get("readiness_band")
-            return _measured(part.get("readiness_score"), band), band, engine
+    """(score 0-100 or None, band, engine) from Claude's reading; engine is "semantic", all None when the call has no
+    reading. Band "unclear" means not measured: the score is None, because the reading schema cannot hold a null
+    score and its 0 there is not a real 0."""
+    sem = call.get("sem")
+    part = sem.get("intent") if isinstance(sem, dict) else None
+    if isinstance(part, dict) and (part.get("readiness_band") or _num(part.get("readiness_score"))):
+        band = part.get("readiness_band")
+        return _measured(part.get("readiness_score"), band), band, "semantic"
     return None, None, None
 
 
 def buying_types(call: dict) -> list[str]:
-    """Buying-signal types found on the call (semantic layer when it ran, else keyword layer)."""
-    sem, kw = call.get("sem"), call.get("kw")
-    if isinstance(sem, dict):
-        return sorted({b.get("type") for b in _dicts(sem.get("buying_signals")) if b.get("type")})
-    return sorted(set((kw.get("signals") or {}).get("buying") or [])) if isinstance(kw, dict) else []
+    """Buying-signal types Claude found on the call."""
+    sem = call.get("sem")
+    return sorted({b.get("type") for b in _dicts(sem.get("buying_signals")) if b.get("type")}) if isinstance(sem, dict) else []
 
 
 def objections(call: dict) -> set[str]:
-    """Objection categories raised on the call, once each (semantic layer when it ran, else keyword layer)."""
-    sem, kw = call.get("sem"), call.get("kw")
-    if isinstance(sem, dict):
-        cats = {o.get("category") for o in _dicts(sem.get("objections"))}
-    elif isinstance(kw, dict):
-        cats = set((kw.get("signals") or {}).get("objections") or [])
-    else:
+    """Objection categories raised on the call, once each, from Claude's reading."""
+    sem = call.get("sem")
+    if not isinstance(sem, dict):
         return set()
+    cats = {o.get("category") for o in _dicts(sem.get("objections"))}
     return {c if c in S.OBJECTION_CATEGORIES else "other" for c in cats if c}
 
 
 def payment_ready(call: dict) -> bool:
-    """A payment step or a strong intent to pay on the call: a payment link sent, amount and date agreed, a
-    payment-ready finding, or (semantic) a strong payment-intent signal / (keyword) a payment-intent phrase."""
-    sem, kw = call.get("sem"), call.get("kw")
-    if isinstance(sem, dict):
-        return ((sem.get("outcome") or {}).get("payment_step") in PAYMENT_STEPS
-                or any(f.get("category") == "payment_ready" for f in _dicts(sem.get("findings")))
-                or any(b.get("type") == "payment_intent" and b.get("strength") == "strong"
-                       for b in _dicts(sem.get("buying_signals"))))
-    if isinstance(kw, dict):
-        sig = kw.get("signals") or {}
-        return (bool(sig.get("payment_step")) or "payment_intent" in (sig.get("buying") or [])
-                or any(f.get("category") == "payment_ready" for f in _dicts(kw.get("findings"))))
-    return False
+    """A payment step or a strong intent to pay on the call, from Claude's reading: a payment link sent, amount and
+    date agreed, a payment-ready finding, or a strong payment-intent signal."""
+    sem = call.get("sem")
+    if not isinstance(sem, dict):
+        return False
+    return ((sem.get("outcome") or {}).get("payment_step") in PAYMENT_STEPS
+            or any(f.get("category") == "payment_ready" for f in _dicts(sem.get("findings")))
+            or any(b.get("type") == "payment_intent" and b.get("strength") == "strong"
+                   for b in _dicts(sem.get("buying_signals"))))
 
 
 def promised_callback(call: dict) -> bool:
-    """The caller promised to call back or follow up: semantic commitments by the caller (or a callback finding)
-    when the semantic layer ran, else the keyword layer's callback_requested."""
-    sem, kw = call.get("sem"), call.get("kw")
-    if isinstance(sem, dict):
-        return (any(c.get("by") == "caller" for c in _dicts(sem.get("commitments")))
-                or any(f.get("category") == "callback_promised" for f in _dicts(sem.get("findings"))))
-    return bool((kw.get("signals") or {}).get("callback_requested")) if isinstance(kw, dict) else False
+    """The caller promised to call back or follow up: a commitment by the caller or a callback finding in Claude's
+    reading."""
+    sem = call.get("sem")
+    if not isinstance(sem, dict):
+        return False
+    return (any(c.get("by") == "caller" for c in _dicts(sem.get("commitments")))
+            or any(f.get("category") == "callback_promised" for f in _dicts(sem.get("findings"))))
 
 
 def entity(call: dict) -> tuple[str, str, str]:
@@ -266,8 +256,8 @@ class _View:
             n["found"] += 1
         if get("analysis_status") == S.ANALYZED:
             n["analyzed"] += 1
-        sem, kw = get("sem"), get("kw")
-        if sem or kw:
+        sem = get("sem")
+        if sem:
             a.objections.update(objections(c))
             if isinstance(sem, dict):
                 self._quality(a, sem)
@@ -309,9 +299,8 @@ class _View:
 
     @staticmethod
     def _quality(a: _Acc, sem: dict) -> None:
-        """Dimension scores as given (null = not shown on the call). ``overall`` cannot be null in the model's
-        schema, so like readiness it is not a measurement when the call gave no basis: band "unclear" or no
-        skill scored at all."""
+        """Dimension scores as given (null = not shown on the call). Like readiness, ``overall`` is not a
+        measurement when the call gave no basis: null, band "unclear" or no skill scored at all."""
         q = sem.get("quality") if isinstance(sem.get("quality"), dict) else {}
         scored = False
         for d in S.QUALITY_DIMENSIONS:
@@ -469,8 +458,9 @@ def _notes(org: dict) -> list[str]:
         "step (a call too short to read, rated 'unclear', is skipped); payment ready: a payment link sent, amount "
         "and date agreed or a clear intent to pay. Enrolled leads are left out. Each lead counts once, for the "
         "caller of that latest call.",
-        "Quality scores come from the model (semantic) layer only and stay blank until it has run. A call that "
-        "gave no basis for a score (readiness 'unclear' or no skill scored) is left out of the overall average.",
+        "Quality scores come from Claude's reading of the transcript and stay blank until Claude has read the "
+        "call. A call that gave no basis for a score (readiness 'unclear' or no skill scored) is left out of the "
+        "overall average.",
         "Possibly-not-real flags mean 'needs review', not proof; flagged % is flagged calls over answered calls.",
         "Revenue is not measurable yet: LeadSquared has returned no payment records, so revenue and revenue per "
         "caller are blank and enrolments are shown instead.",

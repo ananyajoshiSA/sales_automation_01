@@ -1,19 +1,12 @@
-"""Semantic layer: prompt, model engine (fake client shaped like the SDK's responses) and reply validation.
-
-Never imports the anthropic package and never calls the API. All data is synthetic.
+"""Claude's reading: what it is told (prompt), the JSON shape it writes (schema) and how a reading is checked
+before it is stored (validation). No API is involved. All data is synthetic.
 """
 
 from __future__ import annotations
 
 import copy
 import json
-import sys
-from types import SimpleNamespace
 
-import pytest
-
-from analytics.convintel import llm
-from analytics.convintel.llm import DEFAULT_MODEL, PRICES, SemanticEngine, estimate_cost
 from analytics.convintel.prompt import SYSTEM, user_message
 from analytics.convintel.schema import (FINDING_CATEGORIES, REAL_CALL, SEMANTIC_COMPONENTS, SEMANTIC_SCHEMA)
 from analytics.convintel.validate import find_excerpt, validate_semantic
@@ -24,14 +17,6 @@ T = ("Hello, this is the counsellor calling about the diploma course. Haan ji, f
 CALL = {"call_id": "c1", "lead_id": "lead-0001", "lead_number": "919000000001", "number": "919000000001",
         "caller_id": "u-asha", "caller_name": "Asha", "owner_name": "Ravi Kumar", "direction": "outbound",
         "start_utc": "2026-10-05 14:30:00", "duration_s": 245, "call_class": REAL_CALL, "team": "Team Demo"}
-
-
-@pytest.fixture(autouse=True)
-def _isolated_env(monkeypatch, tmp_path):
-    """No real .env, no real key, no model override leaks into these tests."""
-    monkeypatch.setenv("SALES_SKILL_ENV_FILE", str(tmp_path / "missing.env"))
-    for k in ("ANTHROPIC_API_KEY", "CONVINTEL_MODEL"):
-        monkeypatch.delenv(k, raising=False)
 
 
 def _minimal(sch: dict):
@@ -59,72 +44,6 @@ def _good() -> dict:
     return out
 
 
-# ------------------------------------------------------------------ fakes shaped like the SDK's objects
-
-def _msg(text: str | None = None, stop: str = "end_turn", out_tokens: int = 900, category: str | None = None):
-    content = [SimpleNamespace(type="thinking", thinking="")]
-    if text is not None:
-        content.append(SimpleNamespace(type="text", text=text))
-    usage = SimpleNamespace(input_tokens=2100, output_tokens=out_tokens, cache_creation_input_tokens=0,
-                            cache_read_input_tokens=1900)
-    return SimpleNamespace(content=content, stop_reason=stop, usage=usage,
-                           stop_details=SimpleNamespace(category=category, explanation=None) if category else None)
-
-
-class FakeStream:
-    def __init__(self, msg):
-        self.msg = msg
-
-    def __enter__(self):
-        return self
-
-    def __exit__(self, *exc):
-        return False
-
-    def get_final_message(self):
-        return self.msg
-
-
-class FakeBatches:
-    def __init__(self):
-        self.created, self.status, self.items, self.fail = [], "in_progress", [], None
-
-    def create(self, requests):
-        self.created.append(requests)
-        return SimpleNamespace(id="msgbatch_test1", processing_status="in_progress")
-
-    def retrieve(self, batch_id):
-        if self.fail:
-            raise self.fail
-        return SimpleNamespace(id=batch_id, processing_status=self.status)
-
-    def results(self, batch_id):
-        return iter(self.items)
-
-
-class FakeMessages:
-    def __init__(self, replies):
-        self.replies, self.calls, self.batches = list(replies), [], FakeBatches()
-
-    def _next(self, how, kw):
-        self.calls.append((how, kw))
-        r = self.replies.pop(0)
-        if isinstance(r, Exception):
-            raise r
-        return r
-
-    def create(self, **kw):
-        return self._next("create", kw)
-
-    def stream(self, **kw):
-        return FakeStream(self._next("stream", kw))
-
-
-class FakeClient:
-    def __init__(self, *replies):
-        self.messages = FakeMessages(replies)
-
-
 # ------------------------------------------------------------------ prompt
 
 def test_system_prompt_is_static_and_states_the_rules():
@@ -147,13 +66,13 @@ def test_user_message_sends_only_dialer_facts_and_the_transcript():
     assert "Start: not recorded" in bare and "Talk time logged: not recorded" in bare
 
 
-# ------------------------------------------------------------------ structured-output schema
+# ------------------------------------------------------------------ the JSON shape
 
 UNSUPPORTED = {"minimum", "maximum", "exclusiveMinimum", "exclusiveMaximum", "multipleOf", "minLength", "maxLength",
                "minItems", "maxItems", "uniqueItems", "contains", "$ref", "$defs", "patternProperties"}
 
 
-def test_schema_uses_only_documented_structured_output_features():
+def test_schema_is_closed_and_lists_every_part():
     seen = []
 
     def walk(s, path="$"):
@@ -172,167 +91,7 @@ def test_schema_uses_only_documented_structured_output_features():
             assert s["type"] in ("string", "integer", "boolean", "null"), path
     walk(SEMANTIC_SCHEMA)
     assert list(SEMANTIC_SCHEMA["properties"]) == list(SEMANTIC_COMPONENTS)
-    assert len(seen) == 12                     # nullable counts and quality scores, the only unions
-
-
-# ------------------------------------------------------------------ engine
-
-def test_analyze_sends_the_documented_request_and_parses_the_json_block():
-    fc = FakeClient(_msg(json.dumps(_good())))
-    eng = SemanticEngine(client=fc)
-    assert eng.ready() == (True, "") and eng.engine == "claude:claude-opus-5-5" == f"claude:{DEFAULT_MODEL}"
-    res = eng.analyze(CALL, T)
-    assert res["output"] == _good() and res["error"] is None and res["stop_reason"] == "end_turn"
-    assert res["usage"] == {"input_tokens": 2100, "output_tokens": 900, "cache_creation_input_tokens": 0,
-                            "cache_read_input_tokens": 1900}
-    how, kw = fc.messages.calls[0]
-    assert how == "create" and kw["model"] == "claude-opus-5-5" and kw["max_tokens"] == 16000
-    assert kw["system"] == [{"type": "text", "text": SYSTEM, "cache_control": {"type": "ephemeral"}}]
-    assert kw["thinking"] == {"type": "adaptive"}
-    assert kw["output_config"] == {"effort": "medium", "format": {"type": "json_schema", "schema": SEMANTIC_SCHEMA}}
-    assert kw["messages"] == [{"role": "user", "content": user_message(CALL, T)}]
-    assert "919000000001" not in json.dumps(kw) and "Asha" not in json.dumps(kw)
-    assert "anthropic" not in sys.modules
-
-
-def test_reply_that_is_not_json_is_an_error_without_the_text():
-    res = SemanticEngine(client=FakeClient(_msg('{"summary": "fees kitni hai'))).analyze(CALL, T)
-    assert res["output"] is None and "not valid JSON" in res["error"] and "kitni" not in res["error"]
-    res = SemanticEngine(client=FakeClient(_msg("[1, 2]"))).analyze(CALL, T)
-    assert res["output"] is None and "not an object" in res["error"]
-    res = SemanticEngine(client=FakeClient(_msg(None))).analyze(CALL, T)
-    assert res["output"] is None and "no text" in res["error"]
-
-
-def test_refusal_is_never_parsed():
-    fc = FakeClient(_msg('{"summary": "half-done"}', stop="refusal", category="bio"))
-    res = SemanticEngine(client=fc).analyze(CALL, T)
-    assert res["output"] is None and res["stop_reason"] == "refusal"
-    assert "declined" in res["error"] and "bio" in res["error"] and "half-done" not in res["error"]
-
-
-def test_cut_off_reply_is_asked_again_with_a_doubled_streamed_limit_up_to_64k():
-    fc = FakeClient(_msg('{"language": {', stop="max_tokens", out_tokens=16000),
-                    _msg(json.dumps(_good()), out_tokens=20000))
-    res = SemanticEngine(client=fc).analyze(CALL, T)
-    assert res["output"] == _good() and res["usage"]["output_tokens"] == 36000
-    assert [(h, kw["max_tokens"]) for h, kw in fc.messages.calls] == [("create", 16000), ("stream", 32000)]
-    fc = FakeClient(*[_msg("{", stop="max_tokens")] * 3)
-    res = SemanticEngine(client=fc).analyze(CALL, T)
-    assert res["output"] is None and res["usage"]["output_tokens"] == 2700
-    assert [(h, kw["max_tokens"]) for h, kw in fc.messages.calls] == [("create", 16000), ("stream", 32000),
-                                                                       ("stream", 64000)]
-    fc = FakeClient(_msg("{", stop="max_tokens"), _msg("{", stop="max_tokens"))
-    res = SemanticEngine(client=fc, max_tokens=40000).analyze(CALL, T)
-    assert res["output"] is None and res["stop_reason"] == "max_tokens" and "64000-token limit" in res["error"]
-    assert [kw["max_tokens"] for _, kw in fc.messages.calls] == [40000, 64000]
-
-
-def test_api_errors_never_raise_and_never_show_the_key(monkeypatch):
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key")
-    res = SemanticEngine(client=FakeClient(RuntimeError("401 bad key sk-ant-test-not-a-real-key"))).analyze(CALL, T)
-    assert res["output"] is None and "model request failed" in res["error"] and "sk-ant" not in res["error"]
-    res = SemanticEngine(client=FakeClient(_msg(json.dumps(_good())))).analyze(None, T)     # a broken call row
-    assert res["output"] is None and "model request failed" in res["error"]
-    eng = SemanticEngine()
-
-    def unreadable_env(*a, **k):
-        raise UnicodeDecodeError("utf-8", b"\xff", 0, 1, "invalid start byte")
-    monkeypatch.setattr(llm, "load_dotenv", unreadable_env)
-    res = eng.analyze(CALL, T)
-    assert res["output"] is None and res["error"] == "model not available: UnicodeDecodeError"
-
-
-def test_not_ready_says_why_and_sends_nothing(monkeypatch):
-    monkeypatch.setattr(llm, "_sdk_installed", lambda: False)
-    eng = SemanticEngine()
-    ok, why = eng.ready()
-    assert not ok and "ANTHROPIC_API_KEY is not set" in why and "anthropic package is not installed" in why
-    res = eng.analyze(CALL, T)
-    assert res["output"] is None and res["error"].startswith("model not available")
-    with pytest.raises(RuntimeError):
-        eng.submit_batch([("c1", CALL, T)])
-    monkeypatch.setenv("ANTHROPIC_API_KEY", "sk-ant-test-not-a-real-key")
-    assert eng.ready() == (False, "the anthropic package is not installed (pip install anthropic)")
-    monkeypatch.setattr(llm, "_sdk_installed", lambda: True)
-    assert eng.ready() == (True, "") and "anthropic" not in sys.modules
-
-
-def test_model_and_effort_settings(monkeypatch):
-    monkeypatch.setenv("CONVINTEL_MODEL", "claude-sonnet-5-5")
-    assert SemanticEngine(client=FakeClient()).engine == "claude:claude-sonnet-5-5"
-    assert SemanticEngine(client=FakeClient(), model="claude-opus-5").model == "claude-opus-5"
-    eng = SemanticEngine(client=FakeClient(), effort="high")
-    assert eng.params(CALL, T)["output_config"]["effort"] == "high"
-    with pytest.raises(ValueError):
-        SemanticEngine(client=FakeClient(), effort="extreme")
-
-
-def _result(cid, kind, **kw):
-    return SimpleNamespace(custom_id=cid, result=SimpleNamespace(type=kind, **kw))
-
-
-def test_batches_submit_poll_and_read_every_result_kind():
-    fc = FakeClient()
-    eng = SemanticEngine(client=fc)
-    call2 = {**CALL, "call_id": "c2", "lead_number": "919000000002", "duration_s": 190}
-    assert eng.submit_batch([("c1", CALL, T), ("c2", call2, "Hello. Abhi nahi.")]) == "msgbatch_test1"
-    reqs = fc.messages.batches.created[0]
-    assert [r["custom_id"] for r in reqs] == ["c1", "c2"] and reqs[0]["params"] == eng.params(CALL, T, 64000)
-    assert reqs[0]["params"]["max_tokens"] == 64000             # a batch can't be re-asked with a higher limit
-    assert "919000000002" not in json.dumps(reqs)
-    assert eng.batch_state("msgbatch_test1") == "in_progress"
-    fc.messages.batches.status = "ended"
-    assert eng.batch_state("msgbatch_test1") == "ended"
-    err = SimpleNamespace(type="error", error=SimpleNamespace(type="invalid_request_error", message="bad schema"))
-    fc.messages.batches.items = [
-        _result("c1", "succeeded", message=_msg(json.dumps(_good()))),
-        _result("c2", "succeeded", message=_msg("", stop="refusal")),
-        _result("c3", "errored", error=err), _result("c4", "canceled"), _result("c5", "expired"),
-        _result("c6", "succeeded", message=_msg("{", stop="max_tokens"))]
-    got = dict(eng.batch_results("msgbatch_test1"))
-    assert got["c1"]["output"] == _good() and got["c1"]["usage"]["cache_read_input_tokens"] == 1900
-    assert got["c2"]["output"] is None and got["c2"]["stop_reason"] == "refusal"
-    assert "invalid_request_error" in got["c3"]["error"] and "needs fixing" in got["c3"]["error"]
-    assert "canceled" in got["c4"]["error"] and "expired" in got["c5"]["error"]
-    assert got["c6"]["output"] is None and "cut off at the 64000-token" in got["c6"]["error"]
-
-
-def test_batch_limits_and_poll_errors(monkeypatch):
-    fc = FakeClient()
-    eng = SemanticEngine(client=fc)
-    with pytest.raises(ValueError):
-        eng.submit_batch([("c1", CALL, T), ("c1", CALL, T)])
-    with pytest.raises(ValueError):
-        eng.submit_batch([])
-    monkeypatch.setattr(llm, "BATCH_MAX_BYTES", 30_000)   # one request is ~23 KB
-    with pytest.raises(ValueError, match="send about 1 calls at a time"):
-        eng.submit_batch([("c1", CALL, T), ("c2", CALL, T)])
-    assert fc.messages.batches.created == []
-    fc.messages.batches.fail = ConnectionError("network down")
-    assert eng.batch_state("msgbatch_test1") == "in_progress" and "network down" in eng.last_error
-
-
-# ------------------------------------------------------------------ cost estimate
-
-def test_estimate_is_labelled_with_documented_prices_and_halves_in_batch():
-    sync = estimate_cost(1000, 1500.0, "claude-opus-5-5", False)
-    batch = estimate_cost(1000, 1500.0, "claude-opus-5-5", True)
-    assert sync["estimate"] is True and sync["label"].startswith("ESTIMATE ONLY")
-    assert sync["prices_usd_per_mtok"] == PRICES["claude-opus-5-5"] == {"input": 4.0, "output": 20.0, "cache_read": 0.2}
-    assert "skill docs" in sync["price_source"]
-    assert sync["assumptions"]["system_prompt_words"] == len(SYSTEM.split())
-    assert 0 < sync["cost_usd"]["low"] < sync["cost_usd"]["high"]
-    assert batch["cost_usd"]["low"] == pytest.approx(sync["cost_usd"]["low"] / 2, abs=0.01)
-    assert batch["cost_usd"]["high"] == pytest.approx(sync["cost_usd"]["high"] / 2, abs=0.01)
-    lo_in, hi_in = sync["tokens_per_call"]["input"]
-    assert lo_in < hi_in and sync["tokens_total"]["output"][0] == 1000 * sync["tokens_per_call"]["output"][0]
-    none = estimate_cost(10, 800, "claude-unknown-9", False)
-    assert none["cost_usd"] is None and "no documented price" in none["reason"]
-    zero = estimate_cost(0, 0, None, False)
-    assert zero["model"] == DEFAULT_MODEL and zero["cost_usd"] == {"low": 0.0, "high": 0.0}
-    assert zero["cost_per_call_usd"] is None
-    json.dumps(sync)                                    # printed as JSON by the estimate command
+    assert len(seen) == 13                     # nullable counts and quality scores, the only unions
 
 
 # ------------------------------------------------------------------ validation
@@ -423,3 +182,32 @@ def test_validation_reports_missing_and_malformed_components():
         out["findings"] = bad
         clean, missing, _ = validate_semantic(out, T)
         assert missing == ["findings"] and "findings" not in clean
+
+
+def test_word_analysis_keeps_only_verbatim_phrases_and_true_repeat_counts():
+    out = _good()
+    out["word_analysis"] = {
+        "phrases": [{"category": "payment_intent", "excerpt": "fees kitni hai", "speaker": "customer", "note": "asks"},
+                    {"category": "hesitation", "excerpt": "let me think about it", "speaker": "customer", "note": "x"},
+                    {"category": "commitment_language", "excerpt": "kal shaam 5 baje", "speaker": "unclear",
+                     "note": "a time"}],
+        "repeated": [{"excerpt": "the", "speaker": "caller", "times": 9, "what": "filler"},
+                     {"excerpt": "EMI is possible", "speaker": "caller", "times": 3, "what": "said once only"}]}
+    clean, missing, dropped = validate_semantic(out, T)
+    wa = clean["word_analysis"]
+    assert missing == [] and dropped == 1                               # the paraphrased hesitation phrase
+    assert [p["category"] for p in wa["phrases"]] == ["payment_intent", "commitment_language"]
+    assert wa["repeated"] == [{"excerpt": "the", "speaker": "caller", "times": 4, "what": "filler"}]
+    notes = json.dumps(clean["_validation"])
+    assert "times: 9 set to 4" in notes and "does not occur twice" in notes and "kitni" not in notes
+
+
+def test_overall_quality_is_blank_when_no_skill_was_scored():
+    out = _good()
+    out["quality"]["pricing_explanation"]["score"] = None
+    out["quality"]["overall"] = 5                                        # a placeholder for an empty call
+    clean = validate_semantic(out, T)[0]
+    assert clean["quality"]["overall"] is None
+    assert any("overall: set to null" in m for m in clean["_validation"]["value_fixes"])
+    out["quality"]["overall"] = None
+    assert validate_semantic(out, T)[0]["quality"]["overall"] is None   # allowed as given

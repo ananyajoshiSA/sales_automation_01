@@ -231,6 +231,15 @@ describe("ci.js renderer", () => {
     expect(call).toContain("Next step: Send the payment link today");
   });
 
+  it("shows Claude's word and phrase analysis as counts, never the words", () => {
+    const s = fixture();
+    const call = text(CI.html(s, { v: "call", call: "c-0001" }));
+    expect(call).toContain("Words and phrases Hesitation 2 Wants to pay 1 Uncertainty 1 1 repeated phrase");
+    expect(call).toContain("Readiness to pay 78/100 Hot · Claude's reading");
+    expect(text(CI.html(s, { v: "overview" }))).toContain("Words and phrases From Claude's reading of each call");
+    expect(text(CI.html(s, { v: "team", team: "Team Alpha +Ravi" }))).toContain("Hesitation 2");
+  });
+
   it("shows excerpts only when the snapshot allows them", () => {
     const s = fixture();
     s.calls[0].findings[0].excerpt = "haan main Friday tak pay kar dunga";
@@ -280,7 +289,7 @@ describe("ci.js renderer", () => {
     // The per-call list holds the calls the "Flagged calls" tile counts (short calls are counted on their own).
     expect(t).toContain("Flagged calls 6 real calls that may not be real conversations");
     expect(t).toContain("Showing 4 of 6 flagged calls (the list is capped)");
-    const short = fixture();                                     // a short call the keyword layer also doubts
+    const short = fixture();                                     // a short call Claude's reading also doubts
     short.calls[4].findings = [{ category: "possible_not_real", confidence: "medium", reasoning: "Only 4 words.", action: "Listen." }];
     const h = CI.html(short, { v: "integrity" });
     const list = h.split("<h2>Flagged calls</h2>")[1].split("</section>")[0];

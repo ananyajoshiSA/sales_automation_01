@@ -36,7 +36,7 @@ ORG_ROW = "(organisation)"
 # What each compared rate is out of, stored next to it in team_conversation_aggregates.
 DENOMINATORS = {"connectPct": "outbound dials", "realRatePct": "connected calls", "avgRealMin": "real calls (3+ min)",
                 "realPerWorkingDay": "working days (20+ dials)", "convPerRealPct": "leads with a real call (3+ min)",
-                "convPerContactedPct": "leads contacted", "qualityAvg": "calls with a model reading",
+                "convPerContactedPct": "leads contacted", "qualityAvg": "calls Claude has read",
                 "coveragePct": "calls expected to have a transcript", "integrityPct": "connected calls"}
 
 
@@ -45,9 +45,11 @@ def _ist(t: datetime | None) -> str | None:
 
 
 def layer_results(reg: Registry, day_from: str, day_to: str) -> dict[str, dict[str, dict]]:
-    """call_id -> {layer: output} for every valid result at the current version of its layer."""
+    """call_id -> {layer: output} for every valid result at the current version of each required layer (Claude's
+    reading)."""
     out: dict[str, dict[str, dict]] = defaultdict(dict)
-    for layer, version in LAYER_VERSIONS.items():
+    for layer in S.REQUIRED_LAYERS:
+        version = LAYER_VERSIONS[layer]
         for r in reg.q("SELECT x.call_id, x.output FROM conversation_analysis_results x JOIN transcript_coverage_registry r "
                        "USING (call_id) WHERE r.ist_day >= ? AND r.ist_day <= ? AND x.layer = ? AND x.version = ? AND x.valid = 1",
                        (day_from, day_to, layer, version)):
@@ -57,7 +59,7 @@ def layer_results(reg: Registry, day_from: str, day_to: str) -> dict[str, dict[s
 
 def dataset(reg: Registry, day_from: str, day_to: str, users: list[dict], leads: dict, enrolments: list[dict],
             payments: list[dict], zips: list[dict], now: datetime) -> dict:
-    """The analytics input (see the build contract): registry rows for the period with kw/sem/zip/t on each."""
+    """The analytics input (see the build contract): registry rows for the period with sem/zip/t on each."""
     calls = reg.q("SELECT * FROM transcript_coverage_registry WHERE ist_day >= ? AND ist_day <= ? ORDER BY start_utc",
                   (day_from, day_to))
     res = layer_results(reg, day_from, day_to)
@@ -66,7 +68,7 @@ def dataset(reg: Registry, day_from: str, day_to: str, users: list[dict], leads:
         c["caller_name"] = safe_name(c.get("caller_name"))     # rows inventoried before names were checked
         c["missing_layers"] = json.loads(c["missing_layers"] or "[]")
         got = res.get(c["call_id"], {})
-        c["kw"], c["sem"], c["zip"] = got.get(S.KEYWORD), got.get(S.SEMANTIC), None
+        c["sem"], c["zip"] = got.get(S.SEMANTIC), None
         c["ans"], c["duration"] = bool(c["answered"]), c["duration_s"] or 0      # what analytics.zip_calls reads
     day_end = ist_day_start(day_to) + timedelta(days=1)
     zip_unmatched, zip_other_day = attach(zips, calls, day_end) if zips else (0, 0)
@@ -78,8 +80,8 @@ def dataset(reg: Registry, day_from: str, day_to: str, users: list[dict], leads:
             "zip_notes": {"total": len(zips), "unmatched": zip_unmatched, "other_day": zip_other_day}}
 
 
-# One reading per call everywhere (team.py's): the semantic layer when it ran, else the keyword layer; an
-# "unclear" readiness is None; unknown objection categories are "other".
+# One reading per call everywhere (team.py's): Claude's reading; an "unclear" readiness is None; unknown objection
+# categories are "other".
 def readiness(c: dict) -> tuple[int | float | None, str | None, str | None]:
     from analytics.convintel.team import readiness as read
     return read(c)
@@ -105,10 +107,12 @@ def team_of(c: dict) -> str:
 def call_row(c: dict, excerpts: bool) -> dict:
     from analytics.convintel.zipcompare import zip_agrees
     score, band, engine = readiness(c)
-    layer = c.get("sem") or c.get("kw") or {}
+    layer = c.get("sem") or {}
     findings = [{"category": f.get("category"), "confidence": f.get("confidence"), "reasoning": f.get("reasoning"),
                  "action": f.get("recommended_action"), **({"excerpt": f.get("excerpt")} if excerpts else {})}
                 for f in layer.get("findings") or []]
+    wa = layer.get("word_analysis") or {}
+    phrases = [x for x in wa.get("phrases") or [] if isinstance(x, dict)]
     return {"callId": c["call_id"], "leadId": c.get("lead_id"), "callerId": c.get("caller_id"), "caller": c.get("caller_name"),
             "team": team_of(c), "kind": c.get("caller_kind"), "day": c.get("ist_day"), "startIst": _ist(c.get("t")),
             "direction": c.get("direction"), "durationS": c.get("duration_s"), "class": c.get("call_class"),
@@ -118,13 +122,23 @@ def call_row(c: dict, excerpts: bool) -> dict:
             "signals": signals_of(c), "integrityFlags": [f["flag"] for f in c.get("flags") or []],
             "integrityReasons": [f["reason"] for f in c.get("flags") or []],
             "zipIntent": (c.get("zip") or {}).get("intent"), "zipAgrees": zip_agrees(c),
-            "summary": (c.get("sem") or {}).get("summary"), "findings": findings}
+            "summary": (c.get("sem") or {}).get("summary"), "findings": findings,
+            "words": dict(Counter(x.get("category") for x in phrases if x.get("category"))),
+            "repeats": len(wa.get("repeated") or []),
+            **({"phrases": [{k: x.get(k) for k in ("category", "speaker", "excerpt", "note")} for x in phrases]}
+               if excerpts else {})}
+
+
+def word_categories(c: dict) -> set[str]:
+    """The kinds of phrase Claude marked in the call's word analysis, once each."""
+    wa = (c.get("sem") or {}).get("word_analysis") or {}
+    return {x.get("category") for x in wa.get("phrases") or [] if isinstance(x, dict)} & set(S.WORD_CATEGORIES)
 
 
 def _call_priority(c: dict) -> tuple:
     tiers = {f["tier"] for f in c.get("flags") or []}
     score = readiness(c)[0]
-    return (0 if tiers & {"suspect", "pattern"} else 1, 0 if c.get("kw") or c.get("sem") else 1,
+    return (0 if tiers & {"suspect", "pattern"} else 1, 0 if c.get("sem") else 1,
             -(score or -1), -(c["t"].timestamp() if c.get("t") else 0))
 
 
@@ -205,22 +219,25 @@ def snapshot(ds: dict, reg: Registry, key: str, label: str, prior: dict | None =
                 "hot" if j["readiness"] >= 75 else "warm" if j["readiness"] >= 50 else "cool" if j["readiness"] >= 25 else "cold")
     leads = sorted(journeys.values(), key=lambda j: (bool(j.get("enrolled")), -(j.get("readiness") or -1),
                                                      -len(j.get("flags") or [])))
-    eligible = [c for c in calls if c.get("answered") or c.get("flags") or c.get("kw") or c.get("sem")]
+    eligible = [c for c in calls if c.get("answered") or c.get("flags") or c.get("sem")]
     eligible.sort(key=_call_priority)
     opps = revenue.opportunities(calls, ds["leads"], ds["enrolments"], now,
                                  calls_until=data_end)
     objections = {"org": Counter(), "byTeam": defaultdict(Counter)}
+    words = {"org": Counter(), "byTeam": defaultdict(Counter)}
     for c in calls:
         for o in objections_of(c):
             objections["org"][o] += 1
             objections["byTeam"][team_of(c)][o] += 1
+        for w in word_categories(c):
+            words["org"][w] += 1
+            words["byTeam"][team_of(c)][w] += 1
     acct_rows = responsibility.findings(accountability_rows, calls, ds["enrolments"], ds["users"], audit=audit,
                                         now=now) if accountability_rows else []
     acct = responsibility.summary(acct_rows) if accountability_rows else {
         "rows": 0, "byStatus": {}, "byPerson": [], "byAction": {}, "unverified": 0,
         "notes": ["No lead-accountability run was given for this period. Run python -m analytics.accountability for "
                   "the same dates and pass its folder with --accountability."]}
-    blocked = reg.get_meta("blocked_layers", {})
     last_run = reg.q("SELECT MAX(finished_utc) AS t FROM processing_runs WHERE status = 'done'")[0]["t"]
     teams = views["teams"]
     team_coaching = coaching.team_coaching(calls, per_caller)
@@ -242,18 +259,20 @@ def snapshot(ds: dict, reg: Registry, key: str, label: str, prior: dict | None =
         "definitions": {
             "realCallSecs": REAL_CALL_SECS, "workingDayDials": WORKING_DAY_DIALS,
             "analysisVersion": S.ANALYSIS_VERSION, "requiredLayers": list(S.REQUIRED_LAYERS),
-            "semanticEngine": (f"not running: {blocked[S.SEMANTIC]}" if S.SEMANTIC in blocked else
-                               "Claude (model layer)" if any(c.get("sem") for c in calls) else
-                               "not run yet for this period: every reading shown is keyword-based"),
+            "semanticEngine": ("Claude, reading each transcript in a Claude Code session (no API)"
+                               if any(c.get("sem") for c in calls) else
+                               "Claude has not read this period's transcripts yet"),
             "notes": ["A real call here is answered and at least 3 minutes. The main dashboard's 2-minute 'real "
                       "conversation' is unchanged.",
-                      "A call counts as analysed only when both the keyword layer and the model layer have a validated "
-                      "result.", *views.get("notes", []), *notes]},
+                      "Transcripts are analysed by Claude only: Claude reads each whole transcript, and every excerpt "
+                      "it cites is checked word for word against the transcript before it is kept. A call counts "
+                      "as analysed once that reading is validated.", *views.get("notes", []), *notes]},
         "coverage": coverage_section(reg, calls, d0, d1, now),
         "org": views["org"], "teams": teams, "callers": views["callers"],
         "leads": leads[:CAPS["leads"]], "leadsTotal": len(leads),
         "calls": [call_row(c, excerpts) for c in eligible[:CAPS["calls"]]], "callsTotal": len(eligible),
         "objections": {"org": dict(objections["org"]), "byTeam": {t: dict(v) for t, v in objections["byTeam"].items()}},
+        "words": {"org": dict(words["org"]), "byTeam": {t: dict(v) for t, v in words["byTeam"].items()}},
         "integrity": integ,
         "opportunities": opps[:CAPS["opportunities"]], "opportunitiesTotal": len(opps),
         "opportunitiesByKind": dict(Counter(o["kind"] for o in opps)),

@@ -31,38 +31,24 @@ def at(hours_ago: float) -> str:
     return (NOW - timedelta(hours=hours_ago)).strftime("%Y-%m-%d %H:%M:%S")
 
 
-def call(cid, lead, start, status="Answered", dur=240, direction="outbound", user="u1", kw=None, sem=None, zip_intent=None):
+def call(cid, lead, start, status="Answered", dur=240, direction="outbound", user="u1", sem=None, zip_intent=None):
     name, kind, team = WHO[user]
     t = utc(start)
     return {"call_id": cid, "lead_id": lead, "number": NUMBER, "lead_number": NUMBER, "direction": direction,
             "call_status": status, "answered": int(status == "Answered"), "start_utc": start, "ist_day": ist_day(t),
             "duration_s": dur, "call_class": classify(status, dur)[0], "caller_id": user, "caller_name": name,
-            "caller_kind": kind, "team": team, "kw": kw, "sem": sem,
+            "caller_kind": kind, "team": team, "sem": sem,
             "zip": {"intent": zip_intent} if zip_intent else None, "t": t}
 
 
-def kw(score=30, band="cool", buying=(), objections=(), payment_step=False, dated=False, findings=(), courses=()):
-    return {"language": {"primary": "hinglish", "devanagari_share": 0.0, "hinglish_markers": 3, "code_switching": True},
-            "word_level": {"words": 400, "wpm": 120, "categories": {}, "repeated_phrases": []},
-            "sentence_level": {"sentences": 30, "questions": 5, "labelled_total": 1,
-                               "labelled": [{"index": 0, "offset": 0, "excerpt": SECRET, "labels": ["buying"]}]},
-            "signals": {"buying": list(buying), "objections": list(objections), "negative": [],
-                        "payment_step": payment_step, "dated_next_step": dated, "callback_requested": False,
-                        "amounts": [25000], "course_mentions": list(courses), "readiness_score": score,
-                        "readiness_band": band, "markers": []},
-            "integrity": {"words": 400, "wpm": 120, "loop_share": 0.0, "machine_text": "", "flags": []},
-            "findings": [{"category": f, "excerpt": SECRET, "offset": 0, "confidence": "medium", "reasoning": "r",
-                          "recommended_action": "a"} for f in findings]}
-
-
-def sem(score=50, band="warm", objections=(), signals=(), payment_step="none", dated=False, findings=()):
+def sem(score=50, band="warm", objections=(), signals=(), payment_step="none", dated=False, findings=(), course=""):
     return {"intent": {"readiness_score": score, "readiness_band": band, "evidence": [SECRET]},
             "objections": [{"category": c, "excerpt": SECRET, "handled": h, "caller_response_excerpt": "", "note": ""}
                            for c, h in objections],
             "buying_signals": [{"type": s, "excerpt": SECRET, "strength": "strong", "caller_acted_on_it": "yes"}
                                for s in signals],
             "outcome": {"next_step_agreed": dated, "next_step": SECRET, "dated": dated, "payment_step": payment_step,
-                        "course_discussed": ""},
+                        "course_discussed": course},
             "findings": [{"category": f, "excerpt": SECRET, "offset": 0, "confidence": "high", "reasoning": "r",
                           "recommended_action": "a"} for f in findings],
             "summary": SECRET}
@@ -167,16 +153,19 @@ def test_measurable_with_a_synthetic_amount_field():
 
 # ------------------------------------------------------------------ opportunities
 
-def test_payment_ready_semantic_and_keyword_and_dedupe():
+def test_payment_ready_confidence_and_dedupe():
     hot = sem(82, "hot", signals=("fee_question", "payment_intent"), payment_step="amount_and_date_agreed",
               findings=("payment_ready",))
     got = opps([call("a1", "L1", at(50), sem=hot), call("a2", "L1", at(30), sem=hot),
-                call("b1", "L2", at(30), kw=kw(80, "hot", buying=("fee_question",), findings=("payment_ready",))),
-                call("c1", "L3", at(30), kw=kw(40, "cool"))])
+                call("b1", "L2", at(30), sem=sem(80, "hot", signals=("fee_question",))),     # hot, nothing agreed
+                call("d1", "L4", at(30), sem=sem(45, "cool", findings=("payment_ready",))),  # agreed, not hot
+                call("c1", "L3", at(30), sem=sem(40, "cool"))])
     r = got[("payment_ready_unconverted", "L1")]
     assert (r["callId"], r["callerId"], r["caller"], r["team"], r["confidence"]) == ("a2", "u1", "Asha Rao", "Team Alpha +Neel", "high")
     assert r["day"] == ist_day(utc(at(30))) and "readiness 82/100" in r["evidence"] and "fee question" in r["evidence"]
-    assert got[("payment_ready_unconverted", "L2")]["confidence"] == "medium"   # keyword: never high
+    assert r["evidence"].startswith("Claude's reading of the ")
+    assert got[("payment_ready_unconverted", "L2")]["confidence"] == "medium"   # one piece of evidence: never high
+    assert got[("payment_ready_unconverted", "L4")]["confidence"] == "medium"
     assert not any(lead == "L3" for _, lead in got)
 
 
@@ -204,25 +193,30 @@ def test_missed_callback_judged_only_after_2_hours():
 def test_unresolved_objection_on_the_latest_real_call():
     got = opps([call("a", "L10", at(30), sem=sem(40, "cool", objections=(("time", "yes"), ("price", "no")))),
                 call("b", "L11", at(30), sem=sem(40, "cool", objections=(("price", "yes"),))),
-                call("c", "L12", at(30), kw=kw(40, "cool", objections=("trust",))),
-                call("d", "L13", at(30), kw=kw(40, "cool", objections=("trust",), dated=True))])
+                call("c", "L12", at(30), sem=sem(40, "cool", objections=(("trust", "partly"),))),
+                call("d", "L13", at(30), sem=sem(40, "cool", objections=(("trust", "unclear"),)))])
     r = got[("unresolved_objection", "L10")]
     assert "price (answered: no)" in r["evidence"] and "time" not in r["evidence"].split("raised")[1]
     assert r["nextAction"] == R.OBJECTION_ACTIONS["price"] and r["confidence"] == "high"
     assert ("unresolved_objection", "L11") not in got and ("unresolved_objection", "L13") not in got
-    assert got[("unresolved_objection", "L12")]["confidence"] == "low"
+    r = got[("unresolved_objection", "L12")]                       # partly answered: worth a call, less sure
+    assert r["confidence"] == "medium" and "trust (answered: partly)" in r["evidence"]
 
 
 def test_emi_friction_and_course_unavailable():
-    got = opps([call("a", "L14", at(30), kw=kw(45, "cool", objections=("emi_or_finance",), findings=("payment_friction",))),
-                call("b", "L15", at(50), kw=kw(45, "cool", objections=("emi_or_finance",))),
-                call("c", "L15", at(30), kw=kw(55, "warm", payment_step=True)),     # payment step after the friction
-                call("d", "L16", at(30), kw=kw(45, "cool", findings=("course_unavailable",), courses=("diploma in space law",)))],
+    got = opps([call("a", "L14", at(30), sem=sem(45, "cool", objections=(("emi_or_finance", "no"),),
+                                                  findings=("payment_friction",))),
+                call("e", "L17", at(30), sem=sem(45, "cool", findings=("payment_friction",))),
+                call("f", "L18", at(30), sem=sem(45, "cool", objections=(("emi_or_finance", "yes"),))),  # answered
+                call("b", "L15", at(50), sem=sem(45, "cool", objections=(("emi_or_finance", "partly"),))),
+                call("c", "L15", at(30), sem=sem(55, "warm", payment_step="link_sent")),  # payment step after the friction
+                call("d", "L16", at(30), sem=sem(45, "cool", findings=("course_unavailable",), course="diploma in space law"))],
                leads={"L16": {"course": "Diploma in Contract Drafting"}})
-    assert got[("emi_friction", "L14")]["confidence"] == "medium"
-    assert ("emi_friction", "L15") not in got
+    assert got[("emi_friction", "L14")]["confidence"] == "high"      # the objection and the finding agree
+    assert got[("emi_friction", "L17")]["confidence"] == "medium"
+    assert ("emi_friction", "L15") not in got and ("emi_friction", "L18") not in got
     r = got[("course_unavailable", "L16")]
-    assert "course on the lead record: Diploma in Contract Drafting" in r["evidence"] and r["confidence"] == "low"
+    assert "course on the lead record: Diploma in Contract Drafting" in r["evidence"] and r["confidence"] == "medium"
     assert "space law" not in r["evidence"]          # transcript words never reach the evidence
 
 
@@ -237,13 +231,18 @@ def test_weak_follow_up_after_48_hours_only():
 
 
 def test_high_intent_marked_low_by_stage_or_zipteams():
-    got = opps([call("a", "L21", at(30), kw=kw(80, "hot")),
+    got = opps([call("a", "L21", at(30), sem=sem(80, "hot")),
                 call("b", "L22", at(30), sem=sem(75, "hot"), zip_intent="LOW"),
-                call("c", "L23", at(30), sem=sem(75, "hot"), zip_intent="HIGH")],
-               leads={"L21": {"stage": "Not Interested"}, "L23": {"stage": "Call Back Later"}})
+                call("c", "L23", at(30), sem=sem(75, "hot"), zip_intent="HIGH"),
+                call("d", "L24", at(30), sem=sem(85, "hot"), zip_intent="NEUTRAL")],
+               leads={"L21": {"stage": "Not Interested"}, "L23": {"stage": "Call Back Later"},
+                      "L24": {"stage": "Not Interested"}})
     r = got[("high_intent_marked_low", "L21")]
-    assert "stage is Not Interested" in r["evidence"] and r["confidence"] == "low"
-    assert "Zipteams rated the call LOW" in got[("high_intent_marked_low", "L22")]["evidence"]
+    assert "stage is Not Interested" in r["evidence"] and r["confidence"] == "medium"
+    r = got[("high_intent_marked_low", "L22")]
+    assert "Zipteams rated the call LOW" in r["evidence"] and r["confidence"] == "medium"
+    r = got[("high_intent_marked_low", "L24")]                       # the stage and Zipteams both say low
+    assert "stage is Not Interested and Zipteams rated the call NEUTRAL" in r["evidence"] and r["confidence"] == "high"
     assert ("high_intent_marked_low", "L23") not in got
 
 
@@ -275,24 +274,27 @@ def test_enrolled_leads_skipped_ordering_and_no_leaks():
     calls = [call("a", "L30", at(30), sem=hot), call("b", "L31", at(30), sem=hot),
              call("c", "L32", at(30), sem=hot),
              *[call(f"d{i}", "L33", at(20 - i), status="NotAnswered", dur=0) for i in range(6)],
-             call("e", "L34", at(30), kw=kw(75, "hot", findings=("payment_ready",)))]
+             call("e", "L34", at(30), sem=sem(95, "hot", signals=("fee_question",)))]   # hotter, nothing agreed
     rows = R.opportunities(calls, {"L31": {"stage": "Course Enrolled"}}, [{"lead_id": "L30", "at_utc": at(1)}], NOW)
     assert {r["leadId"] for r in rows} == {"L32", "L33", "L34"}
-    assert [(r["kind"], r["leadId"]) for r in rows] == [
-        ("payment_ready_unconverted", "L32"), ("payment_ready_unconverted", "L34"),
-        ("repeated_dials_no_conversation", "L33")]
+    assert [(r["kind"], r["leadId"], r["confidence"]) for r in rows] == [
+        ("payment_ready_unconverted", "L32", "high"), ("payment_ready_unconverted", "L34", "medium"),
+        ("repeated_dials_no_conversation", "L33", "high")]
     text = json.dumps(rows, ensure_ascii=False)
     assert SECRET not in text and NUMBER not in text and "kitne" not in text
-    assert all(r["confidence"] != "high" for r in rows if r["leadId"] == "L34")
 
 
 def test_calls_that_may_not_be_real_conversations_raise_no_opportunity():
-    ivr = kw(85, "hot", findings=("payment_ready",))
-    ivr["integrity"]["flags"] = ["machine"]
-    not_real = {**sem(85, "hot", findings=("payment_ready",)), "integrity": {"real_conversation": "no", "flags": ["machine"]}}
+    no_sign = {**sem(85, "hot", findings=("payment_ready",)), "integrity": {"real_conversation": "no", "flags": []}}
+    ivr = {**sem(85, "hot", findings=("payment_ready",)), "integrity": {"real_conversation": "no", "flags": ["machine"]}}
     doubtful = {**sem(85, "hot", findings=("payment_ready",)), "integrity": {"real_conversation": "doubtful", "flags": []}}
-    got = opps([call("a", "L37", at(30), kw=ivr), call("b", "L38", at(30), sem=not_real), call("c", "L39", at(30), sem=doubtful)])
+    got = opps([call("a", "L37", at(30), sem=no_sign), call("b", "L38", at(30), sem=ivr), call("c", "L39", at(30), sem=doubtful)])
     assert set(got) == {("payment_ready_unconverted", "L39")}
+    # a doubtful verdict that names voicemail, empty text or a loop is no conversation either; a thin call still counts
+    for flag, counted in (("machine", False), ("no_content", False), ("loop", False), ("thin", True)):
+        voided = {**sem(85, "hot", findings=("payment_ready",)),
+                  "integrity": {"real_conversation": "doubtful", "flags": [flag]}}
+        assert bool(opps([call("d", "L40", at(30), sem=voided)])) is counted, flag
 
 
 def test_opportunities_handle_calls_without_analysis_or_time():
@@ -473,10 +475,10 @@ def test_an_automated_call_is_not_a_callback():
 
 
 def test_unclear_readiness_is_not_measured_never_a_low_score():
-    unclear = kw(0, "unclear")
-    got = opps([call("a", "B11", at(50), kw=kw(80, "hot")), call("b", "B11", at(30), kw=unclear),
-                call("c", "B12", at(50), kw=kw(80, "hot")), call("d", "B12", at(30), kw=unclear),
-                call("e", "B13", at(60), kw=unclear)],
+    unclear = sem(0, "unclear")
+    got = opps([call("a", "B11", at(50), sem=sem(80, "hot")), call("b", "B11", at(30), sem=unclear),
+                call("c", "B12", at(50), sem=sem(80, "hot")), call("d", "B12", at(30), sem=unclear),
+                call("e", "B13", at(60), sem=unclear)],
                leads={"B12": {"stage": "Not Interested"}, "B13": {"stage": "Not Interested"}})
     assert got[("payment_ready_unconverted", "B11")]["callId"] == "a"     # the thin later call does not cool it
     assert got[("high_intent_marked_low", "B12")]["callId"] == "c"

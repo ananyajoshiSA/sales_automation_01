@@ -16,7 +16,7 @@ ROOT = Path(__file__).resolve().parent.parent
 FIXTURE = ROOT / "tests" / "fixtures" / "convintel_snapshot.json"
 MIGRATION = ROOT / "dashboard" / "migrations" / "0004_conversation_intelligence.sql"
 CONTRACT_KEYS = {"version", "range", "generatedAt", "dataAsOf", "privacy", "definitions", "coverage", "org", "teams",
-                 "callers", "leads", "leadsTotal", "calls", "callsTotal", "objections", "integrity", "opportunities",
+                 "callers", "leads", "leadsTotal", "calls", "callsTotal", "objections", "words", "integrity", "opportunities",
                  "opportunitiesTotal", "opportunitiesByKind", "zip", "coachingTeams", "accountability", "revenue",
                  "reconciliation", "filters"}
 

@@ -18,12 +18,11 @@
  "definitions": {
   "realCallSecs": 180,
   "workingDayDials": 20,
-  "analysisVersion": "ci-1.0[kw-1.0+sem-1.0]",
+  "analysisVersion": "ci-1.2[sem-1.1]",
   "requiredLayers": [
-   "keyword",
    "semantic"
   ],
-  "semanticEngine": "claude:claude-opus-5-5",
+  "semanticEngine": "Claude, reading each transcript in a Claude Code session (no API)",
   "notes": [
    "Unique-lead counts do not add up across teams: a lead called by two teams counts in each; the organisation counts it once.",
    "Each enrolment is credited once per view: to the lead owner's team at enrolment, and to the team of the last person with an answered call before it."
@@ -276,7 +275,7 @@
     "startIst": "2026-10-06 12:00",
     "class": "REAL_CALL",
     "status": "PENDING_ANALYSIS",
-    "reason": "Transcript found; waiting for the keyword layer",
+    "reason": "Transcript found; waiting for the Claude reading",
     "attempts": 0,
     "nextRetryIst": "2026-10-09 12:05"
    },
@@ -1078,10 +1077,10 @@
    "realCalls": 2,
    "lastCallIst": "2026-10-05 18:40",
    "readiness": 88,
-   "readinessSource": "keyword",
+   "readinessSource": "semantic",
    "readinessBand": "hot",
    "readinessTrend": "rising",
-   "trendSource": "keyword",
+   "trendSource": "semantic",
    "repeatedObjections": [],
    "missedCommitments": 0,
    "flags": [],
@@ -1103,10 +1102,10 @@
    "realCalls": 1,
    "lastCallIst": "2026-10-08 10:15",
    "readiness": 30,
-   "readinessSource": "keyword",
+   "readinessSource": "semantic",
    "readinessBand": "cool",
    "readinessTrend": "single call",
-   "trendSource": "keyword",
+   "trendSource": "semantic",
    "repeatedObjections": [],
    "missedCommitments": 0,
    "flags": [],
@@ -1157,7 +1156,7 @@
    "durationS": 612,
    "class": "REAL_CALL",
    "status": "ANALYZED",
-   "statusReason": "both layers done",
+   "statusReason": "every required layer validated",
    "transcriptState": "FOUND",
    "engine": "semantic",
    "readiness": 78,
@@ -1188,7 +1187,13 @@
      "reasoning": "The lead asked when the batch starts; the caller moved on to fees.",
      "action": "Answer start-date questions before discussing the fee."
     }
-   ]
+   ],
+   "words": {
+    "hesitation": 2,
+    "payment_intent": 1,
+    "uncertainty": 1
+   },
+   "repeats": 1
   },
   {
    "callId": "c-0002",
@@ -1203,7 +1208,7 @@
    "durationS": 195,
    "class": "REAL_CALL",
    "status": "ANALYZED",
-   "statusReason": "both layers done",
+   "statusReason": "every required layer validated",
    "transcriptState": "FOUND",
    "engine": "semantic",
    "readiness": 55,
@@ -1231,7 +1236,9 @@
      "reasoning": "The price concern got no reply about value or EMI.",
      "action": "Answer a price concern with the EMI option and what the course leads to."
     }
-   ]
+   ],
+   "words": {},
+   "repeats": 0
   },
   {
    "callId": "c-0003",
@@ -1246,9 +1253,9 @@
    "durationS": 420,
    "class": "REAL_CALL",
    "status": "ANALYSIS_INCOMPLETE",
-   "statusReason": "keyword layer done; model layer not run yet",
+   "statusReason": "Claude reading handed out in round r20261009-120000, waiting for it",
    "transcriptState": "FOUND",
-   "engine": "keyword",
+   "engine": "semantic",
    "readiness": 45,
    "readinessBand": "warm",
    "quality": null,
@@ -1274,7 +1281,9 @@
      "reasoning": "Keyword match: the caller said they would call back tomorrow.",
      "action": "Log the callback time in LeadSquared and call at that time."
     }
-   ]
+   ],
+   "words": {},
+   "repeats": 0
   },
   {
    "callId": "c-0004",
@@ -1289,7 +1298,7 @@
    "durationS": 186,
    "class": "REAL_CALL",
    "status": "ANALYZED",
-   "statusReason": "both layers done",
+   "statusReason": "every required layer validated",
    "transcriptState": "FOUND",
    "engine": "semantic",
    "readiness": 30,
@@ -1315,7 +1324,9 @@
      "reasoning": "Most of the transcript is a recorded message.",
      "action": "Listen to the recording before counting this as a real conversation."
     }
-   ]
+   ],
+   "words": {},
+   "repeats": 0
   },
   {
    "callId": "c-0005",
@@ -1330,9 +1341,9 @@
    "durationS": 95,
    "class": "SHORT_CALL",
    "status": "ANALYSIS_INCOMPLETE",
-   "statusReason": "keyword layer done; model layer not run yet",
+   "statusReason": "Claude reading handed out in round r20261009-120000, waiting for it",
    "transcriptState": "FOUND",
-   "engine": "keyword",
+   "engine": "semantic",
    "readiness": 20,
    "readinessBand": "cold",
    "quality": null,
@@ -1347,7 +1358,9 @@
    "zipIntent": null,
    "zipAgrees": null,
    "summary": null,
-   "findings": []
+   "findings": [],
+   "words": {},
+   "repeats": 0
   },
   {
    "callId": "c-0006",
@@ -1362,9 +1375,9 @@
    "durationS": 540,
    "class": "REAL_CALL",
    "status": "ANALYSIS_INCOMPLETE",
-   "statusReason": "keyword layer done; model layer not run yet",
+   "statusReason": "Claude reading handed out in round r20261009-120000, waiting for it",
    "transcriptState": "FOUND",
-   "engine": "keyword",
+   "engine": "semantic",
    "readiness": 70,
    "readinessBand": "hot",
    "quality": null,
@@ -1387,7 +1400,9 @@
      "reasoning": "Keyword match: the lead asked how to pay and about EMI.",
      "action": "Send the payment link and confirm the EMI plan on the same call."
     }
-   ]
+   ],
+   "words": {},
+   "repeats": 0
   },
   {
    "callId": "c-0007",
@@ -1419,7 +1434,9 @@
    "zipIntent": null,
    "zipAgrees": null,
    "summary": null,
-   "findings": []
+   "findings": [],
+   "words": {},
+   "repeats": 0
   },
   {
    "callId": "c-0008",
@@ -1434,7 +1451,7 @@
    "durationS": 240,
    "class": "REAL_CALL",
    "status": "PENDING_ANALYSIS",
-   "statusReason": "transcript found; waiting for the keyword layer",
+   "statusReason": "transcript found, waiting for the Claude reading",
    "transcriptState": "FOUND",
    "engine": null,
    "readiness": null,
@@ -1447,7 +1464,9 @@
    "zipIntent": null,
    "zipAgrees": null,
    "summary": null,
-   "findings": []
+   "findings": [],
+   "words": {},
+   "repeats": 0
   }
  ],
  "callsTotal": 340,
@@ -1470,6 +1489,20 @@
     "course_fit": 1
    },
    "(shared logins)": {}
+  }
+ },
+ "words": {
+  "org": {
+   "hesitation": 3,
+   "payment_intent": 2,
+   "uncertainty": 2,
+   "ineffective_wording": 1
+  },
+  "byTeam": {
+   "Team Alpha +Ravi": {
+    "hesitation": 2,
+    "payment_intent": 1
+   }
   }
  },
  "integrity": {
@@ -1640,7 +1673,7 @@
    "caller": "Chitra Nair",
    "team": "Team Beta",
    "day": "2026-10-08",
-   "evidence": "EMI asked about; no EMI option given (keyword match).",
+   "evidence": "EMI asked about; no EMI option given.",
    "nextAction": "Send the EMI breakdown and call in two days.",
    "confidence": "medium"
   }
@@ -1665,8 +1698,7 @@
   "analysed": 9,
   "agreePct": 60.0,
   "byEngine": {
-   "semantic": 3,
-   "keyword": 2
+   "semantic": 5
   },
   "byTeam": [
    {

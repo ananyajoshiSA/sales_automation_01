@@ -1,9 +1,8 @@
 """Each lead's journey across its calls: readiness and its trend, repeated objections, follow-ups promised but
 not made, plain-language flags and one next step.
 
-Readiness is the latest score from the model's reading (semantic layer) and falls back to the keyword layer's
-score; a score whose band is "unclear" (too little talk to judge) is never used. The trend uses one layer only,
-so a model score is never compared with a keyword score. A follow-up counts as missed only once 48 hours have
+Readiness is the latest score from Claude's reading of the lead's calls; a score whose band is "unclear" (too
+little talk to judge) is never used. A follow-up counts as missed only once 48 hours have
 passed with no later answered call on the lead (or enrolment). Both that and "no call in 48 h" are judged only up
 to where the calls run (the latest call given, or ``now`` if earlier): a report on a past period can't see the
 calls made after it, so a promise made in its last 48 hours is left unjudged rather than called missed.
@@ -44,21 +43,15 @@ def _score(layer: dict | None, part: str) -> tuple[int, str | None] | None:
 
 
 def objections(c: dict) -> set[str]:
-    """Objection categories on one call: the model's reading when there is one, else the keyword layer's."""
-    if c.get("sem"):
-        cats = {o.get("category") for o in c["sem"].get("objections") or []}
-    else:
-        cats = set(((c.get("kw") or {}).get("signals") or {}).get("objections") or [])
-    return cats & _CATEGORIES
+    """Objection categories on one call, from Claude's reading."""
+    return {o.get("category") for o in (c.get("sem") or {}).get("objections") or []} & _CATEGORIES
 
 
 def commitment(c: dict) -> bool:
-    """Did the call leave a follow-up for the caller: a callback asked for, or a dated next step?"""
-    if sem := c.get("sem"):
-        return any(x.get("by") == "caller" for x in sem.get("commitments") or []) \
-            or any(f.get("category") == "callback_promised" for f in sem.get("findings") or [])
-    sig = (c.get("kw") or {}).get("signals") or {}
-    return bool(sig.get("callback_requested") or sig.get("dated_next_step"))
+    """Did the call leave a follow-up for the caller: a commitment by the caller or a promised callback?"""
+    sem = c.get("sem") or {}
+    return any(x.get("by") == "caller" for x in sem.get("commitments") or []) \
+        or any(f.get("category") == "callback_promised" for f in sem.get("findings") or [])
 
 
 def trend(scores: list[int]) -> str:
@@ -97,17 +90,14 @@ def _next_action(j: dict, missed_at: list[datetime], quiet: bool, obj_n: Counter
 
 def _journey(lead_id: str, cs: list[tuple[datetime, dict]], n: tuple[int, int], info: dict,
              enrolled_at: datetime | None, enrolled: bool, until: datetime) -> dict:
-    sem_pts, kw_pts, obj_n = [], [], Counter()
-    analysed = [(t, c) for t, c in cs if c.get("sem") or c.get("kw")]
+    pts, obj_n = [], Counter()
+    analysed = [(t, c) for t, c in cs if c.get("sem")]
     for _, c in analysed:
         if (s := _score(c.get("sem"), "intent")) is not None:
-            sem_pts.append(s)
-        if (k := _score(c.get("kw"), "signals")) is not None:
-            kw_pts.append(k)
+            pts.append(s)
         obj_n.update(objections(c))
-    readiness, band = sem_pts[-1] if sem_pts else kw_pts[-1] if kw_pts else (None, None)
-    source = S.SEMANTIC if sem_pts else S.KEYWORD if kw_pts else None
-    pts, trend_src = (sem_pts, S.SEMANTIC) if len(sem_pts) >= 2 or len(kw_pts) <= len(sem_pts) else (kw_pts, S.KEYWORD)
+    readiness, band = pts[-1] if pts else (None, None)
+    source = S.SEMANTIC if pts else None
     answered = [t for t, c in cs if c.get("answered")]
     missed_at = []
     for t, c in analysed:
@@ -124,7 +114,7 @@ def _journey(lead_id: str, cs: list[tuple[datetime, dict]], n: tuple[int, int], 
          "course": info.get("course"), "priority": info.get("priority"), "score": info.get("score"),
          "calls": n[0], "realCalls": n[1],
          "lastCallIst": _ist(last_t), "readiness": readiness, "readinessSource": source,
-         "readinessBand": band, "readinessTrend": trend([p for p, _ in pts]), "trendSource": trend_src if pts else None,
+         "readinessBand": band, "readinessTrend": trend([p for p, _ in pts]), "trendSource": source,
          "repeatedObjections": repeated, "missedCommitments": len(missed_at), "flags": [], "nextAction": "",
          "enrolled": enrolled, "lastCallerId": (last_person or {}).get("caller_id"),
          "lastCaller": (last_person or {}).get("caller_name"), "lastCallerTeam": (last_person or {}).get("team")}

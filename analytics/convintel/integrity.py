@@ -6,9 +6,9 @@ flag means the call needs a listen, never that it was faked.
 
 * ``short``: answered but under 3 minutes (every SHORT_CALL), and an empty transcript on a short call.
 * ``suspect``: a call that counts, or may count, as a real call (REAL_CALL, or UNKNOWN: answered with no usable
-  length) where the evidence says it may not be one: a recording with an empty transcript; the keyword layer's
-  transcript checks (no content, thin, machine, loop); the model's reading (doubtful or not a real conversation,
-  one-sided, not sales talk, machine, no content, loop); and, for REAL_CALLs, a recording much shorter than the
+  length) where the evidence says it may not be one: a recording with an empty transcript; Claude's reading of
+  the transcript (doubtful or not a real conversation, one-sided, not sales talk, machine, no content, thin, loop);
+  and, for REAL_CALLs, a recording much shorter than the
   logged time, an overlap with the same caller's other answered call, or no recording after every recheck.
 * ``pattern``: real calls that look fine one by one but form a pattern: 3+ real calls by one caller to one lead
   in an IST day, or a caller whose real calls bunch just over 3 minutes compared with the whole account.
@@ -27,8 +27,7 @@ import re
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
-from analytics.call_integrity import (EMPTY_WORDS, JUST_OVER_FACTOR, LOOP_SHARE, MIN_LONG_CALLS, OVERLAP_SECS,
-                                      REPEAT_LONG, THIN_WPM)
+from analytics.call_integrity import JUST_OVER_FACTOR, MIN_LONG_CALLS, OVERLAP_SECS, REPEAT_LONG
 from analytics.convintel import schema as S
 from analytics.convintel.attribution import PERSON
 from analytics.convintel.classify import REAL_CALL_SECS
@@ -43,13 +42,12 @@ JUST_OVER = (REAL_CALL_SECS, REAL_CALL_SECS + 30)   # 180-209 s: the daily repor
 # under 75% of the logged time and a minute or more shorter is worth a listen (or was matched to the wrong call).
 MISMATCH_SHARE = 0.75
 MISMATCH_SECS = 60
-KW_FLAGS = ("no_content", "thin", "machine", "loop")
-SEM_FLAGS = ("one_sided", "not_sales_talk", "machine", "no_content", "loop")
-REAL_LABEL = {"yes": "the model judged it a real conversation", "doubtful": "the model doubts it was a real conversation",
-              "no": "the model judged it not a real conversation"}
+SEM_FLAGS = ("one_sided", "not_sales_talk", "machine", "no_content", "thin", "loop")
+REAL_LABEL = {"yes": "Claude judged it a real conversation", "doubtful": "Claude doubts it was a real conversation",
+              "no": "Claude judged it not a real conversation"}
 CALL_IDS_CAP = 50
 REVIEW = "needs review, not proof"
-# The model's integrity reason reaches the dashboard; a number it quoted from the call must not.
+# Claude's integrity reason reaches the dashboard; a number it quoted from the call must not.
 DIGITS = re.compile(r"\+?\d(?:[\s-]?\d){6,}")
 # Classes whose logged duration is usable: an UNKNOWN "call" may be a line left open for hours.
 TIMED = (S.REAL_CALL, S.SHORT_CALL)
@@ -91,21 +89,6 @@ def _int(x) -> int | None:
 
 # ------------------------------------------------------------------ per-call flags
 
-def _kw_reason(flag: str, ev: dict, dur: int | None) -> str:
-    words, wpm, loop = ev.get("words"), ev.get("wpm"), ev.get("loop_share")
-    length = f"a {dur} s call" if dur else "a call of unknown length"
-    if flag == "no_content":
-        return f"keyword check: only {words} words in the transcript of {length} (under {EMPTY_WORDS})" \
-            if words is not None else "keyword check: almost no words in the transcript"
-    if flag == "thin":
-        return f"keyword check: {wpm} words a minute over {length} (under {THIN_WPM})" \
-            if wpm is not None else "keyword check: very little talk for the time"
-    if flag == "machine":
-        return "keyword check: the opening words sound like a recorded message, IVR or voicemail"
-    return f"keyword check: one phrase makes up {round(100 * loop)}% of the words ({round(100 * LOOP_SHARE)}%+ counts)" \
-        if isinstance(loop, (int, float)) else "keyword check: one phrase keeps repeating"
-
-
 def _empty_reason(c: dict) -> str:
     """A recording with no text. Many recordings have none when first searched (about 1 in 3 on 9 Oct 2026),
     so say whether the automatic rechecks (store.RECHECK_AFTER) are still running."""
@@ -123,20 +106,15 @@ def _evidence(c: dict, add) -> None:
     real = c.get("call_class") == S.REAL_CALL
     if c.get("transcript_state") == S.T_NOT_TRANSCRIBED:
         add(c, "empty_transcript", SUSPECT, _empty_reason(c))
-    kw = (c.get("kw") or {}).get("integrity") or {}
     sem = (c.get("sem") or {}).get("integrity") or {}
     verdict = sem.get("real_conversation")
-    for f in dict.fromkeys(kw.get("flags") or []):
-        if f in KW_FLAGS:
-            add(c, f, SUSPECT, _kw_reason(f, kw, dur) + ("; " + REAL_LABEL["yes"] + ", so check before acting"
-                                                         if verdict == "yes" else ""))
     sem_flags = [f for f in dict.fromkeys(sem.get("flags") or []) if f in SEM_FLAGS]
     why = DIGITS.sub("[number removed]", (sem.get("reason") or "").strip()[:200])
     tail = (f"; {REAL_LABEL[verdict]}" if verdict in REAL_LABEL else "") + (f" ({why})" if why else "")
     for f in sem_flags:
-        add(c, f, SUSPECT, f"model reading: {S.INTEGRITY_FLAGS[f]}{tail}")
+        add(c, f, SUSPECT, f"Claude's reading: {S.INTEGRITY_FLAGS[f]}{tail}")
     if verdict in ("doubtful", "no") and not sem_flags:   # no specific sign named: filed under not_sales_talk
-        add(c, "not_sales_talk", SUSPECT, f"model reading: {REAL_LABEL[verdict]}, without naming a specific sign"
+        add(c, "not_sales_talk", SUSPECT, f"Claude's reading: {REAL_LABEL[verdict]}, without naming a specific sign"
             + (f" ({why})" if why else ""))
     if not real:
         return
@@ -206,8 +184,8 @@ def _bunching(real: list[dict], add) -> None:
 def call_flags(calls: list[dict]) -> dict[str, list[dict]]:
     """call_id -> [{"flag", "tier", "reason"}], most serious first; calls with no flag are left out.
 
-    ``calls`` are registry rows (plus "kw", "sem" and "t" when known). The same flag found twice (the keyword
-    check and the model's reading both hear a machine) is one flag with both reasons."""
+    ``calls`` are registry rows (plus "sem" and "t" when known). The same flag found twice is one flag with both
+    reasons."""
     found: dict[str, dict[str, dict]] = defaultdict(dict)
 
     def add(c: dict, flag: str, tier: str, reason: str) -> None:
@@ -264,7 +242,7 @@ def integrity_summary(calls: list[dict], flags: dict[str, list[dict]]) -> dict:
         cls = c.get("call_class")
         if cls == S.REAL_CALL:
             real_total += 1
-            real_checked += bool(c.get("kw") or c.get("sem"))
+            real_checked += bool(c.get("sem"))
         if not (c.get("answered") or fl):
             continue
         by_flag.update(f["flag"] for f in fl)
@@ -305,7 +283,7 @@ def integrity_summary(calls: list[dict], flags: dict[str, list[dict]]) -> dict:
             "byTier": {t: by_tier.get(t, 0) for t in (SUSPECT, PATTERN, SHORT)}, "byCaller": out, "notes": [
                 "A flag means the call needs a listen, not that it was faked.",
                 "Short calls (answered, under 3 minutes) are counted on their own; 'flagged' counts calls that count "
-                "as real (answered, 3+ minutes, or of unknown length) where the transcript, the model's reading or "
+                "as real (answered, 3+ minutes, or of unknown length) where the transcript, Claude's reading of it or "
                 "the call log suggests they may not be real conversations.",
                 "A caller's flagged % is flagged calls over their real calls plus answered calls of unknown length. "
                 "'Calls to review' lists every flagged call, short calls included, most serious first.",

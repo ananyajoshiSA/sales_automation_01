@@ -42,6 +42,9 @@
     misinformation_risk: "Possible wrong information", pressure_excessive: "Too much pressure",
     strong_practice: "Strong practice", possible_not_real: "Possibly not a real conversation",
     zip_disagreement: "Zipteams disagrees",
+    buying_vocabulary: "Buying words", key_phrase: "Key phrase", objection_wording: "Objection wording",
+    hesitation: "Hesitation", commitment_language: "Commitment words", uncertainty: "Uncertainty",
+    persuasive: "Persuasive wording", ineffective_wording: "Wording that hurt",
     ANALYZED: "Analysed", PENDING_ANALYSIS: "Waiting for analysis", ANALYSIS_IN_PROGRESS: "Being analysed",
     ANALYSIS_INCOMPLETE: "Partly analysed", ANALYSIS_FAILED: "Analysis failed (retried)",
     TRANSCRIPT_NOT_FOUND: "No transcript found yet", NO_TRANSCRIPT_EXPECTED: "Not connected (no recording expected)",
@@ -164,6 +167,12 @@
 
   const chip = (text, cls = "") => `<span class="chip${cls ? " " + cls : ""}">${esc(text)}</span>`;
   const chips = (items, cls = "") => list(items).map((i) => chip(word(i), cls)).join(" ") || "–";
+  /** Claude's word analysis of a call as counts by kind of phrase (no transcript words), plus repeats. */
+  const wordsOf = (c) => {
+    const parts = pairsOf(c.words).sort((a, b) => b[1] - a[1]).map(([k, n]) => chip(`${word(k)} ${fmt(n, 0)}`));
+    if (isNum(c.repeats) && c.repeats > 0) parts.push(chip(`${fmt(c.repeats, 0)} repeated phrase${c.repeats === 1 ? "" : "s"}`));
+    return parts.join(" ") || "–";
+  };
   const tile = (label, value, sub = "", cls = "") =>
     `<div class="tile${cls ? " " + cls : ""}"><span class="label">${esc(label)}</span><span class="value">${esc(value)}</span>${sub ? `<span class="muted small">${esc(sub)}</span>` : ""}</div>`;
   const tiles = (items) => `<section class="tiles">${items.join("")}</section>`;
@@ -336,7 +345,7 @@
       lines.push(`Analysed so far: ${fmt(cov.analyzed, 0)} of ${fmt(cov.expected_transcripts, 0)} expected transcripts (${pc(cov.coverage_pct)}). ` +
         "Scores, objections and findings cover analysed calls only.");
     }
-    if (d.semanticEngine) lines.push(`Model analysis: ${d.semanticEngine}. Keyword-only findings are marked low or medium confidence.`);
+    if (d.semanticEngine) lines.push(`Transcript analysis: ${d.semanticEngine}.`);
     lines.push(x.privacy.excerpts ? "This copy includes short transcript excerpts: keep it inside the team." : "No transcript text or lead phone numbers are shown.");
     return `<section class="ci-intro">${lines.map((l) => `<p>${esc(l)}</p>`).join("")}</section>`;
   }
@@ -454,7 +463,7 @@
   }
 
   const quality = (c) => (isNum(c.quality) ? { overall: Number(c.quality) } : obj(c.quality));
-  /** Why a call may not be real: the export's own reasons, else the flag's meaning; plus the model's finding. */
+  /** Why a call may not be real: the export's own reasons, else the flag's meaning; plus Claude's finding. */
   const reasonsOf = (x, c) => {
     const given = list(c.integrityReasons);
     const flags = flagsOf(c).map((f, i) => given[i] || x.flagText[f] || word(f));
@@ -478,7 +487,7 @@
   function qualityTable(id, rows) {
     const dims = [...new Set(rows.flatMap(([, q]) => Object.keys(obj(q))))];
     if (!dims.length || rows.every(([, q]) => Object.values(obj(q)).every((v) => !isNum(v)))) {
-      return note("No quality scores yet: they come from the model analysis, which has not scored these calls.");
+      return note("No quality scores yet: they come from Claude's reading, and Claude has not scored these calls yet.");
     }
     return tbl(id, [{ h: "Skill", v: (d) => word(d) }, ...rows.map(([name, q]) =>
       ({ h: name, num: true, v: (d) => obj(q)[d], f: (d) => (isNum(obj(q)[d]) ? `${fmt(obj(q)[d], 1)}/10` : "–") }))], dims);
@@ -526,7 +535,7 @@
       tile("Leads with a real call", fmt(o.leadsReal, 0), `of ${fmt(o.leadsContacted, 0)} leads reached`),
       tile("Enrolments", fmt(o.enrolmentsOwner, 0), isNum(obj(o.enrolmentsUnattributed).ownerAtEnrolment)
         ? `${fmt(obj(o.enrolmentsUnattributed).ownerAtEnrolment, 0)} not credited to a team` : "first-time, this period"),
-      tile("Call quality", isNum(o.qualityAvg) ? `${fmt(o.qualityAvg, 1)}/10` : "–", isNum(o.qualityAvg) ? "model-scored calls" : "not scored yet"),
+      tile("Call quality", isNum(o.qualityAvg) ? `${fmt(o.qualityAvg, 1)}/10` : "–", isNum(o.qualityAvg) ? "calls scored by Claude" : "not scored yet"),
       tile("Analysed", pc(o.coveragePct), `${fmt(o.analyzed, 0)} of ${fmt(o.transcriptsExpected, 0)} transcripts`),
       tile("Possibly not real", fmt(o.integrityFlagged, 0), `${pc(o.integrityPct)} of answered calls · needs review`, "warn"),
       tile("Revenue", isNum(o.revenue) ? mval("revenue", o.revenue) : rev.measurable && isNum(rev.total) ? `₹${fmt(rev.total, 0)}` : "–",
@@ -541,6 +550,8 @@
       teamsTable(x, "ov-teams", teams), "") +
     `<div class="grid">` +
       card("Objections heard", pairTable("ov-obj", "Objection", "Calls", pairsOf(obj(x.snap.objections).org).sort((a, b) => b[1] - a[1]))) +
+      card("Words and phrases", note("From Claude's reading of each call: calls with at least one phrase of each kind.") +
+        pairTable("ov-words", "Kind of phrase", "Calls", pairsOf(obj(x.snap.words).org).sort((a, b) => b[1] - a[1]))) +
       card("Quality by skill (0-10)", qualityTable("ov-q", [["Organisation", o.qualityByDim], ...teams.map((t) => [t.team, t.qualityByDim])]), "wide") +
       card("How to read these numbers", `<ul class="ci-notes">${list(obj(x.snap.definitions).notes).map((n) => `<li>${esc(n)}</li>`).join("")}</ul>`, "wide") +
     "</div>";
@@ -833,6 +844,7 @@
       card("Callers in this team", note("Differences are against this team. Click a caller to drill down.") + callersTable(x, "team-callers", people(callers))) +
       othersTable(x, "team-others", others(callers), "Shared logins and automation") +
       `<div class="grid">` + card("Objections heard", pairTable("team-obj", "Objection", "Calls", pairsOf(obj(obj(x.snap.objections).byTeam)[t.team] || t.objections).sort((a, b) => b[1] - a[1]))) +
+      card("Words and phrases", pairTable("team-words", "Kind of phrase", "Calls", pairsOf(obj(obj(x.snap.words).byTeam)[t.team]).sort((a, b) => b[1] - a[1]))) +
       card("Quality by skill (0-10)", qualityTable("team-q", [[t.team, t.qualityByDim], ["Organisation", obj(x.snap.org).qualityByDim]])) + "</div>" +
       (coach ? card("Team coaching", `<ul class="ci-notes">${list(coach.priorities).map((p) => `<li>${esc(p)}</li>`).join("") || "<li>No priorities yet.</li>"}</ul>`) : "");
   };
@@ -880,7 +892,7 @@
     if (!c) return notListed("call");
     const q = quality(c), dims = Object.entries(obj(q.byDim || q.dims || q.dimensions));
     const flags = flagsOf(c);
-    const keywordOnly = c.status !== "ANALYZED" && !c.summary;
+    const unread = c.status !== "ANALYZED" && !c.summary;
     return card("Call", kv([
       ["Caller", callerLink(x, c.callerId, c.caller, c.team), true], ["Team", teamLink(x, c.team), true],
       ["Lead", leadLink(x, c.leadId, c.team, c.callerId), true], ["Start", ist(c.startIst)], ["Length", mmss(c.durationS)],
@@ -890,13 +902,14 @@
       ["Zipteams", zipText(c)],
     ])) + card("Transcript intelligence", tiles([
       tile("Readiness to pay", isNum(c.readiness) ? `${fmt(c.readiness, 0)}/100` : "–",
-        `${c.readinessBand ? word(c.readinessBand) : "this call only"}${c.engine ? ` · ${c.engine === "semantic" ? "model" : "keyword"} reading` : ""}`),
-      tile("Call quality", isNum(q.overall) ? `${fmt(q.overall, 1)}/10` : "–", isNum(q.overall) ? "model-scored" : "not scored yet"),
+        `${c.readinessBand ? word(c.readinessBand) : "this call only"}${c.engine ? " · Claude's reading" : ""}`),
+      tile("Call quality", isNum(q.overall) ? `${fmt(q.overall, 1)}/10` : "–", isNum(q.overall) ? "scored by Claude" : "not scored yet"),
       tile("Objections", fmt(list(c.objections).length, 0)), tile("Buying signals", fmt(list(c.signals).length, 0)),
-    ]) + (keywordOnly ? note("Keyword analysis only so far: the model has not read this call yet, so quality and the summary are blank and findings are low or medium confidence.") : "") +
+    ]) + (unread ? note("Claude has not read this call yet, so readiness, quality, findings and the summary are blank.") : "") +
       kv([["Objections", chips(c.objections), true], ["Buying signals", chips(c.signals), true],
+        ["Words and phrases", wordsOf(c), true],
         ["Possibly not real", flags.length ? reasonsOf(x, c).map(esc).join("<br>") + "<br>" + `<span class="muted small">${esc("Needs a listen, not proof.")}</span>` : "no flags", true],
-        ["Summary", c.summary || "No summary yet (written by the model analysis)."]]) +
+        ["Summary", c.summary || "No summary yet (written when Claude reads the call)."]]) +
       (dims.length ? qualityTable("call-q", [["This call", Object.fromEntries(dims)]]) : "") +
       `<h3>Findings</h3>${findingsList(x, c.findings)}` +
       (x.privacy.excerpts ? "" : note("Transcript excerpts are not included in this copy.")));

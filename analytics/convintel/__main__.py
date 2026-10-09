@@ -1,23 +1,24 @@
 """Command line for conversation intelligence (docs/conversation_intelligence.md). Read-only against LeadSquared and
-the transcript API; the model is called only by ``analyze --layer semantic --limit N`` (or ``run --semantic-limit
-N``) once a key is configured, and D1 is written only by ``analytics.convintel.d1push --push --yes``.
+the transcript API. No model API is ever called: Claude reads the transcripts inside a Claude Code session
+(``read``, reading.py). D1 is written only by ``analytics.convintel.d1push --push --yes``.
 
     python -m analytics.convintel status [FROM TO]
     python -m analytics.convintel inventory FROM TO [--window 14:00-14:30]
     python -m analytics.convintel fetch-transcripts [--requests 9] [--pace 7]
-    python -m analytics.convintel analyze [--layer keyword|semantic|all] [--limit N] [--mode sync|batch] [--workers 4]
-    python -m analytics.convintel poll-batches
+    python -m analytics.convintel read prepare [--limit N] [--per-pack 6]
+    python -m analytics.convintel read check data/convintel/reading/ROUND/results/CALL_ID.json
+    python -m analytics.convintel read collect [ROUND]
     python -m analytics.convintel retry [FROM TO]
     python -m analytics.convintel reconcile FROM TO
-    python -m analytics.convintel estimate [FROM TO] [--batch]
     python -m analytics.convintel report FROM TO [--key 7d] [--excerpts] [--accountability DIR] [--out DIR]
-    python -m analytics.convintel run FROM TO [--fetch-runs 1] [--semantic-limit 0] [--report] [--loop --every 300]
+    python -m analytics.convintel run FROM TO [--fetch-runs 1] [--report] [--loop --every 300]
 """
 
 from __future__ import annotations
 
 import argparse
 import json
+import os
 import sys
 import time
 from datetime import timedelta
@@ -41,15 +42,12 @@ def _ist(s: str | None) -> str:
 
 def print_status(reg: Registry, day_from: str | None, day_to: str | None) -> dict:
     cov = reg.coverage(day_from, day_to)
-    blocked = reg.get_meta("blocked_layers", {})
     print(f"Calls: {cov['total_calls']}  ({', '.join(f'{k} {v}' for k, v in cov['by_class'].items())})")
     print(f"Expected transcripts: {cov['expected_transcripts']}   found: {cov['transcripts_found']}   "
           f"analysed: {cov['analyzed']}   coverage: {cov['coverage_pct'] if cov['coverage_pct'] is not None else '-'}%")
     for s in S.STATUSES:
         print(f"  {s:<24} {cov['by_status'][s]}")
     print("Transcript search: " + ", ".join(f"{k} {v}" for k, v in cov["by_transcript_state"].items()))
-    for layer, why in blocked.items():
-        print(f"{layer} layer waiting: {why}")
     last = reg.q("SELECT kind, finished_utc, status FROM processing_runs ORDER BY run_id DESC LIMIT 5")
     for r in last:
         print(f"  last {r['kind']}: {r['status']} at {_ist(r['finished_utc'])}")
@@ -74,8 +72,9 @@ def days_due(reg: Registry, day_from: str, day_to: str, now) -> list[str]:
 
 
 def cycle(reg: Registry, a, lsq=None) -> dict:
-    """One pass of the continuous pipeline: inventory what is due, search transcripts, analyse, reconcile."""
-    from analytics.convintel.analyze import keyword_pass, poll_batches, semantic_pass
+    """One pass of the continuous pipeline: inventory what is due, search transcripts, store the readings Claude
+    has written, hand the transcripts still unread to a new reading round, reconcile."""
+    from analytics.convintel import reading
     from analytics.convintel.fetch import run_fetch
     from analytics.convintel.inventory import inventory
     from analytics.convintel.reconcile import reconcile
@@ -92,10 +91,7 @@ def cycle(reg: Registry, a, lsq=None) -> dict:
         if i:
             time.sleep(60)          # the transcript API counts requests per minute across runs
         out[f"fetch {i + 1}"] = dict(run_fetch(reg, now_utc(), requests=a.requests, pace_s=a.pace, log=log))
-    out["keyword"] = dict(keyword_pass(reg, now_utc(), log=log))
-    out["semantic"] = dict(semantic_pass(reg, now_utc(), a.semantic_limit, mode=a.mode, workers=a.workers, log=log))
-    if reg.open_batches(S.SEMANTIC):
-        out["batches"] = dict(poll_batches(reg, now_utc(), log=log))
+    out["reading round"] = reading.prepare(reg, now_utc(), per_pack=a.per_pack, log=log)   # collects first
     checks = reconcile(reg, a.start, a.end, now_utc(), verify_files=False)
     out["reconciliation"] = {c["check"]: c["ok"] for c in checks}
     if a.report:
@@ -126,9 +122,7 @@ def main(argv: list[str] | None = None) -> None:
         if name == "run":
             period(sp)
             sp.add_argument("--fetch-runs", type=int, default=1, help="transcript runs per cycle (each at most 9 requests)")
-            sp.add_argument("--semantic-limit", type=int, default=0, help="calls sent to the model per cycle (0 = none)")
-            sp.add_argument("--mode", choices=("sync", "batch"), default="batch")
-            sp.add_argument("--workers", type=int, default=4)
+            sp.add_argument("--per-pack", type=int, default=6, help="calls per reading pack")
             sp.add_argument("--report", action="store_true")
             sp.add_argument("--key")
             sp.add_argument("--excerpts", action="store_true")
@@ -138,21 +132,18 @@ def main(argv: list[str] | None = None) -> None:
             sp.add_argument("--every", type=int, default=300, help="seconds between cycles with --loop")
         sp.add_argument("--requests", type=int, default=None, help="at most 9 (the client's per-run ceiling)")
         sp.add_argument("--pace", type=float, default=7.0, help="seconds between requests (API: ~10 a minute)")
-    sp = sub.add_parser("analyze")
-    sp.add_argument("--layer", choices=("keyword", "semantic", "all"), default="keyword")
-    sp.add_argument("--limit", type=int, default=None)
-    sp.add_argument("--mode", choices=("sync", "batch"), default="sync")
-    sp.add_argument("--workers", type=int, default=4)
-    sp.add_argument("--call-ids", nargs="*")
-    sub.add_parser("poll-batches")
+    sp = sub.add_parser("read", help="Claude reading rounds (no API)")
+    rd = sp.add_subparsers(dest="step", required=True)
+    rp = rd.add_parser("prepare")
+    rp.add_argument("--limit", type=int, default=None)
+    rp.add_argument("--per-pack", type=int, default=6)
+    rp.add_argument("--call-ids", nargs="*")
+    rd.add_parser("check").add_argument("result")
+    rd.add_parser("collect").add_argument("round", nargs="?")
     sp = sub.add_parser("retry")
     period(sp, False)
     sp = sub.add_parser("reconcile")
     period(sp)
-    sp = sub.add_parser("estimate")
-    period(sp, False)
-    sp.add_argument("--batch", action="store_true")
-    sp.add_argument("--model")
     sp = sub.add_parser("report")
     period(sp)
     sp.add_argument("--key")
@@ -164,6 +155,7 @@ def main(argv: list[str] | None = None) -> None:
 
     reg = Registry(a.db)
     now = now_utc()
+    reg.upgrade(now)
     if a.cmd == "status":
         print_status(reg, a.start, a.end)
     elif a.cmd == "inventory":
@@ -173,18 +165,26 @@ def main(argv: list[str] | None = None) -> None:
     elif a.cmd == "fetch-transcripts":
         from analytics.convintel.fetch import run_fetch
         print(json.dumps(dict(run_fetch(reg, now, requests=a.requests, pace_s=a.pace, log=log))))
-    elif a.cmd == "analyze":
-        from analytics.convintel.analyze import keyword_pass, semantic_pass
-        if a.layer in ("keyword", "all"):
-            print(json.dumps({"keyword": dict(keyword_pass(reg, now, a.limit, a.call_ids, log=log))}))
-        if a.layer in ("semantic", "all"):
-            if not a.limit:
-                sys.exit("The semantic layer calls a paid model: give --limit N (calls to send). See `estimate` first.")
-            print(json.dumps({"semantic": dict(semantic_pass(reg, now, a.limit, mode=a.mode, workers=a.workers,
-                                                             call_ids=a.call_ids, log=log))}))
-    elif a.cmd == "poll-batches":
-        from analytics.convintel.analyze import poll_batches
-        print(json.dumps(dict(poll_batches(reg, now, log=log))))
+    elif a.cmd == "read":
+        from analytics.convintel import reading
+        if a.step == "prepare":
+            print(json.dumps(reading.prepare(reg, now, a.limit, a.per_pack, call_ids=a.call_ids, log=log), indent=1))
+        elif a.step == "check":
+            res = reading.check(reg, a.result)
+            print(("OK" if res["ok"] else "NOT OK") + f" {res['callId']}")
+            for x in res["problems"]:
+                print(f"  - {x}")
+            if not res["ok"]:
+                reg.close()
+                sys.exit(1)
+        else:
+            folder = a.round
+            if folder and not os.path.isdir(folder) and os.path.isdir(os.path.join(reading.READING_DIR, folder)):
+                folder = os.path.join(reading.READING_DIR, folder)         # a round id instead of its folder
+            if folder and not os.path.isdir(os.path.join(folder, "results")):
+                reg.close()
+                sys.exit(f"{a.round} is not a reading round folder (expected {reading.READING_DIR}/<round>/results)")
+            print(json.dumps(dict(reading.collect(reg, now, folder, log=log))))
     elif a.cmd == "retry":
         n = reg.requeue_not_found(now, a.start, a.end)
         m = sum(reg.retry_failed(layer, now) for layer in S.LAYERS)
@@ -194,14 +194,6 @@ def main(argv: list[str] | None = None) -> None:
         from analytics.convintel.reconcile import reconcile
         for c in reconcile(reg, a.start, a.end, now):
             print(f"{'OK  ' if c['ok'] else 'FAIL'} {c['check']}: {c['detail']}")
-    elif a.cmd == "estimate":
-        from analytics.convintel.llm import estimate_cost
-        where, params = "transcript_state = ? AND analysis_status <> ?", [S.T_FOUND, S.ANALYZED]
-        if a.start:
-            where += " AND ist_day >= ? AND ist_day <= ?"
-            params += [a.start, a.end or a.start]
-        r = reg.q(f"SELECT COUNT(*) AS n, AVG(transcript_words) AS w FROM transcript_coverage_registry WHERE {where}", params)[0]
-        print(json.dumps(estimate_cost(r["n"] or 0, r["w"] or 0, a.model, a.batch), indent=1))
     elif a.cmd == "report":
         from analytics.convintel.export import run_report
         print(json.dumps(run_report(reg, a.start, a.end, now, key=a.key, excerpts=a.excerpts, out_dir=a.out,

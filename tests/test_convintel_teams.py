@@ -32,19 +32,6 @@ def band(score):
     return "hot" if score >= 70 else "warm" if score >= 50 else "cool" if score >= 30 else "cold"
 
 
-def kw(score=20, bnd=None, buying=(), objections=(), callback=False, payment_step=False, findings=()):
-    return {"language": {"primary": "english", "devanagari_share": 0.0, "hinglish_markers": 0, "code_switching": False},
-            "word_level": {"words": 400, "wpm": 120, "categories": {}, "repeated_phrases": []},
-            "sentence_level": {"sentences": 30, "questions": 5, "labelled": [], "labelled_total": 0},
-            "signals": {"buying": list(buying), "objections": list(objections), "negative": [],
-                        "payment_step": payment_step, "dated_next_step": False, "callback_requested": callback,
-                        "amounts": [], "course_mentions": [], "readiness_score": score,
-                        "readiness_band": bnd or band(score), "markers": []},
-            "integrity": {"words": 400, "wpm": 120, "loop_share": 0.0, "machine_text": "", "flags": []},
-            "findings": [{"category": f, "excerpt": "", "offset": -1, "confidence": "low", "reasoning": "",
-                          "recommended_action": ""} for f in findings]}
-
-
 def sem(score=20, bnd=None, overall=6, dims=None, objections=(), buying=(), commitments=(), payment_step="none",
         findings=()):
     q = {d: {"score": (dims or {}).get(d), "evidence": "", "note": ""} for d in S.QUALITY_DIMENSIONS}
@@ -64,27 +51,26 @@ def sem(score=20, bnd=None, overall=6, dims=None, objections=(), buying=(), comm
             "summary": "Synthetic call."}
 
 
-def call(user="u1", at=None, status="Answered", dur=200, direction="outbound", lead="L1", team=None, k=None, s=None,
+def call(user="u1", at=None, status="Answered", dur=200, direction="outbound", lead="L1", team=None, s=None,
          z=None, flags=None, state=None, **extra):
     name, kind, home = WHO[user]
     at = at or NOW - timedelta(hours=6)
     cls = classify(status, dur)[0]
     expected = int(cls != S.NOT_CONNECTED)
-    state = state or (S.T_FOUND if (k or s) else S.T_NOT_LOOKED_UP if expected else S.T_NOT_EXPECTED)
-    status_ = (S.ANALYZED if k and s else S.ANALYSIS_INCOMPLETE if k or s else
-               S.NO_TRANSCRIPT_EXPECTED if not expected else S.PENDING_ANALYSIS)
+    state = state or (S.T_FOUND if s else S.T_NOT_LOOKED_UP if expected else S.T_NOT_EXPECTED)
+    status_ = S.ANALYZED if s else S.NO_TRANSCRIPT_EXPECTED if not expected else S.PENDING_ANALYSIS
     c = {"call_id": f"c{next(_ids):05d}", "lead_id": lead, "direction": direction, "call_status": status,
          "answered": int(status == "Answered"), "start_utc": ts(at), "ist_day": ist_day(at), "duration_s": dur,
          "call_class": cls, "caller_id": user, "caller_name": name, "caller_kind": kind, "team": team or home,
-         "transcript_expected": expected, "transcript_state": state, "analysis_status": status_, "kw": k, "sem": s,
+         "transcript_expected": expected, "transcript_state": state, "analysis_status": status_, "sem": s,
          "zip": z, "t": at, **extra}
     if flags is not None:
         c["flags"] = flags
     return c
 
 
-def views(calls, enrolments=(), leads=None, **kw_):
-    return build_views(calls, USERS, leads or {}, list(enrolments), NOW, **kw_)
+def views(calls, enrolments=(), leads=None, **opts):
+    return build_views(calls, USERS, leads or {}, list(enrolments), NOW, **opts)
 
 
 def caller(v, cid, team=None):
@@ -318,21 +304,23 @@ def test_missed_inbound_is_any_unanswered_inbound_call_with_a_lead():
 
 def test_callbacks_pending_and_overdue():
     old, recent = NOW - timedelta(hours=30), NOW - timedelta(hours=5)
-    calls = [call(lead="L30", at=old, k=kw(callback=True)),                                   # overdue
-             call(lead="L31", at=recent, k=kw(), s=sem(commitments=("caller",))),             # pending
+    promise = sem(commitments=("caller",))
+    calls = [call(lead="L30", at=old, s=promise),                                             # overdue
+             call(lead="L31", at=recent, s=promise),                                          # pending
              call(lead="L32", at=old, s=sem(commitments=("customer",))),                      # customer's promise
-             call(lead="L33", at=old, k=kw(callback=True)),
+             call(lead="L33", at=old, s=promise),
              call(user="u2", lead="L33", at=NOW - timedelta(hours=20), dur=50),              # reached since
-             call(lead="L34", at=old, k=kw(callback=True), s=sem()),                          # semantic wins
-             call(lead="L35", at=old, k=kw(callback=True)),
-             call(lead="L35", at=NOW - timedelta(hours=10), status="NotAnswered", dur=0)]     # not reached
+             call(lead="L34", at=old, s=sem(findings=("callback_promised",))),                # overdue: a finding
+             call(lead="L35", at=old, s=promise),
+             call(lead="L35", at=NOW - timedelta(hours=10), status="NotAnswered", dur=0),    # not reached
+             call(lead="L36", at=old)]                                                        # not read yet: unknown
     a = caller(views(calls), "u1")
-    assert (a["pendingCallbacks"], a["overdueFollowUps"]) == (1, 2)
+    assert (a["pendingCallbacks"], a["overdueFollowUps"]) == (1, 3)
 
 
 def test_prior_follow_up_answered_in_current_period_is_not_overdue():
-    prior = [call(lead="P1", at=NOW - timedelta(days=9), k=kw(callback=True)),
-             call(lead="P2", at=NOW - timedelta(days=9), k=kw(callback=True))]
+    prior = [call(lead="P1", at=NOW - timedelta(days=9), s=sem(commitments=("caller",))),
+             call(lead="P2", at=NOW - timedelta(days=9), s=sem(commitments=("caller",)))]
     v = views([call(user="u2", lead="P1", at=NOW - timedelta(days=2))], prior={"calls": prior, "enrolments": []})
     p = v["org"]["prior"]
     assert p["overdueFollowUps"] == 1 and p["dials"] == 2      # P1 was reached in this period, P2 never
@@ -342,41 +330,44 @@ def test_prior_follow_up_answered_in_current_period_is_not_overdue():
 
 def test_high_intent_and_payment_ready_are_lead_level():
     t1, t2 = NOW - timedelta(hours=10), NOW - timedelta(hours=5)
-    calls = [call(lead="L40", at=t1, k=kw(80)), call(user="u3", lead="L40", at=t2, k=kw(20)),   # cooled down
-             call(lead="L41", at=t1, k=kw(30)), call(user="u3", lead="L41", at=t2, s=sem(75)),
-             call(lead="L42", at=t1, k=kw(40, payment_step=True)),
+    calls = [call(lead="L40", at=t1, s=sem(80)), call(user="u3", lead="L40", at=t2, s=sem(20)),  # cooled down
+             call(lead="L41", at=t1, s=sem(30)), call(user="u3", lead="L41", at=t2, s=sem(75)),
+             call(lead="L42", at=t1, s=sem(40, payment_step="link_sent")),
              call(lead="L43", at=t1, s=sem(90)),                                                 # already enrolled
-             call(lead="L44", at=t1, k=kw(85)), call(lead="L44", at=t2, k=kw(88)),              # once per lead
-             call(lead="L45", at=t1, k=kw(90)), call(lead="L45", at=t2, s=sem(0, bnd="unclear"))]  # thin later call
+             call(lead="L44", at=t1, s=sem(85)), call(lead="L44", at=t2, s=sem(88)),            # once per lead
+             call(lead="L45", at=t1, s=sem(90)), call(lead="L45", at=t2, s=sem(0, bnd="unclear")),  # thin later call
+             call(lead="L46", at=t1, s=sem(80)), call(lead="L46", at=t2)]                       # later call not read
     v = views(calls, leads={"L43": {"stage": ENROLLED}})
     a, m = caller(v, "u1"), caller(v, "u3")
-    assert (a["highIntentUnconverted"], a["paymentReady"]) == (3, 1)          # L42, L44, L45
+    assert (a["highIntentUnconverted"], a["paymentReady"]) == (4, 1)          # L42, L44, L45, L46
     assert (m["highIntentUnconverted"], m["paymentReady"]) == (1, 0)          # L41
-    assert v["org"]["highIntentUnconverted"] == 4 and team(v, ALPHA)["highIntentUnconverted"] == 4
+    assert v["org"]["highIntentUnconverted"] == 5 and team(v, ALPHA)["highIntentUnconverted"] == 5
 
 
-def test_readiness_unclear_is_not_measured():
-    assert readiness({"sem": sem(0, bnd="unclear"), "kw": kw(90)}) == (None, "unclear", "semantic")
-    assert readiness({"kw": kw(0, bnd="unclear")}) == (None, "unclear", "keyword")
-    assert readiness({"kw": kw(42)}) == (42, "cool", "keyword")
-    assert readiness({"sem": sem(80), "kw": kw(10)}) == (80, "hot", "semantic")
-    assert readiness({"sem": {"summary": "malformed"}, "kw": kw(55)}) == (55, "warm", "keyword")
+def test_readiness_comes_only_from_claudes_reading_and_unclear_is_not_measured():
+    assert readiness({"sem": sem(0, bnd="unclear")}) == (None, "unclear", "semantic")
+    assert readiness({"sem": sem(42)}) == (42, "cool", "semantic")
+    assert readiness({"sem": sem(80)}) == (80, "hot", "semantic")
+    assert readiness({"sem": {"summary": "malformed"}}) == (None, None, None)
+    assert readiness({"sem": None}) == (None, None, None)                    # not read by Claude yet
     assert readiness({}) == (None, None, None)
 
 
 # ------------------------------------------------------------------ quality, coverage, objections, integrity
 
-def test_quality_semantic_only_and_objections():
-    calls = [call(lead="L50", k=kw(objections=("price", "time"))),
-             call(user="u3", lead="L51", k=kw(objections=("time",)),
+def test_quality_and_objections_from_claudes_reading():
+    calls = [call(lead="L50", s=sem(overall=None, objections=("price", "time"))),            # no skill scored
+             call(user="u3", lead="L51",
                   s=sem(overall=6, dims={"questioning": 4, "closing": 6}, objections=("price", "price", "trust"))),
-             call(user="u3", lead="L52", s=sem(overall=8, dims={"closing": 8}, objections=("budget",)))]
+             call(user="u3", lead="L52", s=sem(overall=8, dims={"closing": 8}, objections=("budget",))),
+             call(user="u3", lead="L53")]                                                    # not read yet
     v = views(calls)
     a, m = caller(v, "u1"), caller(v, "u3")
     assert a["qualityAvg"] is None and set(a["qualityByDim"].values()) == {None}
+    assert a["objections"] == {"price": 1, "time": 1}
     assert m["qualityAvg"] == 7.0 and m["qualityByDim"]["questioning"] == 4.0 and m["qualityByDim"]["closing"] == 7.0
     assert m["qualityByDim"]["payment_guidance"] is None
-    assert m["objections"] == {"other": 1, "price": 1, "trust": 1}            # keyword "time" ignored: semantic ran
+    assert m["objections"] == {"other": 1, "price": 1, "trust": 1}            # once per call; unknown -> other
     assert v["org"]["objections"] == {"price": 2, "other": 1, "time": 1, "trust": 1}
     assert set(v["org"]["qualityByDim"]) == set(S.QUALITY_DIMENSIONS)
     assert team(v, ALPHA)["vsOrg"]["qualityAvg"] == 0.0
@@ -386,7 +377,8 @@ def test_quality_semantic_only_and_objections():
 def test_quality_overall_needs_a_basis():
     calls = [call(lead="Q1", s=sem(60, overall=8, dims={"closing": 8})),
              call(lead="Q2", s=sem(0, bnd="unclear", overall=0, dims={"closing": 2})),   # wrong number: no basis
-             call(lead="Q3", s=sem(40, overall=3))]                                        # no skill scored
+             call(lead="Q3", s=sem(40, overall=3)),                                        # no skill scored
+             call(lead="Q4", s=sem(50, overall=None, dims={"closing": 5}))]                # no overall given
     a = caller(views(calls), "u1")
     assert a["qualityAvg"] == 8.0 and a["qualityByDim"]["closing"] == 5.0
     assert caller(views(calls[1:]), "u1")["qualityAvg"] is None
@@ -394,8 +386,8 @@ def test_quality_overall_needs_a_basis():
 
 def test_coverage_counts_and_integrity_flags():
     calls = [call(status="NotAnswered", dur=0, lead="L60"),
-             call(lead="L61", k=kw(), s=sem(), flags=[{"flag": "under_3_min", "tier": "short"}]),
-             call(lead="L62", k=kw(), flags=[{"flag": "machine", "tier": "suspect", "reason": "IVR"}]),
+             call(lead="L61", s=sem(), flags=[{"flag": "under_3_min", "tier": "short"}]),
+             call(lead="L62", state=S.T_FOUND, flags=[{"flag": "machine", "tier": "suspect", "reason": "IVR"}]),  # unread
              call(lead="L63", state=S.T_NOT_FOUND,
                   flags=[{"flag": "repeat", "tier": "pattern"}, {"flag": "under_3_min", "tier": "short"}]),
              call(lead="L64", status="NotAnswered", dur=0, state=S.T_FOUND)]   # transcript turned up anyway
@@ -444,7 +436,7 @@ def test_build_views_is_fast():
         u = ("u1", "u2", "u3", "rj")[i % 4]
         st = ("Answered", "NotAnswered", "NotAnswered", "CallFailure")[i % 4 if i % 7 else 0]
         rows.append(call(user=u, status=st, dur=(i % 600) + 1 if st == "Answered" else 0, lead=f"L{i % 20000}",
-                         at=NOW - timedelta(minutes=i % 40000), k=kw(i % 100) if st == "Answered" and i % 3 else None))
+                         at=NOW - timedelta(minutes=i % 40000), s=sem(i % 100) if st == "Answered" and i % 3 else None))
     t0 = time.perf_counter()
     v = views(rows, prior={"calls": rows[:20000], "enrolments": []})
     compare(rows, [], {})
@@ -454,36 +446,38 @@ def test_build_views_is_fast():
 # ------------------------------------------------------------------ Zipteams comparison
 
 @pytest.mark.parametrize("c,expected", [
-    (dict(k=kw(70), z={"intent": "HIGH"}), True),
-    (dict(k=kw(50), z={"intent": "HIGH"}), False),
-    (dict(k=kw(40), z={"intent": "MODERATE"}), True),
-    (dict(k=kw(80), s=sem(20), z={"intent": "LOW"}), True),                  # semantic first
-    (dict(k=kw(10), z={"intent": "NEUTRAL"}), True),
-    (dict(k=kw(50), z={"intent": "NOT_AVAILABLE"}), None),
-    (dict(k=kw(50), z=None), None),
-    (dict(z={"intent": "HIGH"}), None),                                      # no analysis of ours
-    (dict(k=kw(0, bnd="unclear"), z={"intent": "HIGH"}), None),             # ours not measured
-    (dict(s=sem(0, bnd="unclear"), k=kw(90), z={"intent": "LOW"}), None),
+    (dict(s=sem(70), z={"intent": "HIGH"}), True),
+    (dict(s=sem(50), z={"intent": "HIGH"}), False),
+    (dict(s=sem(40), z={"intent": "MODERATE"}), True),
+    (dict(s=sem(65), z={"intent": "HIGH"}), True),                           # our level boundaries: 65 and 35
+    (dict(s=sem(34), z={"intent": "MODERATE"}), False),
+    (dict(s=sem(20), z={"intent": "LOW"}), True),
+    (dict(s=sem(10), z={"intent": "NEUTRAL"}), True),
+    (dict(s=sem(50), z={"intent": "NOT_AVAILABLE"}), None),
+    (dict(s=sem(50), z=None), None),
+    (dict(z={"intent": "HIGH"}), None),                                      # not read by Claude yet
+    (dict(s=sem(0, bnd="unclear"), z={"intent": "HIGH"}), None),            # ours not measured
+    (dict(s={"summary": "malformed"}, z={"intent": "LOW"}), None),          # a reading with no readiness
 ])
 def test_zip_agrees(c, expected):
     assert zip_agrees(call(**c)) is expected
 
 
 def test_compare_counts_baseline_examples_and_findings():
-    calls = [call(lead="Z1", k=kw(80, buying=("fee_question",)), z={"intent": "HIGH"}),
-             call(lead="Z2", k=kw(10), z={"intent": "HIGH"}),                                      # unsupported hot
+    calls = [call(lead="Z1", s=sem(80, buying=("fee_question",)), z={"intent": "HIGH"}),
+             call(lead="Z2", s=sem(10), z={"intent": "HIGH"}),                                     # unsupported hot
              call(lead="Z3", s=sem(75, buying=(("payment_intent", "strong"),)), z={"intent": "LOW"}),  # missed hot
-             call(lead="Z4", k=kw(50, objections=("price",)), z={"intent": "HIGH"}),               # level differs
-             call(lead="Z5", k=kw(5, bnd="unclear"), z={"intent": "HIGH"}),                         # ours unclear
-             call(lead="Z6", k=kw(50), z={"intent": "NOT_AVAILABLE"}),
-             call(user="u2", lead="Z7", k=kw(60)), call(user="u2", lead="Z8", s=sem(30)),           # no Zipteams team
+             call(lead="Z4", s=sem(50, objections=("price",)), z={"intent": "HIGH"}),              # level differs
+             call(lead="Z5", s=sem(5, bnd="unclear"), z={"intent": "HIGH"}),                        # ours unclear
+             call(lead="Z6", s=sem(50), z={"intent": "NOT_AVAILABLE"}),
+             call(user="u2", lead="Z7", s=sem(60)), call(user="u2", lead="Z8", s=sem(30)),          # no Zipteams team
              call(user="u3", lead="Z9", z={"intent": "HIGH"})]                                     # Zipteams only
     out = compare(calls, [], {})
     assert {k: out[k] for k in ("compared", "agree", "disagree", "noBaseline", "zipNoIntent", "ourUnclear",
                                 "unsupportedHot", "missedHot", "zipOnly", "analysed")} == {
         "compared": 4, "agree": 1, "disagree": 3, "noBaseline": 3, "zipNoIntent": 1, "ourUnclear": 1,
         "unsupportedHot": 1, "missedHot": 1, "zipOnly": 1, "analysed": 8}
-    assert out["agreePct"] == 25.0 and out["byEngine"] == {"semantic": 1, "keyword": 3}
+    assert out["agreePct"] == 25.0 and out["byEngine"] == {"semantic": 4}
     beta = next(r for r in out["byTeam"] if r["team"] == BETA)
     assert beta["baseline"] is False and beta["disagree"] == 0 and beta["noBaseline"] == 2 and "not a disagreement" in beta["note"]
     assert next(r for r in out["byTeam"] if r["team"] == ALPHA)["baseline"] is True
@@ -497,13 +491,13 @@ def test_compare_counts_baseline_examples_and_findings():
     assert all("excerpt" not in e and "summary" not in e for e in ex)
     f = out["findings"]
     assert len(f) == out["findingsTotal"] == 3 and {x["category"] for x in f} == {"zip_disagreement"}
-    assert {x["confidence"] for x in f} == {"low", "medium"} and all(x["excerpt"] == "" and x["reasoning"] for x in f)
-    assert next(x for x in f if x["leadId"] == "Z3")["confidence"] == "medium"
+    assert {x["confidence"] for x in f} == {"medium"} and all(x["excerpt"] == "" for x in f)
+    assert all("Claude's reading of the transcript puts readiness at" in x["reasoning"] for x in f)
     assert len(disagreements(calls)) == 3
 
 
 def test_examples_are_capped_with_total():
-    calls = [call(lead=f"Q{i}", k=kw(10), z={"intent": "HIGH"}) for i in range(EXAMPLES + 5)]
+    calls = [call(lead=f"Q{i}", s=sem(10), z={"intent": "HIGH"}) for i in range(EXAMPLES + 5)]
     out = compare(calls, [], {})
     assert len(out["examples"]) == EXAMPLES and out["examplesTotal"] == EXAMPLES + 5
     assert out["findingsTotal"] == EXAMPLES + 5 and len(disagreements(calls)) == EXAMPLES + 5
@@ -511,15 +505,15 @@ def test_examples_are_capped_with_total():
 
 def test_benchmark_shares_with_small_sample_flag():
     t = NOW - timedelta(days=2)
-    calls = [call(lead="A1", at=t, k=kw(80), z={"intent": "HIGH"}), call(lead="A2", at=t, k=kw(80), z={"intent": "HIGH"}),
-             call(lead="B1", at=t, k=kw(10), z={"intent": "HIGH"}), call(lead="C1", at=t, k=kw(80), z={"intent": "LOW"}),
-             call(lead="E1", at=t, k=kw(90), z={"intent": "HIGH"}),
-             call(user="u2", lead="D1", at=t, k=kw(90))]                                  # no Zipteams rating
+    calls = [call(lead="A1", at=t, s=sem(80), z={"intent": "HIGH"}), call(lead="A2", at=t, s=sem(80), z={"intent": "HIGH"}),
+             call(lead="B1", at=t, s=sem(10), z={"intent": "HIGH"}), call(lead="C1", at=t, s=sem(80), z={"intent": "LOW"}),
+             call(lead="E1", at=t, s=sem(90), z={"intent": "HIGH"}),
+             call(user="u2", lead="D1", at=t, s=sem(90))]                                 # no Zipteams rating
     enrolments = [enrol("A1", t + timedelta(days=1)), enrol("C1", t + timedelta(hours=3)),
                   enrol("B1", t - timedelta(days=1))]                                     # enrolled before the call
     b = compare(calls, enrolments, {"E1": {"stage": ENROLLED}})["benchmark"]
     assert b["zipHigh"] == {"leads": 2, "enrolled": 1, "pct": 50.0, "smallSample": True, "alreadyEnrolled": 2}
     assert b["ourHigh"] == {"leads": 3, "enrolled": 2, "pct": 66.7, "smallSample": True, "alreadyEnrolled": 1}
     assert b["ourHighAllCalls"]["leads"] == 4 and b["ourHighAllCalls"]["enrolled"] == 2
-    many = compare([call(lead=f"H{i}", at=t, k=kw(80), z={"intent": "HIGH"}) for i in range(30)], [], {})["benchmark"]
+    many = compare([call(lead=f"H{i}", at=t, s=sem(80), z={"intent": "HIGH"}) for i in range(30)], [], {})["benchmark"]
     assert many["zipHigh"]["smallSample"] is False and many["zipHigh"]["pct"] == 0.0

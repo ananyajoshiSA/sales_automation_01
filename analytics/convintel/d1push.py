@@ -12,7 +12,7 @@ counts, so the page still says "showing N of M".
 
 Writing to the remote database changes what team leaders see, so it needs the user's go-ahead for each run
 (--push --yes). Snapshots holding transcript excerpts or phone numbers stay local and are refused; the command line
-first replaces any phone number quoted in free text (a model summary or reasoning) with "[number removed]". The SQL
+first replaces any phone number quoted in free text (a summary or reasoning from Claude's reading) with "[number removed]". The SQL
 file holds lead ids and caller names: write it under data/ (git-ignored) and delete it after loading.
 
     python -m analytics.convintel.d1push SNAPSHOT.json... [--sql OUT.sql] [--push --yes]

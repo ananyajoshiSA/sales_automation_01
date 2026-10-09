@@ -1,9 +1,9 @@
-"""What the semantic layer tells the model: a fixed system prompt and a per-call user message.
+"""What Claude is told when it reads a call: fixed reading instructions and a per-call message.
 
-``SYSTEM`` never changes between calls (no dates, names or counts in it), so the API can cache it once and
-read it back on every later call. ``user_message`` sends only what the model needs to judge one call: the
-dialer's start time in IST, direction, logged talk time and call class, then the transcript. It never sends
-the lead number, lead id or anyone's name from the registry row.
+``SYSTEM`` never changes between calls (no dates, names or counts in it), so every reading round gives Claude the
+same instructions (reading.py writes them into the round's INSTRUCTIONS.md). ``user_message`` holds only what is
+needed to judge one call: the dialer's start time in IST, direction, logged talk time and call class, then the
+transcript. It never holds the lead number, lead id or anyone's name from the registry row.
 """
 
 from __future__ import annotations
@@ -82,10 +82,34 @@ you see:
 - machine: an IVR menu, voicemail greeting, recorded announcement, ringback tune or hold music;
 - not_sales_talk: a wrong number, a personal or internal conversation, or talk unrelated to the courses;
 - no_content: almost no words for the talk time logged;
+- thin: some talk, but far too little for the talk time logged (long silences, a call left running);
 - loop: the same phrase or fragment repeating over and over.
 These flags mean "a team leader should listen to this call", not proof of wrongdoing, so keep the reason factual and \
 neutral, and add a finding with category possible_not_real. For an ordinary conversation real_conversation is "yes" \
 and flags is empty.
+
+## Words and phrases
+
+word_analysis is the word- and phrase-level reading of the call. You do it by reading, not with any keyword list, so \
+judge each phrase in its context: "haan" may be agreement or just a filler, "I don't need EMI" is not EMI interest, \
+and "sochna padega" can be hesitation or a polite no. phrases lists the words and short phrases that carry meaning \
+in this call, each an exact copy of usually 2 to 12 words, with who said it, a category and a short note on why it \
+matters:
+- buying_vocabulary: words about buying the course (admission, seat, batch, fees, certificate, enrol);
+- key_phrase: an important word or phrase that fits no other category (the course, an exam, a job goal);
+- objection_wording: the words in which an objection is raised;
+- hesitation: hesitation expressions ("let me think", "ghar pe baat karke batata hoon");
+- commitment_language: promises and agreements from either side ("pakka", "I will pay tomorrow");
+- payment_intent: statements of intent to pay ("send the link", "abhi kitna dena hoga");
+- urgency: urgency from either side ("only two seats left", "I need it before my exam");
+- uncertainty: uncertainty markers ("maybe", "not sure", "dekhte hain");
+- persuasive: caller wording that moved the customer forward;
+- ineffective_wording: caller wording that likely hurt (jargon, a pushy line, a vague answer that dodged a \
+question, an over-promise).
+List the phrases that matter, usually 3 to 15 on a real conversation and fewer on a short one; don't list every word. \
+repeated lists words, phrases or objections that come back again and again (the same objection raised twice, a \
+line the caller keeps repeating): the exact repeating phrase, how many times it occurs word for word in the \
+transcript (2 or more; this is counted automatically and corrected), who says it and what the repetition shows.
 
 ## Reading the customer's intent
 
@@ -104,7 +128,8 @@ think"), and statements that contradict each other.
 quality scores each dimension 0-10: 0-2 the caller missed it although the call clearly needed it, 3-4 weak, 5-6 \
 adequate, 7-8 good, 9-10 excellent. Use null when the call gave no chance to show that skill (for example \
 pricing_explanation when fees never came up and it wasn't the moment to raise them) and say why in note. \
-quality.overall is always a whole number 0-10 for the call as a whole. Each dimension's evidence is an excerpt that \
+quality.overall is a whole number 0-10 for the call as a whole, or null when the call gave no basis to score any \
+skill (no real conversation); never a placeholder such as 0 or 5. Each dimension's evidence is an excerpt that \
 shows the score is fair, or "".
 
 The dimensions: questioning (discovery questions about background, goals, timeline, budget); active_listening \

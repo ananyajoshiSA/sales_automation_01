@@ -11,8 +11,8 @@ Each first-time enrolment is credited once per view (analytics/convintel/attribu
 the lead's owner at enrolment, and to the team of the last person whose answered call on the lead came at or
 before it. Neither known -> "unattributed", with the reason.
 
-``opportunities`` names one next step per (kind, lead), most valuable first, from the semantic layer when a
-call has it, else the keyword layer (confidence at most "medium"). Enrolled leads are skipped. Evidence is
+``opportunities`` names one next step per (kind, lead), most valuable first, from Claude's reading of the lead's
+calls. Enrolled leads are skipped. Evidence is
 built from signals, categories and scores only: never transcript words or lead numbers.
 
     python -m analytics.convintel.revenue PAYMENTS.json
@@ -42,7 +42,7 @@ LINK_WAIT = timedelta(hours=24)         # payment link sent, still no enrolment 
 CALLBACK_WINDOW = timedelta(hours=2)    # a missed inbound call should be returned within this
 FOLLOW_UP_WINDOW = timedelta(hours=48)  # a warm lead should be spoken to again within this
 REPEATED_DIALS = 6                      # dials in the period with no 3+ minute conversation
-NOT_REAL_FLAGS = {"no_content", "machine", "loop"}   # keyword integrity flags that void a call's signals
+NOT_REAL_FLAGS = {"no_content", "machine", "loop"}   # signs in Claude's reading that void a call's signals
 DAY_PARTS = (("morning", 12, "in the morning (10:00-12:00 IST)"),       # (name, IST hour it ends, when to try)
              ("afternoon", 17, "in the afternoon (14:00-16:00 IST)"), ("evening", 24, "in the evening (after 18:00 IST)"))
 
@@ -53,7 +53,7 @@ KINDS = ("payment_ready_unconverted", "link_sent_unpaid", "missed_callback", "hi
          "repeated_dials_no_conversation")
 ROW_KEYS = ("kind", "leadId", "callId", "callerId", "caller", "team", "day", "evidence", "nextAction", "confidence")
 _CONF = {"high": 0, "medium": 1, "low": 2}
-_STEPS = ("link_sent", "amount_and_date_agreed", "amount_quoted", "emi_discussed", "unclear")   # semantic outcome
+_STEPS = ("link_sent", "amount_and_date_agreed", "amount_quoted", "emi_discussed", "unclear")   # reading's outcome
 # Objections that are closures or have their own kind are not "unresolved objections".
 _OWN_KIND = {"not_interested", "joined_elsewhere", "emi_or_finance", "course_unavailable"}
 OBJECTION_ACTIONS = {
@@ -325,45 +325,32 @@ def _cat(x) -> str:
 
 
 def read(c: dict) -> dict | None:
-    """One call's analysis in one shape (semantic when the call has it, else keyword). None when there is
-    neither, or when the analysis says the call is not a real conversation (IVR, voicemail, looping or empty
-    text): such calls belong in the integrity view, not in opportunities. Readiness is None when the layer
-    itself calls it unclear."""
-    sem, kw = c.get("sem"), c.get("kw")
-    if isinstance(sem, dict) and sem:
-        if (sem.get("integrity") or {}).get("real_conversation") == "no":
-            return None
-        intent, out = sem.get("intent") or {}, sem.get("outcome") or {}
-        band = intent.get("readiness_band")
-        return {"engine": "semantic", "band": band,
-                "readiness": _int(intent.get("readiness_score")) if band != "unclear" else None,
-                "objections": [(_cat(o.get("category")), o.get("handled")) for o in sem.get("objections") or []
-                               if isinstance(o, dict) and o.get("category")],
-                "signals": [b.get("type") for b in sem.get("buying_signals") or []
-                            if isinstance(b, dict) and b.get("type") in SIGNAL_TYPES],
-                "payment_step": out.get("payment_step") if out.get("payment_step") in _STEPS else "none",
-                "dated": bool(out.get("dated")),
-                "findings": _findings(sem.get("findings"))}
-    if isinstance(kw, dict) and kw:
-        if set((kw.get("integrity") or {}).get("flags") or ()) & NOT_REAL_FLAGS:
-            return None
-        s = kw.get("signals") or {}
-        band = s.get("readiness_band")
-        return {"engine": "keyword", "band": band,
-                "readiness": _int(s.get("readiness_score")) if band != "unclear" else None,
-                "objections": [(_cat(o), None) for o in s.get("objections") or [] if o],
-                "signals": [b for b in s.get("buying") or [] if b in SIGNAL_TYPES],
-                "payment_step": "payment_words" if s.get("payment_step") else "none",
-                "dated": bool(s.get("dated_next_step")),
-                "findings": _findings(kw.get("findings"))}
-    return None
+    """One call's reading by Claude in one shape. None when Claude has not read the call, or when the reading says
+    it was not a real conversation or names IVR, voicemail, looping or empty text (even on a doubtful verdict):
+    such calls belong in the integrity view, not in opportunities. Readiness is None when the reading itself calls
+    it unclear."""
+    sem = c.get("sem")
+    if not (isinstance(sem, dict) and sem):
+        return None
+    integ = sem.get("integrity") or {}
+    if integ.get("real_conversation") == "no" or set(integ.get("flags") or ()) & NOT_REAL_FLAGS:
+        return None
+    intent, out = sem.get("intent") or {}, sem.get("outcome") or {}
+    band = intent.get("readiness_band")
+    return {"engine": "semantic", "band": band,
+            "readiness": _int(intent.get("readiness_score")) if band != "unclear" else None,
+            "objections": [(_cat(o.get("category")), o.get("handled")) for o in sem.get("objections") or []
+                           if isinstance(o, dict) and o.get("category")],
+            "signals": [b.get("type") for b in sem.get("buying_signals") or []
+                        if isinstance(b, dict) and b.get("type") in SIGNAL_TYPES],
+            "payment_step": out.get("payment_step") if out.get("payment_step") in _STEPS else "none",
+            "dated": bool(out.get("dated")),
+            "findings": _findings(sem.get("findings"))}
 
 
 def _conf(r: dict, strong: bool) -> str:
-    """Semantic: high when two pieces of evidence agree, else medium. Keyword: one step lower, never high."""
-    if r["engine"] == "semantic":
-        return "high" if strong else "medium"
-    return "medium" if strong else "low"
+    """High when two pieces of evidence in the reading agree, else medium."""
+    return "high" if strong else "medium"
 
 
 def _label(x: str) -> str:
@@ -384,9 +371,8 @@ def _dur(c: dict) -> str:
 
 
 def _intro(r: dict, t: datetime, c: dict) -> str:
-    who = "Model reading" if r["engine"] == "semantic" else "Keyword scan"
     score = f"readiness {r['readiness']}/100" if r["readiness"] is not None else "readiness unclear"
-    return f"{who} of the {_when(t)} call ({_dur(c)}): {score}"
+    return f"Claude's reading of the {_when(t)} call ({_dur(c)}): {score}"
 
 
 def _signals(r: dict) -> str:
@@ -414,7 +400,7 @@ def _agreed(r: dict) -> bool:
 
 
 def _payment_step_taken(r: dict) -> bool:
-    return r["payment_step"] in ("link_sent", "amount_and_date_agreed", "payment_words")
+    return r["payment_step"] in ("link_sent", "amount_and_date_agreed")
 
 
 class _Lead:
@@ -424,7 +410,7 @@ class _Lead:
         self.lid, self.now, self.seen_until = lid, now, seen_until
         self.analysed, self.answered, self.missed, self.dials, self.has_real = [], [], [], [], False
         for t, c in cs:     # one pass: this runs for every lead of a 30-day period
-            if (c.get("kw") or c.get("sem")) and (r := read(c)):
+            if c.get("sem") and (r := read(c)):
                 self.analysed.append((t, c, r))
             if c.get("answered"):
                 if c.get("caller_kind") != BOT_KIND:    # an automated call is nobody speaking to the lead
@@ -470,7 +456,7 @@ def _payment_ready(L: _Lead) -> dict | None:
 def _link_sent(L: _Lead) -> dict | None:
     if not L.analysed:
         return None
-    x = L.latest(lambda r: r["payment_step"] in ("link_sent", "payment_words"))
+    x = L.latest(lambda r: r["payment_step"] == "link_sent")
     if not x or L.now - x[0] < LINK_WAIT:      # the latest link is still fresh: not judged yet
         return None
     t, c, r = x
@@ -504,9 +490,8 @@ def _missed_callback(L: _Lead) -> dict | None:
 def _marked_low(L: _Lead) -> dict | None:
     if not L.analysed:
         return None
-    # The lead's readiness as the journey view reads it: latest semantic score, else latest keyword score.
-    x = L.latest(lambda r: r["engine"] == "semantic" and r["readiness"] is not None) or L.latest(
-        lambda r: r["readiness"] is not None)
+    # The lead's readiness as the journey view reads it: the latest score Claude gave.
+    x = L.latest(lambda r: r["readiness"] is not None)
     if not x or x[2]["readiness"] < HIGH_READINESS:
         return None
     t, c, r = x
@@ -539,18 +524,12 @@ def _unresolved_objection(L: _Lead) -> dict | None:
     if not L.real:
         return None
     t, c, r = L.real[-1]
-    if r["engine"] == "semantic":
-        open_ = sorted(((cat, h) for cat, h in r["objections"] if h in ("no", "partly") and cat not in _OWN_KIND),
-                       key=lambda x: x[1] != "no")
-    elif not r["dated"] and not _payment_step_taken(r):  # keywords can't see handling: only when the call ended open
-        open_ = [(cat, None) for cat, _ in r["objections"] if cat not in _OWN_KIND]
-    else:
-        open_ = []
+    open_ = sorted(((cat, h) for cat, h in r["objections"] if h in ("no", "partly") and cat not in _OWN_KIND),
+                   key=lambda x: x[1] != "no")
     if not open_:
         return None
     cats = ", ".join(f"{_label(cat)} (answered: {h})" if h else _label(cat) for cat, h in dict.fromkeys(open_))
-    tail = "" if r["engine"] == "semantic" else " and no agreed next step; keywords can't tell whether it was answered"
-    return _row("unresolved_objection", L.lid, t, c, f"{_intro(r, t, c)}; the lead raised {cats}{tail}.",
+    return _row("unresolved_objection", L.lid, t, c, f"{_intro(r, t, c)}; the lead raised {cats}.",
                 OBJECTION_ACTIONS.get(open_[0][0], OBJECTION_ACTIONS["other"]),
                 _conf(r, any(h == "no" for _, h in open_)), r["readiness"])
 
@@ -631,7 +610,7 @@ def opportunities(calls: list[dict], leads: dict, enrolments: list[dict], now: d
         lid = c.get("lead_id")
         if lid and lid not in enrolled and (t := _t(c)):
             by_lead[lid].append((t, c))
-            if c.get("kw") or c.get("sem") or (c.get("direction") == "inbound" and not c.get("answered")):
+            if c.get("sem") or (c.get("direction") == "inbound" and not c.get("answered")):
                 worth.add(lid)
     rows = []
     for lid, cs in by_lead.items():

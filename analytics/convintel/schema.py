@@ -1,13 +1,11 @@
 """The module's contract: call classes, analysis statuses, analysis layers and their mandatory parts.
 
-A call is ANALYZED only when every required layer has a validated result at the current version. Two layers:
+A call is ANALYZED only when every required layer has a validated result at the current version. Transcripts are
+analysed by Claude only, keyword analysis included (user, 9 Oct 2026), so there is one layer:
 
-* ``keyword`` (engine ``analytics/convintel/rules.py``): word- and phrase-level signals in English, Hindi and
-  Hinglish, sentence labels, repeated phrases, talk density. Deterministic and free, so it runs on every
-  transcript, but it counts words: it is not the context-aware reading the module is for.
-* ``semantic`` (engine ``analytics/convintel/llm.py``): a model reads the whole call for intent, tone, quality,
-  objections and how they were handled, commitments, coaching and evidence-backed findings. It needs model
-  access; until then every transcript stays ANALYSIS_INCOMPLETE with the semantic layer named as missing.
+* ``semantic`` (analytics/convintel/reading.py): Claude reads the whole call inside a Claude Code session, with no
+  API, for words and phrases, intent, tone, quality, objections and how they were handled, commitments, coaching
+  and evidence-backed findings, written in the shape of ``SEMANTIC_SCHEMA`` and checked by validate.py.
 
 Bumping a layer's version re-queues every call for that layer, so coverage is always measured against what
 the current version requires.
@@ -53,17 +51,16 @@ TRANSCRIPT_STATES = (T_NOT_LOOKED_UP, T_FOUND, T_NOT_FOUND, T_NOT_TRANSCRIBED, T
 
 # ------------------------------------------------------------------ layers and versions
 
-KEYWORD, SEMANTIC = "keyword", "semantic"
-LAYERS = (KEYWORD, SEMANTIC)
-KEYWORD_VERSION = "kw-1.0"
-SEMANTIC_VERSION = "sem-1.0"
-REQUIRED_LAYERS = (KEYWORD, SEMANTIC)
-ANALYSIS_VERSION = f"ci-1.0[{KEYWORD_VERSION}+{SEMANTIC_VERSION}]"
+SEMANTIC = "semantic"
+LAYERS = (SEMANTIC,)
+SEMANTIC_VERSION = "sem-1.1"     # 1.1: word and phrase analysis by Claude (user, 9 Oct 2026)
+REQUIRED_LAYERS = (SEMANTIC,)
+ANALYSIS_VERSION = f"ci-1.2[{SEMANTIC_VERSION}]"
+LAYER_LABELS = {SEMANTIC: "Claude reading"}
 
-KEYWORD_COMPONENTS = ("language", "word_level", "sentence_level", "signals", "integrity")
-SEMANTIC_COMPONENTS = ("language", "speaker_turns", "intent", "tone", "quality", "objections", "buying_signals",
+SEMANTIC_COMPONENTS = ("language", "word_analysis", "speaker_turns", "intent", "tone", "quality", "objections", "buying_signals",
                        "commitments", "unanswered_questions", "coaching", "outcome", "integrity", "findings", "summary")
-COMPONENTS = {KEYWORD: KEYWORD_COMPONENTS, SEMANTIC: SEMANTIC_COMPONENTS}
+COMPONENTS = {SEMANTIC: SEMANTIC_COMPONENTS}
 
 # ------------------------------------------------------------------ shared vocabularies
 
@@ -76,6 +73,11 @@ OBJECTION_CATEGORIES = ("price", "emi_or_finance", "time", "value_doubt", "trust
 SIGNAL_TYPES = ("fee_question", "payment_intent", "emi_interest", "start_date", "enrol_intent", "urgency",
                 "decision_maker_ready", "documents_or_details", "other")
 READINESS_BANDS = ("hot", "warm", "cool", "cold", "unclear")
+# Word and phrase analysis (requirement 03, word_analysis), done by Claude reading the call, never by a keyword list
+# (user, 9 Oct 2026: "Keyword analysis is also to be done via claude models only").
+WORD_CATEGORIES = ("buying_vocabulary", "key_phrase", "objection_wording", "hesitation", "commitment_language",
+                   "payment_intent", "urgency", "uncertainty", "persuasive", "ineffective_wording")
+SPEAKERS = ("caller", "customer", "unclear")
 FINDING_CATEGORIES = ("buying_signal_missed", "objection_unhandled", "payment_ready", "payment_friction",
                       "course_unavailable", "commitment_made", "callback_promised", "question_unanswered",
                       "misinformation_risk", "pressure_excessive", "strong_practice", "possible_not_real",
@@ -119,12 +121,18 @@ def _arr(item: dict) -> dict:
 _NULLABLE_INT = {"anyOf": [{"type": "integer"}, {"type": "null"}]}
 _LEVEL = _enum(("high", "medium", "low", "unclear"))
 
-# The semantic layer's output, enforced with structured outputs and checked again by validate.py (ranges,
-# excerpts found verbatim in the transcript). Integers carry their range in the description because the API
-# does not accept numeric bounds in the schema.
+# The shape of Claude's reading of one call, checked by validate.py (ranges, labels, excerpts found verbatim in the
+# transcript). Integers carry their range in the description, where Claude reads it.
 SEMANTIC_SCHEMA = _obj({
     "language": _obj({"primary": _enum(("english", "hindi", "hinglish", "other", "unclear")),
                       "code_switching": {"type": "boolean"}, "notes": {"type": "string"}}),
+    "word_analysis": _obj({
+        "phrases": _arr(_obj({"category": _enum(WORD_CATEGORIES), "excerpt": _EXCERPT, "speaker": _enum(SPEAKERS),
+                              "note": {"type": "string", "description": "Why the words matter here, in a few words."}})),
+        "repeated": _arr(_obj({"excerpt": _EXCERPT, "speaker": _enum(SPEAKERS),
+                               "times": {"type": "integer", "description": "times the excerpt occurs word for word, 2 or more"},
+                               "what": {"type": "string", "description": "What the repetition shows."}})),
+    }),
     "speaker_turns": _obj({
         "labels_in_transcript": {"type": "boolean", "description": "Does the transcript itself mark who speaks?"},
         "inferred": {"type": "boolean", "description": "True when turns were inferred from content, not labels."},
@@ -163,7 +171,7 @@ SEMANTIC_SCHEMA = _obj({
     "quality": _obj({
         **{d: _obj({"score": {**_NULLABLE_INT, "description": "0-10, null when the call gave no chance to show it"},
                     "evidence": _EXCERPT, "note": {"type": "string"}}) for d in QUALITY_DIMENSIONS},
-        "overall": {"type": "integer", "description": "0-10 overall sales quality of this call"},
+        "overall": {**_NULLABLE_INT, "description": "0-10 overall sales quality of this call, null when no skill could be scored"},
     }),
     "objections": _arr(_obj({"category": _enum(OBJECTION_CATEGORIES), "excerpt": _EXCERPT,
                              "handled": _enum(("yes", "partly", "no", "unclear")),
@@ -189,7 +197,7 @@ SEMANTIC_SCHEMA = _obj({
     }),
     "integrity": _obj({
         "real_conversation": _enum(("yes", "doubtful", "no")),
-        "flags": _arr(_enum(("one_sided", "not_sales_talk", "machine", "no_content", "loop"))),
+        "flags": _arr(_enum(("one_sided", "not_sales_talk", "machine", "no_content", "thin", "loop"))),
         "reason": {"type": "string"},
     }),
     "findings": _arr(_obj({"category": _enum(FINDING_CATEGORIES), "excerpt": _EXCERPT,

@@ -1,10 +1,9 @@
 """Our reading of each call against Zipteams' intent rating, kept independent: Zipteams is one input, never the answer.
 
-Our view is the call's readiness score (0-100) from the semantic layer, else the keyword layer (the engine is
-recorded), in three coarse levels: high >= 65, medium 35-64, low < 35. Zipteams' intent maps HIGH -> high,
-MODERATE -> medium, NEUTRAL / LOW -> low. A call with our analysis but no Zipteams rating (most teams have no
-Zipteams notes) has no baseline, which is never a disagreement; a call our analysis rates "unclear" (too little
-talk) is not compared either. Every disagreement becomes a finding (category "zip_disagreement") for review, and
+Our view is the call's readiness score (0-100) from Claude's reading of the transcript, in three coarse levels:
+high >= 65, medium 35-64, low < 35. Zipteams' intent maps HIGH -> high, MODERATE -> medium, NEUTRAL / LOW -> low.
+A call with our analysis but no Zipteams rating (most teams have no Zipteams notes) has no baseline, which is
+never a disagreement; a call our analysis rates "unclear" (too little talk) is not compared either. Every disagreement becomes a finding (category "zip_disagreement") for review, and
 the benchmark shows how often each side's high-intent leads later enrolled.
 """
 
@@ -23,7 +22,7 @@ OUR_HIGH, OUR_MEDIUM = 65, 35
 EXAMPLES = 20
 FINDINGS_CAP = 200          # in the snapshot; disagreements() returns them all
 SMALL_SAMPLE = 30           # fewer leads than this: the enrolled share is not reliable
-ENGINE_LABEL = {"semantic": "the model's reading of the transcript", "keyword": "the keyword scan of the transcript"}
+ENGINE_LABEL = {"semantic": "Claude's reading of the transcript"}
 
 
 def our_level(score: float | None) -> str | None:
@@ -130,7 +129,7 @@ def compare(calls: list[dict], enrolments: list[dict], leads: dict) -> dict:
     found: list[tuple[dict, dict]] = []
     for c in calls:
         intent = _zip_intent(c)
-        score, _band, engine = readiness(c) if c.get("sem") or c.get("kw") else (None, None, None)
+        score, _band, engine = readiness(c)
         if engine is None:
             tot["zipOnly"] += intent in ZIP_LEVELS
             continue
@@ -181,7 +180,7 @@ def compare(calls: list[dict], enrolments: list[dict], leads: dict) -> dict:
             "zipOnly", "analysed")
     agree_pct = round(100 * tot["agree"] / tot["compared"], 1) if tot["compared"] else None
     return {**{k: tot[k] for k in keys}, "agreePct": agree_pct,
-            "byEngine": {"semantic": engines["semantic"], "keyword": engines["keyword"]},
+            "byEngine": {"semantic": engines["semantic"]},
             "byTeam": by_team, "examples": examples, "examplesTotal": len(found),
             "findings": findings, "findingsTotal": len(found),
             "benchmark": {"zipHigh": _share(zip_high, enrol_at, leads), "ourHigh": _share(our_high, enrol_at, leads),

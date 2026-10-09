@@ -1,14 +1,10 @@
 import json
 import os
-import sys
-import types
 from datetime import datetime, timedelta, timezone
 
 import pytest
 
-import analytics.convintel as ci
 from analytics.convintel import schema as S
-from analytics.convintel.analyze import keyword_pass, poll_batches, semantic_pass
 from analytics.convintel.attribution import Directory
 from analytics.convintel.classify import classify, parse_duration
 from analytics.convintel.fetch import match, process_number, run_fetch, source_id
@@ -110,22 +106,32 @@ def test_call_without_number_is_not_found_with_reason(reg):
 
 def test_derive_status_every_state():
     found = {"transcript_state": S.T_FOUND, "transcript_expected": 1}
-    kw = {"layer": S.KEYWORD, "version": S.KEYWORD_VERSION, "state": "done"}
+    kw = {"layer": "keyword", "version": "kw-1.0", "state": "done"}     # left in old registries by the removed rules
     sem = {"layer": S.SEMANTIC, "version": S.SEMANTIC_VERSION, "state": "done"}
+    assert S.REQUIRED_LAYERS == (S.SEMANTIC,)                          # Claude's reading is the analysis
     assert derive_status(found, {}, NOW)[0] == S.PENDING_ANALYSIS
-    assert derive_status(found, {S.KEYWORD: kw, S.SEMANTIC: sem}, NOW)[0] == S.ANALYZED
-    st, missing, why = derive_status(found, {S.KEYWORD: kw}, NOW, blocked={S.SEMANTIC: "no model access"})
-    assert (st, missing) == (S.ANALYSIS_INCOMPLETE, [S.SEMANTIC]) and "no model access" in why
+    assert derive_status(found, {S.SEMANTIC: sem}, NOW)[0] == S.ANALYZED
+    st, missing, why = derive_status(found, {"keyword": kw}, NOW)     # an old keyword result changes nothing
+    assert (st, missing) == (S.PENDING_ANALYSIS, [S.SEMANTIC]) and "Claude reading" in why
     old = {**sem, "version": "sem-0.9"}
-    assert derive_status(found, {S.KEYWORD: kw, S.SEMANTIC: old}, NOW)[0] == S.ANALYSIS_INCOMPLETE  # version bump re-queues
+    assert derive_status(found, {S.SEMANTIC: old}, NOW)[0] == S.PENDING_ANALYSIS   # version bump re-queues
     running = {**sem, "state": "in_progress", "claimed_utc": ts(NOW - timedelta(minutes=5))}
-    assert derive_status(found, {S.KEYWORD: kw, S.SEMANTIC: running}, NOW)[0] == S.ANALYSIS_IN_PROGRESS
+    assert derive_status(found, {S.SEMANTIC: running}, NOW)[0] == S.ANALYSIS_IN_PROGRESS
     stale = {**running, "claimed_utc": ts(NOW - timedelta(hours=2))}
-    assert derive_status(found, {S.KEYWORD: kw, S.SEMANTIC: stale}, NOW)[0] == S.ANALYSIS_INCOMPLETE
-    batched = {**sem, "state": "batched", "claimed_utc": ts(NOW - timedelta(hours=10))}
-    assert derive_status(found, {S.KEYWORD: kw, S.SEMANTIC: batched}, NOW)[0] == S.ANALYSIS_IN_PROGRESS
+    assert derive_status(found, {S.SEMANTIC: stale}, NOW)[0] == S.PENDING_ANALYSIS
+    batched = {**sem, "state": "batched", "batch_id": "r1", "claimed_utc": ts(NOW - timedelta(hours=10))}
+    st, _, why = derive_status(found, {S.SEMANTIC: batched}, NOW)
+    assert st == S.ANALYSIS_IN_PROGRESS and "handed out in round r1" in why
+    assert derive_status(found, {S.SEMANTIC: {**batched, "claimed_utc": ts(NOW - timedelta(hours=26))}},
+                         NOW)[0] == S.PENDING_ANALYSIS                 # an unread round is handed out again
     failed = {**sem, "state": "failed", "error": "boom"}
-    assert derive_status(found, {S.KEYWORD: kw, S.SEMANTIC: failed}, NOW)[0] == S.ANALYSIS_FAILED
+    assert derive_status(found, {S.SEMANTIC: failed}, NOW)[0] == S.ANALYSIS_FAILED
+    part = {**sem, "state": "incomplete", "missing": '["coaching"]'}
+    st, _, why = derive_status(found, {S.SEMANTIC: part}, NOW)
+    assert st == S.ANALYSIS_INCOMPLETE and "Claude reading missing coaching" in why
+    both = (S.SEMANTIC, "other")                                        # the rules still work for several layers
+    st, missing, why = derive_status(found, {S.SEMANTIC: sem}, NOW, required=both)
+    assert (st, missing) == (S.ANALYSIS_INCOMPLETE, ["other"]) and "not done yet" in why
     assert derive_status({"transcript_state": S.T_NOT_EXPECTED, "transcript_expected": 0}, {}, NOW)[0] == S.NO_TRANSCRIPT_EXPECTED
     assert derive_status({"transcript_state": S.T_NOT_LOOKED_UP, "transcript_expected": 1}, {}, NOW)[0] == S.PENDING_ANALYSIS
     assert derive_status({"transcript_state": S.T_LOOKUP_FAILED, "transcript_expected": 1}, {}, NOW)[0] == S.PENDING_ANALYSIS
@@ -264,99 +270,6 @@ def test_run_fetch_never_exceeds_nine_requests(reg, tmp_path):
 
 
 # ------------------------------------------------------------------ analysis runner
-
-def _found(reg, tmp_path, n=2):
-    for i in range(n):
-        reg.upsert_calls([rec(i, "2026-10-05 05:00:00", number=f"9190000{i:05d}")], NOW)
-        p = tmp_path / f"c{i}.txt"
-        p.write_text("synthetic words about fees and the course start date", encoding="utf-8")
-        import hashlib
-        reg.set_transcript(f"c{i}", S.T_FOUND, NOW, transcript_ref=str(p),
-                           transcript_sha256=hashlib.sha256(p.read_bytes()).hexdigest(), transcript_source_id=f"s{i}")
-
-
-@pytest.fixture
-def fake_rules(monkeypatch):
-    m = types.ModuleType("analytics.convintel.rules")
-    m.ENGINE = "rules"
-    m.analyze_keywords = lambda text, d: {**{k: {} for k in S.KEYWORD_COMPONENTS},
-                                          "findings": [{"category": "other", "excerpt": "fees", "offset": 15,
-                                                        "confidence": "low", "reasoning": "r", "recommended_action": "a"}]}
-    m.missing_components = lambda out: [k for k in S.KEYWORD_COMPONENTS if k not in out]
-    monkeypatch.setitem(sys.modules, "analytics.convintel.rules", m)
-    monkeypatch.setattr(ci, "rules", m, raising=False)
-    return m
-
-
-def test_keyword_then_blocked_semantic_is_incomplete_with_reason(reg, tmp_path, fake_rules):
-    _found(reg, tmp_path)
-    assert keyword_pass(reg, NOW)["done"] == 2
-    assert keyword_pass(reg, NOW)["claimed"] == 0                       # idempotent
-
-    class NoKey:
-        engine = "claude:test"
-
-        def ready(self):
-            return False, "ANTHROPIC_API_KEY is not set"
-    assert semantic_pass(reg, NOW, 10, engine=NoKey())["blocked"] == 1
-    c = reg.call("c0")
-    assert c["analysis_status"] == S.ANALYSIS_INCOMPLETE and "ANTHROPIC_API_KEY" in c["status_reason"]
-    assert reg.q("SELECT COUNT(*) AS n FROM conversation_quality_findings")[0]["n"] == 2
-
-
-def test_missing_transcript_file_is_searched_again(reg, tmp_path, fake_rules):
-    _found(reg, tmp_path, 1)
-    os.remove(tmp_path / "c0.txt")
-    assert keyword_pass(reg, NOW)["transcript_missing"] == 1
-    c = reg.call("c0")
-    assert c["transcript_state"] == S.T_NOT_LOOKED_UP and c["analysis_status"] == S.PENDING_ANALYSIS
-
-
-class FakeEngine:
-    engine = "claude:test"
-
-    def __init__(self, outputs):
-        self.outputs, self.batches = outputs, {}
-
-    def ready(self):
-        return True, ""
-
-    def analyze(self, call, text):
-        return self.outputs.get(call["call_id"], {"output": None, "error": "rate limited"})
-
-    def submit_batch(self, items):
-        self.batches["b1"] = [cid for cid, _, _ in items]
-        return "b1"
-
-    def batch_state(self, bid):
-        return "ended"
-
-    def batch_results(self, bid):
-        for cid in self.batches[bid][:1]:
-            yield cid, self.outputs[cid]
-
-
-def test_semantic_failure_is_retried_later_and_batch_gaps_fail(reg, tmp_path, fake_rules, monkeypatch):
-    import analytics.convintel.validate as v
-    monkeypatch.setattr(v, "validate_semantic", lambda out, text: (out, [], 0))
-    _found(reg, tmp_path)
-    keyword_pass(reg, NOW)
-    good = {"output": {k: {} for k in S.SEMANTIC_COMPONENTS} | {"findings": []}, "error": None}
-    out = semantic_pass(reg, NOW, 10, engine=FakeEngine({"c0": good}))
-    assert (out["done"], out["failed"]) == (1, 1)
-    assert reg.call("c0")["analysis_status"] == S.ANALYZED
-    c1 = reg.call("c1")
-    assert c1["analysis_status"] == S.ANALYSIS_FAILED and "rate limited" in c1["status_reason"]
-    assert semantic_pass(reg, NOW, 10, engine=FakeEngine({}))["claimed"] == 0   # waits for its retry time
-    later = NOW + timedelta(minutes=6)
-    eng = FakeEngine({"c1": good})
-    assert semantic_pass(reg, later, 10, engine=eng, mode="batch")["batched"] == 1
-    assert reg.call("c1")["analysis_status"] == S.ANALYSIS_IN_PROGRESS
-    assert poll_batches(reg, later, engine=eng)["done"] == 1
-    assert reg.call("c1")["analysis_status"] == S.ANALYZED
-    checks = {c["check"]: c for c in reconcile(reg, "2026-10-05", "2026-10-05", later)}
-    assert checks["analysed calls have every layer"]["ok"] and checks["found transcripts on disk"]["ok"]
-
 
 def test_inventory_reads_a_block_once_and_counts_each_day(reg):
     acts = [act(1, "2026-10-04 19:00:00"), act(2, "2026-10-05 20:00:00"), act(3, "2026-10-06 10:00:00")]
