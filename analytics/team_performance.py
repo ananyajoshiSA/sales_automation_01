@@ -22,14 +22,14 @@ import subprocess
 import sys
 import time
 from collections import Counter, defaultdict
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from analytics.call_markers import MARKERS, PAYMENT_STEP, marker_rates, summary_has_payment_step
 from analytics.lead_priority import strip_html
 from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS
 from analytics.team_report import IST, utc, zip_score
 
-VERSION = "1.2"
+VERSION = "1.3"
 REAL_SECS = REAL_CONVERSATION_SECS
 LONG_NON_CONVERTED_SECS = 300
 BOT = re.compile(r"\b(system|bot|welcome|reminder|webinar|ivr)\b", re.I)
@@ -65,19 +65,22 @@ def load_run(path: str) -> dict:
             "enrollments": j("enrollments.json"), "payments": j("payments.json")}
 
 
-def map_calls(calls: list[dict], users: list[dict], d0: datetime | None = None) -> tuple[list[dict], int, set[str], int]:
+def map_calls(calls: list[dict], users: list[dict], d0: datetime | None = None) -> tuple[list[dict], int, set[str], int, int]:
     """P1, P10-P12, P14: name and team per call; bot calls and calls outside the IST day removed.
 
-    The activity API can return calls created weeks earlier but edited on the day, so every call is
-    re-checked against the window. Returns (calls, bots, multi-group user ids, calls outside the day).
+    The activity API filters on the last edit, so every call is re-checked against the window by its start.
+    Returns (calls, bots, multi-group user ids, calls outside the day, calls whose start time can't be read).
     """
     by_id = {u["ID"]: u for u in users}
     by_name = {_name(u): u for u in users}
-    kept, bots, multi, outside = [], 0, set(), 0
+    kept, bots, multi, outside, bad_time = [], 0, set(), 0, 0
     for c in calls:
         c = dict(c)
         c["t"] = utc(c.get("start_utc"))
-        if d0 and not (c["t"] and d0 <= c["t"] < d0 + timedelta(days=1)):
+        if not c["t"]:
+            bad_time += 1
+            continue
+        if d0 and not d0 <= c["t"] < d0 + timedelta(days=1):
             outside += 1
             continue
         u = by_id.get(c.get("user_id")) or by_name.get((c.get("caller") or "").strip())
@@ -94,8 +97,8 @@ def map_calls(calls: list[dict], users: list[dict], d0: datetime | None = None) 
         c["ans"] = c.get("status") == "Answered"
         c["real"] = c["ans"] and (c.get("duration") or 0) >= REAL_SECS
         kept.append(c)
-    kept.sort(key=lambda c: c["t"] or datetime.min.replace(tzinfo=timezone.utc))
-    return kept, bots, multi, outside
+    kept.sort(key=lambda c: c["t"])
+    return kept, bots, multi, outside, bad_time
 
 
 def credit_enrollments(enrollments: list[dict], calls: list[dict], users: list[dict], cw_end: datetime | None = None) -> list[dict]:
@@ -163,7 +166,9 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
     meta = run["meta"]
     d0 = datetime.fromisoformat(meta["d0"])
     cw_end = min(datetime.fromisoformat(meta["cw_end"]), as_of) if as_of else datetime.fromisoformat(meta["cw_end"])
-    calls, bots, multi, outside = map_calls(run["calls"], run["users"], d0)
+    calls, bots, multi, outside, bad_time = map_calls(run["calls"], run["users"], d0)
+    day_end = d0 + timedelta(days=1)
+    late = sum(1 for c in calls if (m := utc(c.get("modified_utc"))) and m >= day_end)
     E = credit_enrollments(run["enrollments"], calls, run["users"], cw_end)
     cred_t = Counter(e["team"] for e in E if e["team"])
     cred_p = Counter((e["team"], e["caller"]) for e in E if e["team"])
@@ -195,7 +200,8 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
         "best_front_line": front[0] if front else None,
         "rec": rec, "coach_case": max(cases, key=lambda p: p["real"]) if cases else None, "assets": assets,
         "enrollments": E,
-        "totals": {"calls_raw": len(run["calls"]), "outside_window_excluded": outside, "bots_excluded": bots, "calls": len(calls), "outbound": len(out_calls),
+        "totals": {"calls_raw": len(run["calls"]), "outside_window_excluded": outside, "unreadable_time_excluded": bad_time,
+                   "late_edits_recovered": late, "edit_margin_days": meta.get("edit_margin_days", 0), "bots_excluded": bots, "calls": len(calls), "outbound": len(out_calls),
                    "inbound": len(calls) - len(out_calls), "answered_out": sum(c["ans"] for c in out_calls),
                    "zip_total": len(run["zips"]), "zip_attr": len(Z), "zip_dropped": dropped, "enroll_window": len(E),
                    "enroll_credited": sum(cred_t.values()), "payments": len(run["payments"]),
@@ -246,10 +252,24 @@ def fetch_transcripts(A: dict, out_dir: str) -> dict:
         except Exception as e:  # noqa: BLE001 - one failed chunk must not lose the rest
             failed += 1
             print(f"transcript chunk {i // 10 + 1} failed: {str(e)[:120]}", file=sys.stderr)
-    best = {}
-    for x in res:
-        if not x.start_time or x.start_time.astimezone(IST).strftime("%Y-%m-%d") != A["date"]:
-            continue
+    rows, shifts = pick_transcripts(res, A["_calls"], meta)
+    os.makedirs(out_dir, exist_ok=True)
+    json.dump(rows, open(os.path.join(out_dir, "transcripts.json"), "w"))
+    return summarise_transcripts(rows, {"requests": tc.requests_made, "failed_chunks": failed, "numbers": len(nums),
+                                        "sample_conv": len(conv), "sample_non": len(non), "top5": top, "time_shifts": shifts})
+
+
+def pick_transcripts(api_calls: list, calls: list[dict], meta: dict[str, dict]) -> tuple[list[dict], dict[str, int]]:
+    """P32: per sampled number, the longest transcript of 120 s or more that matches one of the day's answered
+    LeadSquared calls. The time is LeadSquared's, so a wrongly labelled API clock can't move a call to another day.
+    Returns the rows and the matches counted by the shift the API time needed."""
+    from integrations.transcripts.client import match_to_calls, normalize_phone, shift_counts
+
+    day = [c for c in calls if c["ans"] and c["t"] and normalize_phone(c.get("lead_number")) in meta]
+    hits = match_to_calls(api_calls, [{**c, "activity_id": i} for i, c in enumerate(day)])
+    best, shifts = {}, Counter()
+    for x, shift in hits.values():
+        shifts[shift] += 1
         if (x.duration or 0) < REAL_SECS or not x.transcript.strip() or (x.agent_name and BOT.search(x.agent_name)):
             continue
         k = normalize_phone(x.phone)
@@ -257,10 +277,7 @@ def fetch_transcripts(A: dict, out_dir: str) -> dict:
             best[k] = x
     rows = [{**meta[k], "agent": x.agent_name, "duration": x.duration, "transcript": x.transcript}
             for k, x in best.items() if k in meta]
-    os.makedirs(out_dir, exist_ok=True)
-    json.dump(rows, open(os.path.join(out_dir, "transcripts.json"), "w"))
-    return summarise_transcripts(rows, {"requests": tc.requests_made, "failed_chunks": failed, "numbers": len(nums),
-                                        "sample_conv": len(conv), "sample_non": len(non), "top5": top})
+    return rows, shift_counts(shifts)
 
 
 def summarise_transcripts(rows: list[dict], info: dict) -> dict:

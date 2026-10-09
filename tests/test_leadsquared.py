@@ -177,3 +177,49 @@ def test_iter_activities_by_event_pages(client):
     assert [g["id"] for g in got] == [1, 2, 3]
     body = json.loads(responses.calls[0].request.body)
     assert body["Parameter"] == {"FromDate": "2026-10-01 00:00:00", "ToDate": "2026-10-02 00:00:00", "ActivityEvent": 22}
+
+
+@responses.activate
+def test_iter_activities_started_reads_later_edits_and_keeps_by_start(client):
+    """The API filters on ModifiedOn: a day's calls edited later must still be found, and older calls edited on the day dropped."""
+    from integrations.timeutil import IST
+
+    url = HOST + "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+    day1 = [{"ProspectActivityId": "a1", "CreatedOn": "2026-10-05 05:00:00", "ModifiedOn": "2026-10-05 05:02:00"},
+            {"ProspectActivityId": "old", "CreatedOn": "2026-09-20 05:00:00", "ModifiedOn": "2026-10-05 07:00:00"},
+            {"ProspectActivityId": "a2", "CreatedOn": "2026-10-05 06:00:00", "ModifiedOn": "2026-10-05 06:01:00"},
+            {"ProspectActivityId": "bad", "CreatedOn": "", "ModifiedOn": "2026-10-05 10:00:00"}]  # kept, so it gets counted
+    day2 = [{"ProspectActivityId": "midnight", "CreatedOn": "2026-10-05 18:28:00", "ModifiedOn": "2026-10-05 18:33:00"},
+            {"ProspectActivityId": "a2", "CreatedOn": "2026-10-05 06:00:00", "ModifiedOn": "2026-10-06 04:00:00"},  # repeat
+            {"ProspectActivityId": "next", "CreatedOn": "2026-10-05 19:00:00", "ModifiedOn": "2026-10-05 19:00:30"}]
+    responses.post(url, json={"List": day1})
+    responses.post(url, json={"List": day2})
+    d0 = datetime(2026, 10, 5, tzinfo=IST)
+    got = list(client.iter_activities_started(22, d0, d0.replace(hour=23, minute=59, second=59),
+                                              margin=timedelta(days=1), now=datetime(2026, 10, 9, tzinfo=IST)))
+    assert [g["ProspectActivityId"] for g in got] == ["a1", "a2", "bad", "midnight"]
+    windows = [json.loads(c.request.body)["Parameter"] for c in responses.calls]
+    assert [(w["FromDate"], w["ToDate"]) for w in windows] == [("2026-10-04 18:30:00", "2026-10-05 18:29:59"),
+                                                              ("2026-10-05 18:30:00", "2026-10-06 18:29:59")]
+
+
+@responses.activate
+def test_iter_activities_started_never_reads_past_now(client):
+    from integrations.timeutil import IST
+
+    url = HOST + "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+    responses.post(url, json={"List": [{"ProspectActivityId": "x", "CreatedOn": "2026-10-04 19:00:00", "ModifiedOn": ""}]})
+    d0 = datetime(2026, 10, 5, tzinfo=IST)
+    got = list(client.iter_activities_started(22, d0, d0 + timedelta(days=1, seconds=-1), now=d0 + timedelta(hours=10)))
+    assert [g["ProspectActivityId"] for g in got] == ["x"]       # bad ModifiedOn is fine: CreatedOn decides
+    (w,) = [json.loads(c.request.body)["Parameter"] for c in responses.calls]
+    assert w["ToDate"] == "2026-10-05 04:30:00"
+
+
+def test_parse_phone_call_keeps_the_edit_time_and_ignores_note_start_times():
+    from integrations.leadsquared import parse_phone_call
+    act = {"ActivityEvent": "22", "CreatedOn": "2026-10-05 14:29:02", "ModifiedOn": "2026-10-05 14:29:34",
+           "ActivityEvent_Note": 'StartTime{=}10/5/2026 2:29:02 PM{next}'
+                                 'SourceData{=}{"StartTime":"2026-10-05 19:59:02","DestinationNumber":"600"}{next}'}
+    c = parse_phone_call(act)
+    assert (c["start_utc"], c["modified_utc"]) == ("2026-10-05 14:29:02", "2026-10-05 14:29:34")

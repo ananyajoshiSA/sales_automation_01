@@ -22,11 +22,11 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from analytics.team_report import zip_score
+from integrations.timeutil import IST
 from integrations.leadsquared import (
     PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, format_datetime, parse_phone_call,
 )
 
-IST = timezone(timedelta(hours=5, minutes=30))
 REAL_CALL_SECS = 120
 ENROLLED = "Course Enrolled"
 ZIP_NOTES = 237

@@ -58,8 +58,14 @@ places and in GOAL.md together, or not at all.
 **Data and judgement**
 - Zipteams intent is one input, never the answer. Where Zipteams and LeadSquared disagree, flag it.
 - Fix the dialer before judging the caller.
-- Every time shown to people is IST. LeadSquared returns UTC strings; transcript sources may label IST as
-  UTC (the client corrects most of this; `call_integrity` also matches a 5 h 30 min shift when durations agree).
+- Every time shown to people is IST. Take `IST`, `utc()` and the clock from `integrations/timeutil.py`;
+  a test fails on a second IST or a zoneless `datetime.now()`. Details: [docs/timezone_issues.md](docs/timezone_issues.md).
+  - A call starts at its `CreatedOn` (UTC). Never read a call note's `StartTime`: one copy is UTC, the other IST,
+    and neither is labelled.
+  - LeadSquared's activity date filter is on `ModifiedOn`, so fetch calls, notes and payments for days with
+    `iter_activities_started`, which reads 3 days of later edits and keeps activities by `CreatedOn`.
+  - Transcript API clocks can be 5 h 30 min off in either direction. Place a transcript on a day only through
+    `match_to_calls`, which takes the time from its LeadSquared call.
 - Count each call once. Don't add per-call rows to D1.
 - Never invent numbers, targets or probabilities. Label estimates as estimates (as the call-plan PDF does).
   `analytics.revenue` reads payment activities (event 213), but the API returned none for 5–8 Oct 2026;

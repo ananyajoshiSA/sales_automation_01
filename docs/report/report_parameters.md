@@ -1,6 +1,6 @@
 # Fixed parameters for the daily team calling report
 
-Version 1.2, 8 Oct 2026. v1.2 adds the call-integrity section (11, P67–P74), its page-2 block (P62) and validation check 14. v1.1 changed only the layout (P62/P64) and added the blocking validation gate (section 10). Every definition and number rule from v1.0 is unchanged, so v1.0–v1.2 figures for teams and callers are comparable. Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
+Version 1.3, 9 Oct 2026. v1.3 fixes the day window and transcript times (S1, S3, S6, P2, P32, check 8; see [docs/timezone_issues.md](../timezone_issues.md)): calls are read up to 3 days past the day so later-edited calls are kept, and each transcript takes its time from its LeadSquared call. Definitions are unchanged, but v1.3 counts can be slightly higher than v1.2 for the same day, so compare reports only within a version. v1.2 adds the call-integrity section (11, P67–P74), its page-2 block (P62) and validation check 14. v1.1 changed only the layout (P62/P64) and added the blocking validation gate (section 10). Every definition and number rule from v1.0 is unchanged, so v1.0–v1.2 figures for teams and callers are comparable with each other. Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
 
 The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in its `<parameters>` block. Change both files together.
 
@@ -11,7 +11,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 | ID | Parameter | Fixed value | Requirement |
 |---|---|---|---|
 | P1 | Target day | `{TARGET_DATE}`, a single IST calendar day | Window is 00:00:00 to 23:59:59 IST, i.e. previous day 18:30:00 to target day 18:29:59 UTC on LeadSquared's clock. |
-| P2 | Timezone | IST (UTC+05:30) | All times shown in IST. LeadSquared `CreatedOn` is UTC and must be converted. Transcript times use `Call.start_time` (already timezone-corrected by `integrations/transcripts`). |
+| P2 | Timezone | IST (UTC+05:30) | All times shown in IST, using `integrations/timeutil.py`. LeadSquared `CreatedOn` is UTC and is the call start; never use a call note's `StartTime` (one copy is UTC, the other IST, neither labelled). A transcript's time is its matched LeadSquared call's time (`match_to_calls`), because API clocks can be 5 h 30 min off in either direction. |
 | P3 | Conversion window | Target day through target day + 3 days (IST), capped at "now" | The window must be printed on the report. Never compare reports with different windows. |
 | P4 | Repository | github.com/ananyajoshiSA/sales_automation_01, `main` | Run from the repo with `PYTHONPATH=.`. Install `requirements.txt` first. Run `python -m integrations.leadsquared check` and stop if it fails. |
 
@@ -19,12 +19,12 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 
 | ID | Source | What is read | How |
 |---|---|---|---|
-| S1 | LeadSquared phone activities | Every outbound (event 22) and inbound (event 21) call in the window, parsed with `parse_phone_call` | `scripts/fetch_all_calls.py {D} {D} data/all_calls_{D}.jsonl` or `iter_activities_by_event`. **Never** use "leads modified" or lead edits as a proxy for calls. |
+| S1 | LeadSquared phone activities | Every outbound (event 22) and inbound (event 21) call in the window, parsed with `parse_phone_call` | `scripts/fetch_all_calls.py {D} {D} data/all_calls_{D}.jsonl` or `iter_activities_started`, which reads edits up to 3 days past the window (the API filters on `ModifiedOn`) and keeps calls by `CreatedOn`. Print how many later-edited calls were recovered. **Never** use "leads modified" or lead edits as a proxy for calls. |
 | S2 | LeadSquared users | `UserManagement.svc/Users.Get` (all users with `MemberOfGroups`) | `LeadSquaredClient().get_users()` |
-| S3 | Zipteams analysis | "Zipteams Notes" activities, event 237, created in the window | `iter_activities_by_event(237, …)`. Must be included. A report without Zipteams is not a valid run. |
+| S3 | Zipteams analysis | "Zipteams Notes" activities, event 237, created in the window | `iter_activities_started(237, …)`. Must be included. A report without Zipteams is not a valid run. |
 | S4 | Enrollments | Leads whose `ProspectStage` = "Course Enrolled", with stage-change history (event 3002) | Same logic as `scripts/d1_backfill.py` "first-time enrollments" |
 | S5 | Transcripts | Centralized transcript API, `TranscriptClient.search` | See P30–P34 for sampling and limits |
-| S6 | Payments (context only) | "Payment Successful", event 213 | Report the count; do not use it as the conversion measure while it is empty. |
+| S6 | Payments (context only) | "Payment Successful", event 213, read with the same 3-day edit margin as S1 | Report the count; do not use it as the conversion measure while it is empty. |
 
 ## 3. Team mapping
 
@@ -76,7 +76,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 |---|---|---|
 | P30 | Request limits | ≤ 10 numbers per request; ≤ 9 requests per `TranscriptClient` run; and the API allows **≤ 10 requests per minute**, so wait ≥ 7 s between requests and 60 s after earlier calls. Use `max_retries=0` and catch errors per chunk. |
 | P31 | Sample | Up to 90 leads: up to 40 **converted** leads (P27, credited by P28, longest target-day call first) and up to 50 **non-converted** leads with an answered call ≥ 300 s, 10 at random (seed 5) from each of the 5 ranked teams with the most real conversations. |
-| P32 | Unit of analysis | Keep only calls whose IST start date = target day. Per lead, analyse the **longest** transcript of ≥ 120 s. |
+| P32 | Unit of analysis | Keep only transcripts that match one of the lead's target-day LeadSquared calls (same number, start within 10 min, a ±5 h 30 min shift allowed when durations agree within 10%); print how many needed the shift. Per lead, analyse the **longest** transcript of ≥ 120 s. |
 | P33 | Close-behaviour markers | Use these case-insensitive regex markers and report the % of converted vs non-converted calls containing each: price/fee/EMI; discount/scholarship/offer; payment step (payment link, pay now, balance payment); urgency (deadline, seats, last date); discovery questions; batch/LMS/onboarding; career/ROI; fixed next step (date/time). |
 | P34 | Quotes | At most 3 short quotes, each tied to a named caller and team. Never quote customer phone numbers or names. |
 
@@ -110,11 +110,11 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 5. The PDF has 1 or 2 pages.
 6. The parameter version is printed in the Method section.
 7. No duplicate call or Zipteams activity IDs.
-8. Every call and Zipteams note falls inside the target IST day.
+8. Every call and Zipteams note falls inside the target IST day, and no call has a start time that can't be read.
 9. Calls from callers who are not LeadSquared users stay under 5%.
 10. Each enrollment is counted once, and every credited caller had an answered call with that lead on the target day.
 11. Every rate is within 0–100 and no call has a negative duration.
-12. Totals reconcile: calls = team dials + inbound; credited = sum of team credited = sum of their callers; Zipteams attributed + dropped = total.
+12. Totals reconcile: fetched = counted + other-day + unreadable-time + bot calls; calls = team dials + inbound; credited = sum of team credited = sum of their callers; Zipteams attributed + dropped = total.
 13. A seeded sample of 10 credited enrollments is re-read from LeadSquared stage history and confirmed as first-ever "Course Enrolled" in the window.
 14. Call-integrity counts reconcile (flagged and checked calls never exceed eligible calls; caller totals add up) and carry no lead details.
 

@@ -2,7 +2,8 @@
 
 Writes data/report_{DATE}/: meta.json, users.json, calls.json (S1), zip.json (S3),
 enrollments.json (S4: first-ever "Course Enrolled" inside the conversion window) and
-payments.json (S6). Read-only against LeadSquared.
+payments.json (S6). Read-only against LeadSquared. Activities are read with a 3-day edit margin and kept
+by their start (``CreatedOn``), because the API filters on the last edit (``iter_activities_started``).
 
     python scripts/fetch_report_day.py 2026-10-05 [--as-of "2026-10-08 13:00"] [--out data/report_2026-10-05]
 """
@@ -13,13 +14,12 @@ import argparse
 import json
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timedelta
 
 from analytics.team_performance import ENROLLED, first_enrollment
-from analytics.team_report import utc
 from integrations.leadsquared import PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, format_datetime, parse_phone_call
+from integrations.timeutil import EDIT_MARGIN, IST, ist_day_start, now_utc, utc
 
-IST = timezone(timedelta(hours=5, minutes=30))
 ZIP_NOTES, PAYMENT_SUCCESS, STAGE_CHANGE = 237, 213, 3002
 
 
@@ -29,9 +29,9 @@ def log(*a):
 
 def windows(date: str, as_of: str | None = None) -> tuple[datetime, datetime, datetime]:
     """P1 day window [d0, d1] and P3 conversion window end (target day + 3 days, capped at now / as-of)."""
-    d0 = datetime.strptime(date, "%Y-%m-%d").replace(tzinfo=IST)
+    d0 = ist_day_start(date)
     d1 = d0 + timedelta(days=1) - timedelta(seconds=1)
-    cap = datetime.strptime(as_of, "%Y-%m-%d %H:%M").replace(tzinfo=IST) if as_of else datetime.now(timezone.utc)
+    cap = datetime.strptime(as_of, "%Y-%m-%d %H:%M").replace(tzinfo=IST) if as_of else now_utc()
     return d0, d1, min(d0 + timedelta(days=4) - timedelta(seconds=1), cap)
 
 
@@ -48,18 +48,15 @@ def main():
     c = LeadSquaredClient()
     d0, d1, cw_end = windows(a.date, a.as_of)
     w("meta.json", {"date": a.date, "d0": d0.isoformat(), "cw_end": cw_end.isoformat(),
-                    "fetched": datetime.now(timezone.utc).isoformat()})
+                    "fetched": now_utc().isoformat(), "edit_margin_days": EDIT_MARGIN.days})
     w("users.json", c.get_users())
-    calls = [parse_phone_call(x) for ev in (PHONE_OUTBOUND, PHONE_INBOUND) for x in c.iter_activities_by_event(ev, d0, d1)]
+    calls = [parse_phone_call(x) for ev in (PHONE_OUTBOUND, PHONE_INBOUND) for x in c.iter_activities_started(ev, d0, d1)]
     w("calls.json", calls)
     log("calls", len(calls))
-    zips = list(c.iter_activities_by_event(ZIP_NOTES, d0, d1))
+    zips = list(c.iter_activities_started(ZIP_NOTES, d0, d1))
     w("zip.json", zips)
     log("zipteams notes", len(zips))
-    pays, day = [], d0
-    while day < cw_end:
-        pays += list(c.iter_activities_by_event(PAYMENT_SUCCESS, day, min(day + timedelta(days=1) - timedelta(seconds=1), cw_end)))
-        day += timedelta(days=1)
+    pays = list(c.iter_activities_started(PAYMENT_SUCCESS, d0, cw_end))
     w("payments.json", pays)
     log("payments", len(pays))
 

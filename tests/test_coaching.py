@@ -41,3 +41,19 @@ def test_longest_real_calls_one_per_lead():
     assert [(r["caller"], r["lead_id"], r["minutes"]) for r in s] == [("Asha K", "L1", 15.0), ("Asha K", "L3", 10.0)]
     scored = score_sample(s, {"L1": "please make the payment by tomorrow at 6 pm", "L3": "tell me about yourself"})
     assert scored[0]["calls_read"] == 2 and scored[0][PAYMENT_STEP] == 50
+
+
+def test_sample_transcript_is_the_sampled_call_not_the_longest_on_the_number():
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from analytics.coaching import sample_texts
+    from integrations.transcripts import normalize_phone
+
+    s = longest_calls(SNAP, per_caller=5)
+    l1 = next(r for r in s if r["lead_id"] == "L1")
+    k = normalize_phone(l1["lead_number"])
+    api = [SimpleNamespace(phone=k, start_time=l1["_call"]["t"] - timedelta(minutes=330), duration=l1["_call"]["duration"] + 5,
+                           transcript="the sampled call"),
+           SimpleNamespace(phone=k, start_time=l1["_call"]["t"] + timedelta(days=3), duration=5000, transcript="a later call")]
+    assert sample_texts(s, api) == {"L1": "the sampled call"}

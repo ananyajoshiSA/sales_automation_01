@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Iterator, Mapping
 
 import requests
+
+from integrations.timeutil import EDIT_MARGIN, now_utc, utc
 
 DEFAULT_HOST = "https://api-in21.leadsquared.com/v2/"
 
@@ -67,8 +69,10 @@ PHONE_OUTBOUND = 22
 def parse_phone_call(activity: dict) -> dict[str, Any]:
     """Flatten an inbound/outbound phone call activity into one record.
 
-    ``start_utc`` is the call start in UTC (``CreatedOn``); ``status`` is e.g.
-    Answered / NotAnswered / CallFailure (outbound) or Answered / Missed (inbound).
+    ``start_utc`` is the call start in UTC (``CreatedOn``); ``modified_utc`` is the last edit, which is what
+    the activity API filters on. ``status`` is e.g. Answered / NotAnswered / CallFailure (outbound) or
+    Answered / Missed (inbound). The note's ``StartTime`` fields are not used: one is UTC, the other IST,
+    and neither says which (``integrations/timeutil.py``).
     """
     import json as _json
 
@@ -89,6 +93,7 @@ def parse_phone_call(activity: dict) -> dict[str, Any]:
         "lead_id": activity.get("RelatedProspectId"),
         "direction": "inbound" if event == PHONE_INBOUND else "outbound",
         "start_utc": activity.get("CreatedOn"),
+        "modified_utc": activity.get("ModifiedOn"),
         "user_id": note.get("UserId") or activity.get("Owner") or activity.get("CreatedBy"),
         "caller": note.get("Caller") or activity.get("CreatedByName"),
         "status": note.get("Status") or activity.get("Status"),
@@ -332,6 +337,37 @@ class LeadSquaredClient:
             if len(batch) < page_size:
                 return
             page += 1
+
+    def iter_activities_started(
+        self,
+        activity_event: int,
+        from_dt: datetime,
+        to_dt: datetime,
+        margin: timedelta = EDIT_MARGIN,
+        now: datetime | None = None,
+    ) -> Iterator[dict]:
+        """Every activity of one type created (for a call: started) in ``[from_dt, to_dt]``.
+
+        The API's date filter is on ``ModifiedOn``, so a plain query misses activities edited after
+        ``to_dt`` and returns older ones edited inside it. This reads edits from ``from_dt`` to
+        ``to_dt + margin`` (capped at now), one day per query, keeps those whose ``CreatedOn`` is in the
+        window and drops repeats. An activity with a missing or unreadable ``CreatedOn`` is kept if it was
+        edited in the window, so the caller can count it.
+        """
+        stop = min(to_dt + margin, now or now_utc())
+        seen: set = set()
+        day = from_dt
+        while day <= stop:
+            end = min(day + timedelta(days=1) - timedelta(seconds=1), stop)
+            for a in self.iter_activities_by_event(activity_event, day, end):
+                key = a.get("ProspectActivityId") or a.get("Id")
+                if key and key in seen:
+                    continue
+                t = utc(a.get("CreatedOn")) or utc(a.get("ModifiedOn"))
+                if t and from_dt <= t <= to_dt:
+                    seen.add(key)
+                    yield a
+            day = end + timedelta(seconds=1)
 
     # ----------------------------------------------------------------- users
 

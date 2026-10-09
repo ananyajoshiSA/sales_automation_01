@@ -24,8 +24,8 @@ from datetime import datetime, timedelta, timezone
 
 from analytics.definitions import BUCKETS, ENROLLED, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
 from analytics.definitions import speed_bucket as bucket_minutes
+from integrations.timeutil import IST, ist_day, utc  # noqa: F401 - re-exported for the other reports
 
-IST = timezone(timedelta(hours=5, minutes=30))
 WORK_START, WORK_END = 10, 20  # IST hours used for "assigned during working hours"
 MEANINGFUL_SECS = REAL_CONVERSATION_SECS  # a connected call shorter than this is not a real conversation
 
@@ -70,20 +70,6 @@ def enrolment_credit(lead: dict, acts: list[dict] | None, answered: list[tuple])
             "owner_at_enrolment": owner or lead.get("OwnerIdName") or "",
             "owner_source": "assignment history" if owner else "current owner",
             "closer": prior[-1] if prior else "", "date_source": source}
-
-
-def utc(s: str | None) -> datetime | None:
-    """Parse LeadSquared's ``YYYY-MM-DD HH:MM:SS[.fff]`` UTC strings."""
-    if not s:
-        return None
-    try:
-        return datetime.strptime(s[:19], "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
-    except ValueError:
-        return None
-
-
-def ist_day(dt: datetime | None) -> str | None:
-    return dt.astimezone(IST).strftime("%Y-%m-%d") if dt else None
 
 
 def minutes(a: datetime, b: datetime) -> float:
