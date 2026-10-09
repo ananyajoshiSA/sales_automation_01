@@ -7,6 +7,7 @@ import {
 } from "./lsq";
 import { aggregateCalls, aggregateLeads, aggregateZip, firstEnrollment } from "./aggregate";
 import { addOnConflict, int, multiInsert, str } from "./sql";
+import { sumRowsRead } from "./cache";
 
 export interface Env extends LsqEnv {
   DB: D1Database;
@@ -17,6 +18,12 @@ export interface Env extends LsqEnv {
   LEAD_PAGE_SIZE?: string;         // default 500 (4 small columns)
   ENROLL_LEADS_PER_RUN?: string;   // default 12 (one stage-history request each)
   WRITE_BUDGET?: string;           // default 90000 of the 100,000 free rows written per UTC day
+  READ_BUDGET?: string;            // default 4500000 of the 5,000,000 free rows read per UTC day
+  SUMMARY_TTL_SECONDS?: string;    // default 60: how long a computed summary is served from cache
+  ACCESS_TEAM_DOMAIN?: string;     // <team>.cloudflareaccess.com; empty = API refuses (see access.ts)
+  ACCESS_AUD?: string;             // the Access application's AUD tag
+  RUN_TOKEN?: string;              // secret: Bearer token for POST /api/run
+  ACCESS_LOCAL_DEV?: string;       // "1" in .dev.vars only: localhost requests skip the Access check
 }
 
 export type Task = "calls_out" | "calls_in" | "leads" | "zip" | "enroll" | "users";
@@ -28,7 +35,7 @@ const FIRST_RUN_LOOKBACK_MIN = 60;
 const ENROLL_MAX_AGE_DAYS = 7; // older first enrollments come from the backfill script
 const USERS_EVERY_HOURS = 20;
 
-const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) ? Number(v) : d);
+export const num = (v: string | undefined, d: number) => (v && Number.isFinite(Number(v)) ? Number(v) : d);
 
 interface State { cursor: Date; page: number }
 
@@ -52,16 +59,61 @@ async function writeBatch(db: D1Database, statements: string[]): Promise<number>
   return res.reduce((n, r) => n + (r.meta?.rows_written ?? 0), 0);
 }
 
-const utcDay = () => new Date().toISOString().slice(0, 10);
+export const utcDay = () => new Date().toISOString().slice(0, 10);
 
 export async function rowsWrittenToday(db: D1Database): Promise<number> {
   const r = await db.prepare("SELECT rows FROM write_budget WHERE day = ?").bind(utcDay()).first<{ rows: number }>();
   return r?.rows ?? 0;
 }
 
-async function addToBudget(db: D1Database, rows: number): Promise<void> {
-  await db.prepare("INSERT INTO write_budget (day, rows) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET rows = rows + excluded.rows")
-    .bind(utcDay(), rows + 1).run();
+export async function rowsReadToday(db: D1Database): Promise<number> {
+  const r = await db.prepare("SELECT rows FROM read_budget WHERE day = ?").bind(utcDay()).first<{ rows: number }>();
+  return r?.rows ?? 0;
+}
+
+const BUDGET_UPSERT = "INSERT INTO %t (day, rows) VALUES (?, ?) ON CONFLICT(day) DO UPDATE SET rows = rows + excluded.rows";
+
+/** Write-budget increment for `rows` written plus this upsert itself (1 row). */
+export function addWriteBudget(db: D1Database, rows: number): D1PreparedStatement {
+  return db.prepare(BUDGET_UPSERT.replace("%t", "write_budget")).bind(utcDay(), rows + 1);
+}
+
+export function addReadBudget(db: D1Database, rows: number): D1PreparedStatement {
+  return db.prepare(BUDGET_UPSERT.replace("%t", "read_budget")).bind(utcDay(), rows);
+}
+
+/** Both budget increments in one batch; the read-budget upsert is the one extra row written. */
+async function addToBudgets(db: D1Database, written: number, read: number): Promise<void> {
+  await db.batch([addWriteBudget(db, written + 1), addReadBudget(db, read + 2)]);
+}
+
+/**
+ * A D1 handle that adds every statement's meta.rows_read to `tally`, so a cron run can charge its
+ * reads to read_budget. first() runs as all(), because first() returns no meta; every first() here
+ * is a primary-key lookup, so it reads the same single row either way.
+ */
+export function countReads(db: D1Database, tally: { rowsRead: number }): D1Database {
+  const inner = new WeakMap<object, D1PreparedStatement>();
+  const add = <R extends object>(r: R): R => { tally.rowsRead += sumRowsRead((Array.isArray(r) ? r : [r]) as D1Result[]); return r; };
+  const wrap = (s: D1PreparedStatement): D1PreparedStatement => {
+    const w = {
+      bind: (...v: unknown[]) => wrap(s.bind(...v)),
+      all: () => s.all().then(add),
+      run: () => s.run().then(add),
+      raw: (o?: any) => s.raw(o),
+      first: (col?: string) => s.all<Record<string, unknown>>().then(add).then((r) => {
+        const row = r.results[0] ?? null;
+        return col ? (row?.[col] ?? null) : row;
+      }),
+    };
+    inner.set(w, s);
+    return w as unknown as D1PreparedStatement;
+  };
+  return {
+    prepare: (sql: string) => wrap(db.prepare(sql)),
+    batch: (stmts: D1PreparedStatement[]) => db.batch(stmts.map((x) => inner.get(x) ?? x)).then(add),
+    exec: (sql: string) => db.exec(sql),
+  } as unknown as D1Database;
 }
 
 export async function recordError(db: D1Database, task: string, err: unknown): Promise<void> {
@@ -221,6 +273,9 @@ export async function runUsers(env: Env): Promise<number> {
       users.map((u) => [str(u.id), str(u.name), str(u.team), str(now)]),
       "ON CONFLICT(id) DO UPDATE SET name = excluded.name, team = excluded.team, updated_at = excluded.updated_at"),
     `DELETE FROM lead_last_call WHERE at < ${str(fmtUtc(new Date(Date.now() - 3 * 24 * 60 * MIN)))}`,
+    `DELETE FROM summary_cache WHERE computed_at < ${str(fmtUtc(new Date(Date.now() - 24 * 60 * MIN)))}`,
+    ...["write_budget", "read_budget"].map((t) =>
+      `DELETE FROM ${t} WHERE day < ${str(new Date(Date.now() - 35 * 24 * 60 * MIN).toISOString().slice(0, 10))}`),
     stateSql("users", { cursor: new Date(), page: 1 }),
   ]);
 }
@@ -237,9 +292,11 @@ export function taskForMinute(minuteIndex: number): Task {
   return minuteIndex % 2 === 0 ? "calls_out" : ODD[Math.floor(minuteIndex / 2) % ODD.length];
 }
 
-export async function runTask(env: Env, task: Task): Promise<{ task: Task; rows: number; skipped?: string }> {
+export async function runTask(raw: Env, task: Task): Promise<{ task: Task; rows: number; rowsRead: number; skipped?: string }> {
+  const tally = { rowsRead: 0 };
+  const env: Env = { ...raw, DB: countReads(raw.DB, tally) };
   const budget = num(env.WRITE_BUDGET, 90_000);
-  if ((await rowsWrittenToday(env.DB)) >= budget) return { task, rows: 0, skipped: "daily write budget reached" };
+  if ((await rowsWrittenToday(env.DB)) >= budget) return { task, rows: 0, rowsRead: tally.rowsRead, skipped: "daily write budget reached" };
   if (task === "leads" && (await usersDue(env.DB))) task = "users";
   try {
     const rows = await ({
@@ -250,10 +307,11 @@ export async function runTask(env: Env, task: Task): Promise<{ task: Task; rows:
       enroll: () => runEnroll(env),
       users: () => runUsers(env),
     }[task])();
-    await addToBudget(env.DB, rows);
-    return { task, rows };
+    await addToBudgets(raw.DB, rows, tally.rowsRead);
+    return { task, rows, rowsRead: tally.rowsRead };
   } catch (err) {
     await recordError(env.DB, task, err);
+    await addToBudgets(raw.DB, 1, tally.rowsRead).catch(() => {});
     throw err;
   }
 }
