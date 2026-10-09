@@ -41,7 +41,7 @@ describe("route rules", () => {
 
   it("refuses data until Access is configured, but health stays up with no names or error text", async () => {
     const env = mkEnv();
-    env.DB.sqlite.prepare("INSERT INTO sync_state VALUES ('calls_out', '2026-10-09 07:00:00', 1, '2026-10-09 07:10:00', 'boom: Asha')").run();
+    env.DB.sqlite.prepare("INSERT INTO sync_state VALUES ('calls_out', '2026-10-09 07:00:00', 1, '2026-10-09 07:10:00', '2026-10-09 07:10:00 GET ProspectActivity.svc/Retrieve -> HTTP 401: Asha')").run();
     const r = await call(env, "/api/summary");
     expect(r.status).toBe(403);
     expect(await r.json()).toMatchObject({ error: "Dashboard not yet protected: finish Cloudflare Access setup", notProtected: true });
@@ -49,7 +49,7 @@ describe("route rules", () => {
     expect(h.status).toBe(200);
     const text = await h.text();
     expect(text).not.toContain("Asha");
-    expect(JSON.parse(text)).toMatchObject({ ok: true, accessConfigured: false, sync: [{ task: "calls_out", hasError: true }] });
+    expect(JSON.parse(text)).toMatchObject({ ok: true, accessConfigured: false, sync: [{ task: "calls_out", hasError: true, errorHttp: 401 }] });
   });
 
   it("rejects a range over 31 days with 400 (localhost dev bypass)", async () => {

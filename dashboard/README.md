@@ -110,7 +110,8 @@ deploy command `npm run deploy:prod`, production branch `main`. The Builds token
 
 - `GET /api/health` (no login, no names or error text): `rowsWrittenToday` / `writeBudget`,
   `rowsReadToday` / `readBudget`, `accessConfigured`, and per task `cursor`, `updatedAt`,
-  `behindMin` and `hasError`. The error text itself shows on the page (behind Access).
+  `behindMin`, `hasError` and `errorHttp` (the HTTP status of a failed LeadSquared call: 401 =
+  keys missing or wrong). The error text itself shows on the page (behind Access).
 - `POST /api/run?task=calls_out|calls_in|leads|zip|enroll|users` with
   `Authorization: Bearer <RUN_TOKEN>` – run one task now.
 - `/api/summary` answers with header `x-cache: hit | miss | stale` (stale = paused copy) and 503

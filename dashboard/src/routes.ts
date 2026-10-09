@@ -92,6 +92,8 @@ export async function health(env: Env): Promise<Response> {
     accessConfigured: !!(env.ACCESS_TEAM_DOMAIN?.trim() && env.ACCESS_AUD?.trim()),
     sync: (sync.results as { task: string; cursor: string; updated_at: string; last_error: string | null }[]).map((s) => ({
       task: s.task, cursor: s.cursor, updatedAt: s.updated_at, hasError: !!s.last_error,
+      // Only the status code of a failed LeadSquared call (e.g. 401 = keys missing or wrong), never its text.
+      errorHttp: Number(s.last_error?.match(/-> HTTP (\d{3})/)?.[1]) || null,
       behindMin: ["users", "enroll"].includes(s.task) ? null : Math.round((now - (parseUtc(s.cursor)?.getTime() ?? 0)) / 60_000),
     })),
   });
