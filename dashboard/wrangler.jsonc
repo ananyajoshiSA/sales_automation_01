@@ -1,7 +1,14 @@
 {
   "$schema": "node_modules/wrangler/config-schema.json",
   "name": "sales-dashboard",
+  // The target Cloudflare account (not a secret). Pins deploys to it, so a login to another
+  // account can't land the Worker there. Set before the first deploy (README, "Deploy").
+  // "account_id": "<CLOUDFLARE_ACCOUNT_ID>",
   "main": "src/index.ts",
+  // Served at https://sales-dashboard.<subdomain>.workers.dev, behind Cloudflare Access.
+  "workers_dev": true,
+  // No per-version preview URLs: they would be extra hostnames without the Access policy.
+  "preview_urls": false,
   "compatibility_date": "2025-09-01",
   // Free tier: one cron trigger (5 allowed per account); each run does one small task.
   "triggers": { "crons": ["* * * * *"] },
@@ -11,7 +18,8 @@
     {
       "binding": "DB",
       "database_name": "sales_dashboard",
-      // Created with: npx wrangler d1 create sales_dashboard
+      // Created with: npx wrangler d1 create sales_dashboard. This ID is from the old account;
+      // replace it with the target account's database ID at deploy time (README, "Deploy").
       "database_id": "2f27d60b-3b45-41bc-a7b4-106a7ea8b1a0",
       "migrations_dir": "migrations"
     }
@@ -24,8 +32,13 @@
     "ZIP_PAGE_SIZE": "40",
     "LEAD_PAGE_SIZE": "500",
     "ENROLL_LEADS_PER_RUN": "12",
-    "WRITE_BUDGET": "90000"
+    "WRITE_BUDGET": "90000",
+    "READ_BUDGET": "4500000",
+    "SUMMARY_TTL_SECONDS": "60",
+    // From Zero Trust once the Access app exists (not secrets). Empty = the API refuses all data.
+    "ACCESS_TEAM_DOMAIN": "",
+    "ACCESS_AUD": ""
   },
-  // Secrets (never in this file): npx wrangler secret put LEADSQUARED_ACCESS_KEY / LEADSQUARED_SECRET_KEY
+  // Secrets (never in this file): LEADSQUARED_ACCESS_KEY, LEADSQUARED_SECRET_KEY, RUN_TOKEN
   "observability": { "enabled": true }
 }

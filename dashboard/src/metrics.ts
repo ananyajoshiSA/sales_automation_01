@@ -1,6 +1,7 @@
 // Read side: turn daily totals into the dashboard summary. Definitions match the Python report
 // (exports/insights_*): a caller's working day = >= 20 dials; lagging = >= 2 flags vs team median
 // (70% threshold), at least one of them effort/conversations, >= 2 working days, no dialer issue.
+import { sumRowsRead } from "./cache";
 import { fmtUtc, istDay, istHour, parseUtc } from "./lsq";
 
 export const ACTIVE_DAY_DIALS = 20;
@@ -95,10 +96,13 @@ function sum<T>(rows: T[], key: (r: T) => string, val: (r: T) => number): [strin
   return [...m.entries()].sort((a, b) => b[1] - a[1]);
 }
 
+/** The dashboard payload for an IST date range, and the D1 rows its queries read (for the read budget). */
 export async function summary(db: D1Database, from: string, to: string, budgetLimit: number) {
   const now = new Date();
   const weekAgo = istDay(new Date(now.getTime() - 8 * 86_400_000));
-  const q = <T>(sql: string, ...args: unknown[]) => db.prepare(sql).bind(...args).all<T>().then((r) => r.results);
+  let rowsRead = 0;
+  const q = <T>(sql: string, ...args: unknown[]) => db.prepare(sql).bind(...args).all<T>()
+    .then((r) => { rowsRead += sumRowsRead([r]); return r.results; });
   const [users, callerRows, enrolls, leadsByDay, leadsBySource, leadsByOwner, zip, hours, sync, budget] = await Promise.all([
     q<{ id: string; name: string; team: string }>("SELECT id, name, team FROM users"),
     q<CallerDayRow>("SELECT * FROM caller_day WHERE day BETWEEN ? AND ? ORDER BY day", from, to),
@@ -145,7 +149,7 @@ export async function summary(db: D1Database, from: string, to: string, budgetLi
   });
 
   const lagMin = (c: string) => Math.round((now.getTime() - (parseUtc(c)?.getTime() ?? 0)) / 60_000);
-  return {
+  const data = {
     range: { from, to }, generatedAt: fmtUtc(now) + " UTC",
     leads: {
       total: leadsByDay.reduce((a, r) => a + r.n, 0), byDay: leadsByDay, bySource: leadsBySource,
@@ -180,4 +184,5 @@ export async function summary(db: D1Database, from: string, to: string, budgetLi
       lastSuccess: s.updated_at, lastError: s.last_error })),
     budget: { rowsWrittenToday: budget[0]?.rows ?? 0, limit: budgetLimit, freeTierLimit: 100_000 },
   };
+  return { data, rowsRead };
 }

@@ -13,10 +13,12 @@ from __future__ import annotations
 
 import os
 import time
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Iterable, Iterator, Mapping
 
 import requests
+
+from integrations.timeutil import EDIT_MARGIN, now_utc, utc
 
 DEFAULT_HOST = "https://api-in21.leadsquared.com/v2/"
 
@@ -67,8 +69,10 @@ PHONE_OUTBOUND = 22
 def parse_phone_call(activity: dict) -> dict[str, Any]:
     """Flatten an inbound/outbound phone call activity into one record.
 
-    ``start_utc`` is the call start in UTC (``CreatedOn``); ``status`` is e.g.
-    Answered / NotAnswered / CallFailure (outbound) or Answered / Missed (inbound).
+    ``start_utc`` is the call start in UTC (``CreatedOn``); ``modified_utc`` is the last edit, which is what
+    the activity API filters on. ``status`` is e.g. Answered / NotAnswered / CallFailure (outbound) or
+    Answered / Missed (inbound). The note's ``StartTime`` fields are not used: one is UTC, the other IST,
+    and neither says which (``integrations/timeutil.py``).
     """
     import json as _json
 
@@ -89,6 +93,7 @@ def parse_phone_call(activity: dict) -> dict[str, Any]:
         "lead_id": activity.get("RelatedProspectId"),
         "direction": "inbound" if event == PHONE_INBOUND else "outbound",
         "start_utc": activity.get("CreatedOn"),
+        "modified_utc": activity.get("ModifiedOn"),
         "user_id": note.get("UserId") or activity.get("Owner") or activity.get("CreatedBy"),
         "caller": note.get("Caller") or activity.get("CreatedByName"),
         "status": note.get("Status") or activity.get("Status"),
@@ -332,6 +337,71 @@ class LeadSquaredClient:
             if len(batch) < page_size:
                 return
             page += 1
+
+    def iter_activities_started(
+        self,
+        activity_event: int,
+        from_dt: datetime,
+        to_dt: datetime,
+        margin: timedelta = EDIT_MARGIN,
+        now: datetime | None = None,
+    ) -> Iterator[dict]:
+        """Every activity of one type created (for a call: started) in ``[from_dt, to_dt]``.
+
+        The API's date filter is on ``ModifiedOn``, so a plain query misses activities edited after
+        ``to_dt`` and returns older ones edited inside it. This reads edits from ``from_dt`` to
+        ``to_dt + margin`` (capped at now), keeps those whose ``CreatedOn`` is in the window and drops
+        repeats. An activity with a missing or unreadable ``CreatedOn`` is kept if it was edited in the
+        window, so the caller can count it. Windows are read one page at a time (``_iter_unpaged``)
+        because paging through a large result skips a few rows.
+        """
+        stop = min(to_dt + margin, now or now_utc())
+        seen: set = set()
+        day = from_dt
+        while day <= stop:
+            end = min(day + timedelta(days=1), stop)
+            for a in self._iter_unpaged(activity_event, day, end):
+                key = a.get("ProspectActivityId") or a.get("Id")
+                if key and key in seen:
+                    continue
+                t = utc(a.get("CreatedOn")) or utc(a.get("ModifiedOn"))
+                if t and from_dt <= t <= to_dt:
+                    seen.add(key)
+                    yield a
+            if end >= stop:
+                return
+            day = end
+
+    def _iter_unpaged(self, activity_event: int, from_dt: datetime, to_dt: datetime,
+                      page_size: int = 1000) -> Iterator[dict]:
+        """``[from_dt, to_dt]`` split into windows small enough to come back in one page each.
+
+        On 5 Oct 2026 a 12,203-row read returned 1 to 3 rows twice and skipped as many, differently on
+        each run, so a window with more rows than one page is cut into pieces instead of paged. Pieces
+        share their boundary second (times carry milliseconds the filter can't express); the caller
+        drops the repeats.
+        """
+        data = self.request(
+            "POST",
+            "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent",
+            json={
+                "Parameter": {"FromDate": format_datetime(from_dt), "ToDate": format_datetime(to_dt),
+                              "ActivityEvent": activity_event},
+                "Paging": {"PageIndex": 1, "PageSize": page_size},
+            },
+        ) or {}
+        rows = data.get("List") or []
+        total = max(int(data.get("RecordCount") or 0), len(rows))
+        seconds = int((to_dt - from_dt).total_seconds())
+        if total < page_size:
+            yield from rows
+        elif seconds < 2:  # can't cut further: page it
+            yield from self.iter_activities_by_event(activity_event, from_dt, to_dt, page_size)
+        else:
+            pieces = min(seconds, -(-total * 3 // (page_size * 2)))  # aim for two-thirds of a page each
+            cuts = [from_dt + timedelta(seconds=seconds * k // pieces) for k in range(pieces)] + [to_dt]
+            for a, b in zip(cuts, cuts[1:]):
+                yield from self._iter_unpaged(activity_event, a, b, page_size)
 
     # ----------------------------------------------------------------- users
 

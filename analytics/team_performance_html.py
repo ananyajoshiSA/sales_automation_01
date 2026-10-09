@@ -12,6 +12,7 @@ import html
 from datetime import datetime
 
 from analytics.team_performance import IST, VERSION, short
+from integrations.timeutil import now_ist
 
 e = html.escape
 CSS = """
@@ -33,6 +34,12 @@ tr.top td{background:#e9f7ee} .full{font-size:7.6pt} .full td{padding:2px 4px}
 
 def f(v, s=""):
     return "–" if v is None else f"{v}{s}"
+
+
+def _shifts(s: dict) -> str:
+    """How many transcript clocks were right, or 5 h 30 m off, against the LeadSquared call."""
+    off = s.get("api_5h30_early", 0) + s.get("api_5h30_late", 0)
+    return f"{s.get('on_time', 0)} transcript times matched the call log, {off} were 5 h 30 m off and were corrected"
 
 
 def _verdict(A: dict, gap: str | None) -> tuple[str, list[str]]:
@@ -190,11 +197,12 @@ def report_html(A: dict, tx: dict | None, validation: str = "") -> tuple[str, li
                f"Transcripts: {tx['numbers']} leads ({tx['sample_conv']} converted, {tx['sample_non']} non-converted 300 s+ calls, "
                f"10 per team from {', '.join(short(t) for t in tx['top5'])}, seed 5), {tx['requests']} API requests"
                + (f", {tx['failed_chunks']} failed chunk(s)" if tx.get("failed_chunks") else "")
-               + ", longest target-day transcript of 120 s or more per lead.")
+               + ", longest transcript of 120 s or more per lead that matches a target-day LeadSquared call"
+               + (f" ({_shifts(tx['time_shifts'])})" if tx.get("time_shifts") else "") + ".")
     cw = f"{d0.day} {d0:%b} 00:00 to {cw_end.day} {cw_end:%b %H:%M} IST"
     page = f"""<!doctype html><html><head><meta charset="utf-8"><title>Team calling report {A['date']}</title><style>{CSS}</style></head><body>
 <h1>Who converted best — {title_day}</h1>
-<div class="sub">Sales calling performance by team and caller · enrolments counted {cw} · Parameters v{VERSION} · prepared {datetime.now():%d %b %Y}</div>
+<div class="sub">Sales calling performance by team and caller · enrolments counted {cw} · Parameters v{VERSION} · prepared {now_ist():%d %b %Y}</div>
 <div class="kpis"><div class="k"><b>{tot['calls']:,}</b>calls ({tot['outbound']:,} out, {tot['inbound']:,} in)</div>
 <div class="k"><b>{round(100 * tot['answered_out'] / tot['outbound'], 1) if tot['outbound'] else 0}%</b>outbound answered ({tot['answered_out']:,})</div>
 <div class="k"><b>{tot['zip_attr']:,}</b>calls scored by Zipteams</div>
@@ -217,7 +225,7 @@ def report_html(A: dict, tx: dict | None, validation: str = "") -> tuple[str, li
 <h2>7. Call integrity: calls to review</h2>
 {_integrity(A)}
 <h2>Method and limits</h2>
-<div class="note"><span class="ok">{e(validation)}</span>. Window {d0.day} {d0:%b} 00:00–23:59 IST. Calls: LeadSquared events 21/22 started in the window; {tot['bots_excluded']} automated calls and {tot['outside_window_excluded']} calls that started on another day (returned because they were edited on the day) excluded. Real conversation = answered and 120 s or longer. Enrolment = a lead's first-ever stage change to "Course Enrolled" from {cw} ({tot['enroll_window']} found), credited to the caller with the most answered talk time on that lead on the target day ({tot['enroll_credited']} credited). Conversion = credited ÷ leads reached. "Payment Successful" activities in the window: {tot['payments']}{', so enrolments are the conversion measure' if not tot['payments'] else ''}. Zipteams: {tot['zip_attr']:,} of {tot['zip_total']:,} notes attributed to the caller of the last answered call before the note ({tot['zip_dropped']} dropped){'; no Zipteams notes for ' + ', '.join(e(t) for t in no_zip) + ' ("–")' if no_zip else ''}. Team = caller's first LeadSquared group; {tot['multi_group_callers']} callers belong to more than one group. {tx_note} Parameters v{VERSION}.</div>
+<div class="note"><span class="ok">{e(validation)}</span>. Window {d0.day} {d0:%b} 00:00–23:59 IST. Calls: LeadSquared events 21/22 started in the window, read up to {tot.get('edit_margin_days', 0)} days after it so calls edited later are kept ({tot.get('late_edits_recovered', 0)} were); {tot['bots_excluded']} automated calls and {tot['outside_window_excluded']} calls that started on another day excluded. Real conversation = answered and 120 s or longer. Enrolment = a lead's first-ever stage change to "Course Enrolled" from {cw} ({tot['enroll_window']} found), credited to the caller with the most answered talk time on that lead on the target day ({tot['enroll_credited']} credited). Conversion = credited ÷ leads reached. "Payment Successful" activities in the window: {tot['payments']}{', so enrolments are the conversion measure' if not tot['payments'] else ''}. Zipteams: {tot['zip_attr']:,} of {tot['zip_total']:,} notes attributed to the caller of the last answered call before the note, the call it analysed ({tot['zip_dropped']} dropped; {tot.get('zip_after_day_kept', 0)} written after midnight for a late call){'; no Zipteams notes for ' + ', '.join(e(t) for t in no_zip) + ' ("–")' if no_zip else ''}. Team = caller's first LeadSquared group; {tot['multi_group_callers']} callers belong to more than one group. {tx_note} Parameters v{VERSION}.</div>
 </div>
 </body></html>"""
     return page, nums

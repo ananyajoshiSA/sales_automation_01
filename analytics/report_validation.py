@@ -15,6 +15,7 @@ from collections import Counter
 from datetime import datetime, timedelta
 
 from analytics.team_report import utc
+from analytics.zip_calls import ZIP_LATE_WINDOW
 
 NOT_A_USER_MAX_PCT = 5      # calls whose caller is not a LeadSquared user (IVR etc.) after bots are removed
 ZIP_DROPPED_MAX_PCT = 5     # P40 / checklist 3
@@ -37,10 +38,17 @@ def data_checks(run: dict, A: dict) -> list[dict]:
     d0 = datetime.fromisoformat(A["window"]["d0"])
     d1 = d0 + timedelta(days=1)
     outside = sum(1 for c in calls if not c["t"] or not d0 <= c["t"] < d1)
-    zout = sum(1 for z in run["zips"] if not (t := utc(z.get("CreatedOn"))) or not d0 <= t < d1)
-    out.append(_check("Every counted call and note is inside the IST day", outside == 0 and zout == 0,
-                      f"{outside} counted calls and {zout} Zipteams notes outside {d0:%d %b} 00:00–23:59 IST; "
-                      f"{tot['outside_window_excluded']} fetched calls started on another day and were excluded"))
+    zout = sum(1 for z in run["zips"] if not (t := utc(z.get("CreatedOn"))) or not d0 <= t < d1 + ZIP_LATE_WINDOW)
+    zout += sum(1 for c in calls if c.get("zip") and not d0 <= c["t"] < d1)  # an analysis on a call of another day
+    bad = tot.get("unreadable_time_excluded", 0)
+    out.append(_check("Every counted call and note is inside the IST day", outside == 0 and zout == 0 and bad == 0,
+                      f"{outside} counted calls and {zout} Zipteams notes outside {d0:%d %b} 00:00–23:59 IST "
+                      f"(notes up to {ZIP_LATE_WINDOW.seconds // 3600} h later count only for a call that ended then: "
+                      f"{tot.get('zip_after_day_kept', 0)} kept, {tot.get('zip_other_day_excluded', 0)} excluded); "
+                      f"{tot['outside_window_excluded']} fetched calls started on another day and were excluded; "
+                      f"{bad} calls had a start time that couldn't be read; "
+                      f"{tot.get('late_edits_recovered', 0)} calls edited after the day were recovered "
+                      f"(edit margin {tot.get('edit_margin_days', 0)} days)"))
 
     nu = T.get("Not a user", {})
     nu_calls = nu.get("dials", 0) + nu.get("inbound", 0)
@@ -67,7 +75,8 @@ def data_checks(run: dict, A: dict) -> list[dict]:
     people = A["people"]
     recon = {
         "calls = team dials + inbound": tot["calls"] == sum(s["dials"] + s["inbound"] for s in T.values()),
-        "fetched = counted + other-day + bot calls": tot["calls_raw"] == tot["calls"] + tot["outside_window_excluded"] + tot["bots_excluded"],
+        "fetched = counted + other-day + unreadable-time + bot calls":
+            tot["calls_raw"] == tot["calls"] + tot["outside_window_excluded"] + tot.get("unreadable_time_excluded", 0) + tot["bots_excluded"],
         "credited = sum of team credited": tot["enroll_credited"] == sum(s["credited"] for s in T.values()),
         "team credited = sum of its callers": all(s["credited"] == sum(p["credited"] for p in people if p["team"] == t)
                                                   for t, s in T.items() if t != "Not a user"),

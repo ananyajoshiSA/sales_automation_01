@@ -18,7 +18,7 @@ h1 { margin: 0; font-size: 22px; }
 h2 { margin: 0 0 8px; font-size: 16px; }
 .muted { color: var(--muted); margin: 2px 0 0; }
 .small { font-size: 12px; }
-nav button, select { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: var(--card);
+nav button, select, input { font: inherit; padding: 6px 12px; border: 1px solid var(--line); background: var(--card);
   color: var(--text); border-radius: 8px; cursor: pointer; }
 nav button.on { background: var(--accent); border-color: var(--accent); color: #fff; }
 #alerts .alert { padding: 10px 12px; border-radius: 8px; margin-bottom: 8px; background: var(--warn-bg); color: var(--warn); }
@@ -46,4 +46,25 @@ td.flags { white-space: normal; min-width: 200px; color: var(--muted); }
 .chip.dialer_issue { background: var(--bad-bg); color: var(--bad); }
 .chip.ok { color: var(--ok); }
 .empty { color: var(--muted); padding: 8px 0; }
+.fresh { margin: 4px 0 0; font-weight: 600; }
+.fresh.late { color: var(--warn); }
+.range-box { display: flex; flex-direction: column; gap: 6px; align-items: flex-end; max-width: 100%; }
+nav { display: flex; flex-wrap: wrap; gap: 6px; }
+.custom { display: flex; flex-wrap: wrap; gap: 8px; color: var(--muted); font-size: 12px; }
+.custom label { display: flex; align-items: center; gap: 4px; }
+.custom input { padding: 4px 6px; cursor: text; }
+.range-error { margin: 0; color: var(--bad); min-height: 0; }
+.range-error:empty { display: none; }
+.filters { display: flex; flex-wrap: wrap; gap: 6px; }
+.filters input { cursor: text; min-width: 0; width: 180px; }
+th.sortable { cursor: pointer; user-select: none; }
+th.sortable:hover, th.sortable:focus-visible { color: var(--text); }
+th .arrow { font-size: 10px; }
+@media (max-width: 600px) {
+  body { padding: 12px; }
+  .range-box { align-items: stretch; width: 100%; }
+  .filters, .filters select, .filters input { width: 100%; }
+  .card-head { align-items: stretch; flex-direction: column; }
+  .grid { grid-template-columns: minmax(0, 1fr); }
+}
 @media (max-width: 480px) { .tile .value { font-size: 22px; } }

@@ -20,17 +20,20 @@ from __future__ import annotations
 import os
 import re
 import time
+from collections import Counter, defaultdict
 from dataclasses import dataclass
-from datetime import datetime, timedelta, timezone
+from datetime import datetime, timezone
 from typing import Any, Iterable
 
 import requests
 
+from integrations.timeutil import IST, IST_OFFSET
+
 DEFAULT_BASE = "https://centralized-transcript-api.altlapps.com/api/v1/"
-IST = timezone(timedelta(hours=5, minutes=30))
 
 MAX_NUMBERS_PER_REQUEST = 10  # API rejects more
 MAX_REQUESTS_PER_RUN = 9      # strict: always fewer than 10 requests per run
+MATCH_MINUTES = 10            # a transcript belongs to the LeadSquared call that started within this of it
 
 
 def _env(name: str, legacy: str) -> str | None:
@@ -88,6 +91,10 @@ def detect_call_timezone(kind: str, raw: dict, now: datetime | None = None) -> t
     * anything else (S3 ``/audio/``, no audio) . mixed, so inferred: a record can't
       be created before its call started and a call can't start in the future,
       so either means IST; otherwise UTC.
+
+    This is a best guess: some ``/audio/`` records are UTC shifted back a further 5 h 30 m, and an IST
+    record transcribed more than 5 h 30 m after the call reads as UTC. ``match_to_calls`` settles
+    the real time against the LeadSquared call log; use it before putting a transcript on a day.
     """
     if kind == "support":
         return IST
@@ -151,6 +158,50 @@ class Call:
             created_at=created,
             source_tz="IST" if tz is IST else "UTC",
         )
+
+
+def durations_agree(api_secs: int | None, call_secs: int) -> bool:
+    return bool(api_secs) and abs(api_secs - call_secs) <= max(15, 0.1 * call_secs)
+
+
+def match_gap(x: Call, start: datetime, duration: int) -> tuple[float, int]:
+    """(minutes between an API call and a LeadSquared call start, shift in minutes that gives it).
+
+    Some API times are exactly 5 h 30 m off in either direction, so a shift of +330 or -330 minutes also
+    counts, but only when the two durations agree.
+    """
+    best = (abs((x.start_time - start).total_seconds()) / 60, 0)
+    if durations_agree(x.duration, duration):
+        for k in (1, -1):
+            gap = abs((x.start_time + k * IST_OFFSET - start).total_seconds()) / 60
+            if gap < best[0]:
+                best = (gap, k * 330)
+    return best
+
+
+def match_to_calls(api_calls: Iterable[Call], ls_calls: Iterable[dict], normalize=normalize_phone,
+                   minutes: float = MATCH_MINUTES) -> dict[str, tuple[Call, int]]:
+    """activity_id -> (API call, shift in minutes) for each LeadSquared call that has an API call on the same
+    number starting within ``minutes`` of it. LeadSquared calls need ``activity_id``, ``lead_number``,
+    ``t`` (start, aware datetime) and ``duration``. The call's real time is the LeadSquared one."""
+    by_number = defaultdict(list)
+    for x in api_calls:
+        if x.start_time:
+            by_number[x.phone].append(x)
+    out = {}
+    for c in ls_calls:
+        found = by_number.get(normalize(c.get("lead_number")), [])
+        scored = [(match_gap(x, c["t"], c.get("duration") or 0), x) for x in found]
+        if scored:
+            (gap, shift), x = min(scored, key=lambda s: s[0][0])
+            if gap <= minutes:
+                out[c["activity_id"]] = (x, shift)
+    return out
+
+
+def shift_counts(shifts: Counter) -> dict[str, int]:
+    """Matches by how far the API's own time was off: on time, 5 h 30 m early (+330) or 5 h 30 m late (-330)."""
+    return {"on_time": shifts.get(0, 0), "api_5h30_early": shifts.get(330, 0), "api_5h30_late": shifts.get(-330, 0)}
 
 
 class TranscriptClient:

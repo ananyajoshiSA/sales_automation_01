@@ -32,6 +32,8 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from analytics.team_report import IST
+from analytics.zip_calls import attach
+from integrations.transcripts.client import match_to_calls, shift_counts
 
 OVERLAP_SECS = 30          # P68
 REPEAT_LONG = 3            # P69: real conversations with one lead in a day
@@ -137,41 +139,32 @@ def pick_sample(long_calls: list[dict], flags: dict, limit: int) -> list[dict]:
     return out
 
 
-TZ_SHIFT = timedelta(hours=5, minutes=30)
-
-
-def _gap(x, c) -> float:
-    """Minutes between an API call and a LeadSquared call. Some API times are off by exactly the IST offset
-    (the client labels their timezone wrongly), so a ±5h30 shift also counts when the durations agree."""
-    gaps = [abs((x.start_time - c["t"]).total_seconds())]
-    if x.duration and abs(x.duration - c["duration"]) <= max(15, 0.1 * c["duration"]):
-        gaps += [abs((x.start_time + k * TZ_SHIFT - c["t"]).total_seconds()) for k in (1, -1)]
-    return min(gaps) / 60
-
-
-def match(sample: list[dict], api_calls: list, normalize) -> tuple[dict[str, str], dict[str, str]]:
-    """activity_id -> transcript text of the API call on the same number that started closest to it (within P73),
-    and activity_id -> why a sampled call has no text. A call the API never transcribed (no transcript file)
-    is "not transcribed", never "no content"."""
-    by_number = defaultdict(list)
-    for x in api_calls:
-        if x.start_time:
-            by_number[x.phone].append(x)
+def match(sample: list[dict], api_calls: list, normalize, shifts: Counter | None = None) -> tuple[dict[str, str], dict[str, str]]:
+    """activity_id -> transcript text of the API call on the same number that started closest to it (within P73,
+    allowing the ±5 h 30 m shift some API times carry when durations agree), and activity_id -> why a sampled call
+    has no text. A call the API never transcribed (no transcript file) is "not transcribed", never "no content".
+    ``shifts`` counts the matches by the shift that was needed (0, 330 or -330 minutes)."""
+    hits = match_to_calls(api_calls, sample, normalize, MATCH_MINUTES)
+    numbers = {x.phone for x in api_calls if x.start_time}
     texts, why = {}, {}
     for c in sample:
-        found = by_number.get(normalize(c["lead_number"]), [])
-        best = min(found, default=None, key=lambda x: _gap(x, c))
-        if not best or _gap(best, c) > MATCH_MINUTES:
-            why[c["activity_id"]] = "no API call within 10 min" if found else "number not in the transcript API"
-        elif not best.transcript.strip() and not getattr(best, "transcript_url", None):
+        hit = hits.get(c["activity_id"])
+        if not hit:
+            why[c["activity_id"]] = "no API call within 10 min" if normalize(c["lead_number"]) in numbers else "number not in the transcript API"
+            continue
+        x, shift = hit
+        if shifts is not None:
+            shifts[shift] += 1
+        if not x.transcript.strip() and not getattr(x, "transcript_url", None):
             why[c["activity_id"]] = "not transcribed"
         else:
-            texts[c["activity_id"]] = best.transcript
+            texts[c["activity_id"]] = x.transcript
     return texts, why
 
 
-def fetch(sample: list[dict]) -> tuple[dict[str, str], dict[str, str], int, int]:
-    """Search the sample's numbers within the API limits: (texts, reasons for no text, requests, failed chunks)."""
+def fetch(sample: list[dict]) -> tuple[dict[str, str], dict[str, str], int, int, dict[str, int]]:
+    """Search the sample's numbers within the API limits: (texts, reasons for no text, requests, failed chunks,
+    matches by time shift)."""
     from integrations.transcripts import TranscriptClient
     from integrations.transcripts.client import normalize_phone
 
@@ -187,7 +180,9 @@ def fetch(sample: list[dict]) -> tuple[dict[str, str], dict[str, str], int, int]
         except Exception as e:  # noqa: BLE001 - one failed chunk must not lose the rest
             failed += 1
             print(f"transcript chunk {i // 10 + 1} failed: {str(e)[:120]}", file=sys.stderr)
-    return (*match(sample, found, normalize_phone), tc.requests_made, failed)
+    shifts = Counter()
+    texts, why = match(sample, found, normalize_phone, shifts)
+    return texts, why, tc.requests_made, failed, shift_counts(shifts)
 
 
 def rollup(long_calls: list[dict], flags: dict, checked: set[str]) -> list[dict]:
@@ -222,6 +217,7 @@ def analyse(calls: list[dict], texts: dict[str, str] | None = None, sample: list
                   "start_ist": c["t"].astimezone(IST).strftime("%H:%M"), "duration_s": c["duration"],
                   "transcript_checked": c["activity_id"] in evidence, **evidence.get(c["activity_id"], {}),
                   "transcript_note": (missing or {}).get(c["activity_id"], ""),
+                  "zip_intent": (c.get("zip") or {}).get("intent", ""),
                   "flags": "; ".join(LABEL[f] for f in flags.get(c["activity_id"], []))}
                  for c in long_calls if flags.get(c["activity_id"]) or c["activity_id"] in evidence
                  or c["activity_id"] in (missing or {})]
@@ -242,7 +238,7 @@ def write(I: dict, data: str) -> None:
     json.dump({k: v for k, v in I.items() if k != "calls"}, open(os.path.join(data, "integrity.json"), "w"), indent=1)
     if I["calls"]:
         keys = ["call_id", "caller", "team", "start_ist", "duration_s", "transcript_checked", "words", "wpm",
-                "loop_share", "machine_text", "flags", "transcript_note"]
+                "loop_share", "machine_text", "flags", "transcript_note", "zip_intent"]
         with open(os.path.join(data, "integrity_calls.csv"), "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
             w.writeheader()
@@ -260,18 +256,21 @@ def main():
     a = ap.parse_args()
     data = a.data or f"data/report_{a.date}"
     run = load_run(data)
-    calls, *_ = map_calls(run["calls"], run["users"], datetime.fromisoformat(run["meta"]["d0"]))
+    d0 = datetime.fromisoformat(run["meta"]["d0"])
+    calls, *_ = map_calls(run["calls"], run["users"], d0)
+    attach(run["zips"], calls, d0 + timedelta(days=1))  # each call's Zipteams analysis, for the per-call file
     long_calls = eligible(calls)
     flags, _ = log_flags(calls)
     sample = [] if a.no_transcripts else pick_sample(long_calls, flags, min(a.limit, 90))
-    texts, missing, requests, failed = fetch(sample) if sample else ({}, {}, 0, 0)
+    texts, missing, requests, failed, shifts = fetch(sample) if sample else ({}, {}, 0, 0, shift_counts(Counter()))
     I = analyse(calls, texts if sample else None, sample, missing)
-    I.update({"date": a.date, "requests": requests, "failed_chunks": failed})
+    I.update({"date": a.date, "requests": requests, "failed_chunks": failed, "time_shifts": shifts})
     write(I, data)
     print(f"{I['long_calls']:,} answered calls of 2+ min; {I['flagged_calls']} flagged for review "
           f"({', '.join(f'{LABEL[k]} {v}' for k, v in I['by_flag'].items() if v)})")
     print(f"transcripts: {I['sampled']} calls sampled, {I['transcripts_matched']} matched, {requests} requests, {failed} failed"
           + "".join(f"; {v} {k}" for k, v in I["unmatched"].items()))
+    print("transcript times: " + ", ".join(f"{v} {k.replace('_', ' ')}" for k, v in shifts.items()))
     for c in I["calls"]:
         if c["transcript_checked"] or c["transcript_note"]:
             print(f"  {c['call_id']}  {c['caller'][:22]:22} {c['duration_s']:5}s {c.get('words', '-'):>5} words "

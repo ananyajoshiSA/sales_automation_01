@@ -71,9 +71,9 @@ def test_plan_tracker_and_html():
     assert team["payment_step_zip_pct"] == 100 and team["missed_inbound_leads"] == 1
     assert team["called_back_same_day_pct"] == 100 and team["median_callback_min"] == 30
     html, nums = report_html(A, None, "Validated")
-    assert "Monday 5 October 2026" in html and "Parameters v1.2." in html
+    assert "Monday 5 October 2026" in html and "Parameters v1.3." in html
     assert verdict_numbers_check(nums, scorecard_cells(A))["ok"]
-    assert "Parameters v1.2" in tracker_html(P)
+    assert "Parameters v1.3" in tracker_html(P)
 
 
 def test_markers():
@@ -109,3 +109,56 @@ def test_conversion_window_is_shown_in_ist():
     r["meta"]["cw_end"] = "2026-10-08T18:06:40+00:00"
     html, _ = report_html(analyse(r), None, "Validated")
     assert "8 Oct 23:36 IST" in html
+
+
+def test_each_call_carries_its_zipteams_analysis():
+    from analytics.team_performance import zip_call_rows
+
+    r = run()
+    r["zips"].append({"CreatedOn": "2026-10-05 18:33:00", "RelatedProspectId": "E1", "mx_Custom_1": "HIGH"})  # after midnight
+    r["zips"].append({"CreatedOn": "2026-10-05 20:00:00", "RelatedProspectId": "L1", "mx_Custom_1": "LOW"})   # next day's call
+    r["calls"].append(call("u1", "E1", "2026-10-05 18:25:00", dur=480))                                     # 23:55 IST
+    A = analyse(r)
+    rows = {x["start_ist"]: x for x in zip_call_rows(A)}
+    assert rows["2026-10-05 10:30"]["zip_intent"] == "HIGH" and rows["2026-10-05 10:30"]["zip_payment_step"] is True
+    assert rows["2026-10-05 23:55"]["zip_intent"] == "HIGH"
+    t = A["totals"]
+    assert (t["zip_after_day_kept"], t["zip_other_day_excluded"], t["zip_attr"] + t["zip_dropped"]) == (1, 1, t["zip_total"])
+    inside = next(c for c in data_checks(r, A) if c["check"] == "Every counted call and note is inside the IST day")
+    assert inside["ok"], inside["detail"]
+
+
+def test_late_edits_and_unreadable_times_are_counted():
+    r = run()
+    r["meta"]["edit_margin_days"] = 3
+    r["calls"][0]["modified_utc"] = "2026-10-06 04:00:00"                     # edited the next morning, still counted
+    r["calls"].append(call("u1", "W2", "10/5/2026 2:29:02 PM"))              # a start time we can't read
+    A = analyse(r)
+    t = A["totals"]
+    assert (t["late_edits_recovered"], t["unreadable_time_excluded"], t["calls"]) == (1, 1, analyse(run())["totals"]["calls"])
+    inside = next(c for c in data_checks(r, A) if c["check"] == "Every counted call and note is inside the IST day")
+    assert not inside["ok"] and "1 calls had a start time that couldn't be read" in inside["detail"]
+    recon = next(c for c in data_checks(r, A) if c["check"] == "Totals reconcile across teams and callers")
+    assert recon["ok"]
+
+
+def test_transcripts_are_placed_by_their_leadsquared_call_not_their_own_clock():
+    from datetime import timedelta
+    from types import SimpleNamespace
+
+    from analytics.team_performance import pick_transcripts
+    from integrations.transcripts import normalize_phone
+
+    r = run()
+    r["calls"].append(call("u1", "E1", "2026-10-05 14:30:00", dur=900))      # 20:00 IST
+    A = analyse(r)
+    evening = next(c for c in A["_calls"] if c["lead_id"] == "E1")
+    k = normalize_phone(evening["lead_number"])
+    api = [SimpleNamespace(phone=k, start_time=evening["t"] + timedelta(minutes=330), duration=905, transcript="evening call",
+                           agent_name="Asha K"),                                # IST read as UTC: 01:30 IST next day
+           SimpleNamespace(phone=k, start_time=evening["t"] - timedelta(days=2), duration=1500, transcript="older call",
+                           agent_name="Asha K")]                                # longer, but another day's call
+    rows, shifts = pick_transcripts(api, A["_calls"], {k: {"lead": "E1", "team": "Team A", "converted": False}})
+    assert [r["transcript"] for r in rows] == ["evening call"]
+    assert rows[0]["zip"] is None                                            # no Zipteams note on that call
+    assert shifts == {"on_time": 0, "api_5h30_early": 0, "api_5h30_late": 1}

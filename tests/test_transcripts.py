@@ -193,3 +193,29 @@ def test_retries_count_against_budget(monkeypatch):
     with pytest.raises(RequestBudgetExceeded):
         c.search(["9000000001"])
     assert len(responses.calls) == 2
+
+
+def _api(phone, start, dur, text="t"):
+    from types import SimpleNamespace
+    return SimpleNamespace(phone=phone, start_time=start, duration=dur, transcript=text, transcript_url="u")
+
+
+def test_match_to_calls_settles_each_api_clock_against_the_call_log():
+    from collections import Counter
+    from datetime import datetime, timedelta, timezone
+
+    from integrations.transcripts import match_to_calls
+    from integrations.transcripts.client import shift_counts
+
+    t0 = datetime(2026, 10, 5, 14, 30, tzinfo=timezone.utc)   # 20:00 IST
+    ls = [{"activity_id": "on", "lead_number": "9000000001", "t": t0, "duration": 600},
+          {"activity_id": "early", "lead_number": "9000000002", "t": t0, "duration": 600},
+          {"activity_id": "late", "lead_number": "9000000003", "t": t0, "duration": 600},
+          {"activity_id": "other", "lead_number": "9000000004", "t": t0, "duration": 600}]
+    api = [_api("919000000001", t0 + timedelta(minutes=2), 590),
+           _api("919000000002", t0 - timedelta(minutes=330), 605),      # converted twice: 5 h 30 m early
+           _api("919000000003", t0 + timedelta(minutes=331), 600),      # IST read as UTC: lands on the next IST day
+           _api("919000000004", t0 - timedelta(minutes=330), 200)]      # durations disagree: not the same call
+    hits = match_to_calls(api, ls)
+    assert {k: s for k, (_, s) in hits.items()} == {"on": 0, "early": 330, "late": -330}
+    assert shift_counts(Counter(s for _, s in hits.values())) == {"on_time": 1, "api_5h30_early": 1, "api_5h30_late": 1}

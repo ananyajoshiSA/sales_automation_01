@@ -24,6 +24,7 @@ from collections import Counter, defaultdict
 from analytics.call_markers import MARKERS, NEXT_STEP, PAYMENT_STEP, markers_in, summary_has_payment_step
 from analytics.lead_priority import strip_html
 from analytics.team_report import IST, utc, zip_score
+from analytics.zip_calls import match_notes, zip_analysis
 
 REAL_SECS = 120
 ENROLLED = "Course Enrolled"
@@ -99,9 +100,14 @@ def quality(snap: dict) -> list[dict]:
 
 
 def longest_calls(snap: dict, per_caller: int = 5) -> list[dict]:
-    """Step 3b: each caller's longest real conversations in the snapshot, one per lead."""
+    """Step 3b: each caller's longest real conversations in the snapshot, one per lead, with that call's
+    Zipteams intent and payment step when Zipteams analysed it."""
     users = {u["ID"]: _name(u) for u in snap["users"]}
     leads = {l["ProspectID"]: l for l in snap["leads"]}
+    zips = [a for a in snap.get("zip_activities", []) if str(a.get("ActivityEvent")) == "237"]
+    answered = [{**c, "t": t, "ans": True} for c in snap["calls"]
+                if c.get("status") == "Answered" and (t := utc(c.get("start_utc")))]
+    on_call = {(c["lead_id"], c["start_utc"]): zip_analysis(a) for a, c in match_notes(zips, answered)[0]}
     best: dict[tuple, dict] = {}
     for c in snap["calls"]:
         if c.get("status") != "Answered" or (c.get("duration") or 0) < REAL_SECS or c.get("user_id") not in users:
@@ -119,7 +125,11 @@ def longest_calls(snap: dict, per_caller: int = 5) -> list[dict]:
             out.append({"caller": caller, "lead_id": c["lead_id"], "lead_number": c.get("lead_number"),
                         "at_ist": utc(c["start_utc"]).astimezone(IST).strftime("%Y-%m-%d %H:%M"),
                         "minutes": round(c["duration"] / 60, 1), "course": l.get("mx_Enquired_Course") or "",
-                        "stage": l.get("ProspectStage") or "", "enrolled": l.get("ProspectStage") == ENROLLED})
+                        "stage": l.get("ProspectStage") or "", "enrolled": l.get("ProspectStage") == ENROLLED,
+                        "zip_intent": (on_call.get((c["lead_id"], c["start_utc"])) or {}).get("intent", ""),
+                        "zip_payment_step": (on_call.get((c["lead_id"], c["start_utc"])) or {}).get("payment_step"),
+                        "_call": {"activity_id": c.get("activity_id") or f"{c['lead_id']}|{c['start_utc']}",
+                                  "lead_number": c.get("lead_number"), "t": utc(c["start_utc"]), "duration": c["duration"]}})
     return out
 
 
@@ -134,7 +144,8 @@ def score_sample(sample: list[dict], transcripts: dict[str, str]) -> list[dict]:
 
 
 def fetch_sample_transcripts(sample: list[dict], conversion: dict[str, float], out_dir: str) -> dict[str, str]:
-    """Search the sample's numbers (bottom converters first) within 9 requests of 10 numbers; keep the longest per lead."""
+    """Search the sample's numbers (bottom converters first) within 9 requests of 10 numbers; keep the transcript of
+    each sampled call, matched to it by number and time (``match_to_calls``), the longest per lead."""
     from integrations.transcripts import TranscriptClient
     from integrations.transcripts.client import normalize_phone
 
@@ -145,22 +156,33 @@ def fetch_sample_transcripts(sample: list[dict], conversion: dict[str, float], o
             lead_of[k] = s["lead_id"]
     nums = list(lead_of)[:90]
     tc = TranscriptClient(max_retries=0, timeout=120)
-    texts: dict[str, tuple[int, str]] = {}
+    found = []
     time.sleep(60)  # the API allows 10 requests a minute, counting earlier runs
     for i in range(0, len(nums), 10):
         if i:
             time.sleep(7)
         try:
-            for x in tc.search(nums[i:i + 10]):
-                lid = lead_of.get(normalize_phone(x.phone))
-                if lid and x.transcript.strip() and (x.duration or 0) >= REAL_SECS and (x.duration or 0) > texts.get(lid, (0, ""))[0]:
-                    texts[lid] = (x.duration or 0, x.transcript)
+            found += tc.search(nums[i:i + 10])
         except Exception as e:  # noqa: BLE001 - one failed chunk must not lose the rest
             print(f"transcript chunk {i // 10 + 1} failed: {str(e)[:120]}", file=sys.stderr)
-    out = {k: v[1] for k, v in texts.items()}
+    out = sample_texts(sample, found)
     os.makedirs(out_dir, exist_ok=True)
     json.dump(out, open(os.path.join(out_dir, "coaching_transcripts.json"), "w"))  # PII: data/ only
     return out
+
+
+def sample_texts(sample: list[dict], api_calls: list) -> dict[str, str]:
+    """lead_id -> transcript of the longest sampled call on that lead that an API call matches (number, time and
+    duration; the API's ±5 h 30 m clock errors are allowed for)."""
+    from integrations.transcripts.client import match_to_calls
+
+    hits = match_to_calls(api_calls, [s["_call"] for s in sample if s["_call"]["t"]])
+    texts: dict[str, tuple[int, str]] = {}
+    for s in sample:
+        x = (hits.get(s["_call"]["activity_id"]) or (None,))[0]
+        if x and x.transcript.strip() and (x.duration or 0) >= REAL_SECS and (x.duration or 0) > texts.get(s["lead_id"], (0, ""))[0]:
+            texts[s["lead_id"]] = (x.duration or 0, x.transcript)
+    return {k: v[1] for k, v in texts.items()}
 
 
 def write_csv(path: str, rows: list[dict]) -> None:
@@ -183,7 +205,7 @@ def main():
     obj, qual, sample = objections(snap), quality(snap), longest_calls(snap, a.per_caller)
     write_csv(os.path.join(a.out, "objections.csv"), obj)
     write_csv(os.path.join(a.out, "quality.csv"), qual)
-    write_csv(os.path.join(a.out, "coaching_sample.csv"), [{k: v for k, v in s.items() if k != "lead_number"} for s in sample])
+    write_csv(os.path.join(a.out, "coaching_sample.csv"), [{k: v for k, v in s.items() if k != "lead_number" and not k.startswith("_")} for s in sample])
     print(f"{len(obj)} caller/course/objection rows, {len(qual)} callers scored, {len(sample)} calls in the coaching sample")
     if a.transcripts:
         conv = {}
