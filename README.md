@@ -105,6 +105,50 @@ zt.upsert_customer("asha@example.com", name="Ravi", phone_number="9876543210")
 Every call writes to Zipteams (phones go out as E.164). Zipteams' analysis comes back
 into LeadSquared as "Zipteams Notes" activities, which is what `analytics/` reads.
 
+## Google Ads, Meta Ads, Zoom and TimePay (read-only)
+
+These four clients only read. They feed the Revenue Boost levers like this:
+
+| Source | What it adds | Lever |
+|---|---|---|
+| Google Ads, Meta Ads | Daily spend, clicks and platform leads per campaign | Calling the right leads first, once campaigns are joined to LeadSquared enrolments |
+| Zoom | Who attended each bootcamp or webinar, and for how long | Calling the right leads first; speed to lead after a session |
+| TimePay | AI voice-agent campaigns and call logs (reminders, confirmations) | Speed to lead; returning leads' calls |
+
+| Variable | Description |
+|---|---|
+| `GOOGLE_DEV_TOKEN`, `GOOGLE_CLIENT_ID`, `GOOGLE_CLIENT_SECRET`, `GOOGLE_REFRESH_TOKEN` | Google Ads OAuth app and refresh token |
+| `GOOGLE_LOGIN_CUSTOMER_ID`, `GOOGLE_CUSTOMER_IDS` | Manager account, and the ad accounts to report on (comma-separated) |
+| `META_TOKEN`, `META_GRAPH_VERSION` | System User token with `ads_read`; Graph version (default `v21.0`) |
+| `ZOOM_ACCOUNT_ID`, `ZOOM_CLIENT_ID`, `ZOOM_CLIENT_SECRET` | Main Zoom Server-to-Server app; `ZOOM_MKT_*` and `ZOOM_WEBINAR_*` for the other two |
+| `TIMEPAY_BASE_URL`, `TIMEPAY_TOKEN`, `TIMEPAY_ORG_ID` | TimePay REST API; `TIMEPAY_AUTH_HEADER` overrides the token header (default `Authorization: Bearer`) |
+
+```python
+from integrations.google_ads import GoogleAdsClient
+from integrations.meta_ads import MetaAdsClient
+from integrations.zoom import ZoomClient, attendance
+from integrations.timepay import TimePayClient
+
+GoogleAdsClient().campaign_daily("2026-10-01", "2026-10-07")      # spend in rupees
+MetaAdsClient().campaign_daily("act_123", "2026-10-01", "2026-10-07")
+z = ZoomClient("main")                                            # or "marketing", "webinar"
+attendance(z.webinar_participants(webinar_uuid))                  # minutes per person
+TimePayClient().count_logs("2026-10-08T00:00:00", "2026-10-08T23:59:59", type="call")
+```
+
+```bash
+PYTHONPATH=. .venv/bin/python scripts/check_integrations.py            # read-only check, prints no secrets
+PYTHONPATH=. .venv/bin/python scripts/fetch_ad_spend.py 2026-10-01 2026-10-07 exports/ad_spend.csv
+PYTHONPATH=. .venv/bin/python scripts/fetch_zoom_attendance.py main host@lawsikho.in 2026-10-01 2026-10-07 data/zoom.csv
+```
+
+Notes: Meta budgets come back in paise and insights spend in rupees; an ACTIVE Meta campaign
+may not be delivering. Zoom attendance reports need the `report:read:admin` scope, which the
+webinar app does not have yet, and a paid Zoom plan, which the marketing account is not on.
+Use the main account for attendance. TimePay `/logs` returns 10 rows a page, so read counts with
+`count_logs`. The TimePay client has no call, WhatsApp or SMS methods on purpose: those reach
+real people and need a go-ahead for each run.
+
 ## Live dashboard
 
 [dashboard/](dashboard/) is a Cloudflare Worker (free tier) that pulls LeadSquared every minute and
