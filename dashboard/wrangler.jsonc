@@ -19,9 +19,8 @@
     {
       "binding": "DB",
       "database_name": "sales_dashboard",
-      // Created with: npx wrangler d1 create sales_dashboard. This ID is from the old account;
-      // replace it with the target account's database ID at deploy time (README, "Deploy").
-      "database_id": "2f27d60b-3b45-41bc-a7b4-106a7ea8b1a0",
+      // Created in the target account's dashboard (D1 -> Create Database), 2026-10-09.
+      "database_id": "db058839-b873-41ee-8bc8-198482d4b56e",
       "migrations_dir": "migrations"
     }
   ],
