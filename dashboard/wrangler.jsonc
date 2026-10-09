@@ -4,7 +4,7 @@
   "name": "sales-automation-01",
   // The target Cloudflare account (not a secret): pins deploys to it, so a login to another
   // account can't land the Worker there.
-  "account_id": "35563947961bb7f8690daa28fa3f3944",
+  "account_id": "5f3e897557136f4ccbe8d884329f1c58",
   "main": "src/index.ts",
   // Served at https://sales-automation-01.<subdomain>.workers.dev, behind Cloudflare Access.
   "workers_dev": true,
