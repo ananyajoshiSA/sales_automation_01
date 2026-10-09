@@ -280,9 +280,13 @@ export async function runUsers(env: Env): Promise<number> {
   ]);
 }
 
+/** Users refresh every USERS_EVERY_HOURS, and again on the next leads slot after a failed run:
+ *  recordError leaves an old cursor behind, which would otherwise hold the team list back for hours. */
 export async function usersDue(db: D1Database): Promise<boolean> {
-  const s = await getState(db, "users");
-  return !s || Date.now() - s.cursor.getTime() > USERS_EVERY_HOURS * 60 * MIN;
+  const r = await db.prepare("SELECT cursor, last_error FROM sync_state WHERE task = 'users'")
+    .first<{ cursor: string; last_error: string | null }>();
+  const cursor = r ? parseUtc(r.cursor) : null;
+  return !r || !cursor || r.last_error !== null || Date.now() - cursor.getTime() > USERS_EVERY_HOURS * 60 * MIN;
 }
 
 /** Cron rotation (every minute): even minutes = outbound calls; odd minutes rotate the rest. */

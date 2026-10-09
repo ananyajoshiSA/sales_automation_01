@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import worker from "../src/index";
 import { MAX_RANGE_DAYS, parseRange, runAuthorized, serveSummary } from "../src/routes";
-import { countReads, utcDay } from "../src/tasks";
+import { countReads, recordError, usersDue, utcDay } from "../src/tasks";
 import type { Env } from "../src/tasks";
 import { fakeD1 } from "./fake_d1.mjs";
 
@@ -114,4 +114,16 @@ it("countReads charges every statement's rows read, first() included", async () 
   await c.prepare("SELECT * FROM users").all();
   await c.batch([c.prepare("SELECT * FROM users"), c.prepare("SELECT * FROM users WHERE id = ?").bind("zz")]);
   expect(tally.rowsRead).toBe(1 + 1 + 2 + 2);
+});
+
+describe("users refresh", () => {
+  it("retries on the next slot after a failed run instead of waiting 20 hours", async () => {
+    const env = mkEnv();
+    expect(await usersDue(env.DB)).toBe(true);  // never run
+    await recordError(env.DB, "users", new Error("HTTP 401"));
+    expect(await usersDue(env.DB)).toBe(true);  // failed: try again
+    env.DB.sqlite.prepare("UPDATE sync_state SET cursor = ?, last_error = NULL WHERE task = 'users'")
+      .run(new Date().toISOString().slice(0, 19).replace("T", " "));
+    expect(await usersDue(env.DB)).toBe(false); // fresh success
+  });
 });
