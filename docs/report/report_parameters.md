@@ -1,6 +1,6 @@
 # Fixed parameters for the daily team calling report
 
-Version 1.3, 9 Oct 2026. v1.3 fixes the day window and transcript times (S1, S3, S6, P2, P32, check 8; see [docs/timezone_issues.md](../timezone_issues.md)): calls are read up to 3 days past the day so later-edited calls are kept, and each transcript takes its time from its LeadSquared call. Definitions are unchanged, but v1.3 counts can be slightly higher than v1.2 for the same day, so compare reports only within a version. v1.2 adds the call-integrity section (11, P67–P74), its page-2 block (P62) and validation check 14. v1.1 changed only the layout (P62/P64) and added the blocking validation gate (section 10). Every definition and number rule from v1.0 is unchanged, so v1.0–v1.2 figures for teams and callers are comparable with each other. Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
+Version 1.3, 9 Oct 2026. v1.3 fixes the day window and transcript times (S1, S3, S6, P2, P32, P40, checks 8 and 12; see [docs/timezone_issues.md](../timezone_issues.md)): calls are read up to 3 days past the day so later-edited calls are kept, each transcript takes its time from its LeadSquared call, each Zipteams analysis is kept on the call it analysed, including a call that ends after midnight, and windows are read one page at a time because LeadSquared's paging skips a few rows. Definitions are unchanged, but v1.3 counts can be slightly higher than v1.2 for the same day, so compare reports only within a version. v1.2 adds the call-integrity section (11, P67–P74), its page-2 block (P62) and validation check 14. v1.1 changed only the layout (P62/P64) and added the blocking validation gate (section 10). Every definition and number rule from v1.0 is unchanged, so v1.0–v1.2 figures for teams and callers are comparable with each other. Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
 
 The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in its `<parameters>` block. Change both files together.
 
@@ -21,7 +21,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 |---|---|---|---|
 | S1 | LeadSquared phone activities | Every outbound (event 22) and inbound (event 21) call in the window, parsed with `parse_phone_call` | `scripts/fetch_all_calls.py {D} {D} data/all_calls_{D}.jsonl` or `iter_activities_started`, which reads edits up to 3 days past the window (the API filters on `ModifiedOn`) and keeps calls by `CreatedOn`. Print how many later-edited calls were recovered. **Never** use "leads modified" or lead edits as a proxy for calls. |
 | S2 | LeadSquared users | `UserManagement.svc/Users.Get` (all users with `MemberOfGroups`) | `LeadSquaredClient().get_users()` |
-| S3 | Zipteams analysis | "Zipteams Notes" activities, event 237, created in the window | `iter_activities_started(237, …)`. Must be included. A report without Zipteams is not a valid run. |
+| S3 | Zipteams analysis | "Zipteams Notes" activities, event 237, created in the window or in the 2 hours after it (a note is written as its call ends) | `iter_activities_started(237, …)`, same 3-day edit margin as S1. Must be included. A report without Zipteams is not a valid run. |
 | S4 | Enrollments | Leads whose `ProspectStage` = "Course Enrolled", with stage-change history (event 3002) | Same logic as `scripts/d1_backfill.py` "first-time enrollments" |
 | S5 | Transcripts | Centralized transcript API, `TranscriptClient.search` | See P30–P34 for sampling and limits |
 | S6 | Payments (context only) | "Payment Successful", event 213, read with the same 3-day edit margin as S1 | Report the count; do not use it as the conversion measure while it is empty. |
@@ -62,7 +62,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 
 | ID | Metric | Exact definition |
 |---|---|---|
-| P40 | Attribution | Each 237 note is credited to the caller of the lead's **last answered call at or before** the note's `CreatedOn`. Notes with no such call are dropped and counted. |
+| P40 | Attribution | Each 237 note is credited to the caller of the lead's **last answered call at or before** the note's `CreatedOn`, and its analysis (intent, scores, payment step) is kept on that call (`analytics/zip_calls.py`; per call in `data/report_{D}/zip_calls.csv`). Notes with no such call are dropped and counted. A note written after the day counts only if it lands within 5 minutes of the end of one of the day's calls; the rest belong to another day and are counted separately. |
 | P41 | Probing % | Mean of `mx_Custom_5` (0 or 100) over the caller's or team's notes. |
 | P42 | Product pitch % | Mean of `mx_Custom_4`. |
 | P43 | Objection handling % | Mean of `mx_Custom_6`. |

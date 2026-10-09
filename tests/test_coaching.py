@@ -39,6 +39,7 @@ def test_quality_attributed_to_last_answered_caller():
 def test_longest_real_calls_one_per_lead():
     s = longest_calls(SNAP, per_caller=5)
     assert [(r["caller"], r["lead_id"], r["minutes"]) for r in s] == [("Asha K", "L1", 15.0), ("Asha K", "L3", 10.0)]
+    assert [(r["zip_intent"], r["zip_payment_step"]) for r in s] == [("NOT_AVAILABLE", True), ("", None)]  # that call's analysis
     scored = score_sample(s, {"L1": "please make the payment by tomorrow at 6 pm", "L3": "tell me about yourself"})
     assert scored[0]["calls_read"] == 2 and scored[0][PAYMENT_STEP] == 50
 

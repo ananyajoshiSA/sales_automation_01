@@ -17,6 +17,7 @@ import sys
 from datetime import datetime, timedelta
 
 from analytics.team_performance import ENROLLED, first_enrollment
+from analytics.zip_calls import ZIP_LATE_WINDOW
 from integrations.leadsquared import PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, format_datetime, parse_phone_call
 from integrations.timeutil import EDIT_MARGIN, IST, ist_day_start, now_utc, utc
 
@@ -53,7 +54,7 @@ def main():
     calls = [parse_phone_call(x) for ev in (PHONE_OUTBOUND, PHONE_INBOUND) for x in c.iter_activities_started(ev, d0, d1)]
     w("calls.json", calls)
     log("calls", len(calls))
-    zips = list(c.iter_activities_started(ZIP_NOTES, d0, d1))
+    zips = list(c.iter_activities_started(ZIP_NOTES, d0, d1 + ZIP_LATE_WINDOW))  # a call ending after midnight
     w("zip.json", zips)
     log("zipteams notes", len(zips))
     pays = list(c.iter_activities_started(PAYMENT_SUCCESS, d0, cw_end))

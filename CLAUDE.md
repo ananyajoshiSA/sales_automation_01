@@ -63,7 +63,10 @@ places and in GOAL.md together, or not at all.
   - A call starts at its `CreatedOn` (UTC). Never read a call note's `StartTime`: one copy is UTC, the other IST,
     and neither is labelled.
   - LeadSquared's activity date filter is on `ModifiedOn`, so fetch calls, notes and payments for days with
-    `iter_activities_started`, which reads 3 days of later edits and keeps activities by `CreatedOn`.
+    `iter_activities_started`, which reads 3 days of later edits and keeps activities by `CreatedOn`. It also
+    reads each window in one page, because paging through a large result skips a few rows.
+  - Each Zipteams note is written as its call ends; `analytics/zip_calls.py` keeps the analysis on that call,
+    including a call that ends after midnight.
   - Transcript API clocks can be 5 h 30 min off in either direction. Place a transcript on a day only through
     `match_to_calls`, which takes the time from its LeadSquared call.
 - Count each call once. Don't add per-call rows to D1.

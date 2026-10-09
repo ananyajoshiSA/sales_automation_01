@@ -32,6 +32,7 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from analytics.team_report import IST
+from analytics.zip_calls import attach
 from integrations.transcripts.client import match_to_calls, shift_counts
 
 OVERLAP_SECS = 30          # P68
@@ -216,6 +217,7 @@ def analyse(calls: list[dict], texts: dict[str, str] | None = None, sample: list
                   "start_ist": c["t"].astimezone(IST).strftime("%H:%M"), "duration_s": c["duration"],
                   "transcript_checked": c["activity_id"] in evidence, **evidence.get(c["activity_id"], {}),
                   "transcript_note": (missing or {}).get(c["activity_id"], ""),
+                  "zip_intent": (c.get("zip") or {}).get("intent", ""),
                   "flags": "; ".join(LABEL[f] for f in flags.get(c["activity_id"], []))}
                  for c in long_calls if flags.get(c["activity_id"]) or c["activity_id"] in evidence
                  or c["activity_id"] in (missing or {})]
@@ -236,7 +238,7 @@ def write(I: dict, data: str) -> None:
     json.dump({k: v for k, v in I.items() if k != "calls"}, open(os.path.join(data, "integrity.json"), "w"), indent=1)
     if I["calls"]:
         keys = ["call_id", "caller", "team", "start_ist", "duration_s", "transcript_checked", "words", "wpm",
-                "loop_share", "machine_text", "flags", "transcript_note"]
+                "loop_share", "machine_text", "flags", "transcript_note", "zip_intent"]
         with open(os.path.join(data, "integrity_calls.csv"), "w", newline="", encoding="utf-8") as fh:
             w = csv.DictWriter(fh, fieldnames=keys, extrasaction="ignore")
             w.writeheader()
@@ -254,7 +256,9 @@ def main():
     a = ap.parse_args()
     data = a.data or f"data/report_{a.date}"
     run = load_run(data)
-    calls, *_ = map_calls(run["calls"], run["users"], datetime.fromisoformat(run["meta"]["d0"]))
+    d0 = datetime.fromisoformat(run["meta"]["d0"])
+    calls, *_ = map_calls(run["calls"], run["users"], d0)
+    attach(run["zips"], calls, d0 + timedelta(days=1))  # each call's Zipteams analysis, for the per-call file
     long_calls = eligible(calls)
     flags, _ = log_flags(calls)
     sample = [] if a.no_transcripts else pick_sample(long_calls, flags, min(a.limit, 90))

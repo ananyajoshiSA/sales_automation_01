@@ -24,6 +24,7 @@ from collections import Counter, defaultdict
 from analytics.call_markers import MARKERS, NEXT_STEP, PAYMENT_STEP, markers_in, summary_has_payment_step
 from analytics.lead_priority import strip_html
 from analytics.team_report import IST, utc, zip_score
+from analytics.zip_calls import match_notes, zip_analysis
 
 REAL_SECS = 120
 ENROLLED = "Course Enrolled"
@@ -99,9 +100,14 @@ def quality(snap: dict) -> list[dict]:
 
 
 def longest_calls(snap: dict, per_caller: int = 5) -> list[dict]:
-    """Step 3b: each caller's longest real conversations in the snapshot, one per lead."""
+    """Step 3b: each caller's longest real conversations in the snapshot, one per lead, with that call's
+    Zipteams intent and payment step when Zipteams analysed it."""
     users = {u["ID"]: _name(u) for u in snap["users"]}
     leads = {l["ProspectID"]: l for l in snap["leads"]}
+    zips = [a for a in snap.get("zip_activities", []) if str(a.get("ActivityEvent")) == "237"]
+    answered = [{**c, "t": t, "ans": True} for c in snap["calls"]
+                if c.get("status") == "Answered" and (t := utc(c.get("start_utc")))]
+    on_call = {(c["lead_id"], c["start_utc"]): zip_analysis(a) for a, c in match_notes(zips, answered)[0]}
     best: dict[tuple, dict] = {}
     for c in snap["calls"]:
         if c.get("status") != "Answered" or (c.get("duration") or 0) < REAL_SECS or c.get("user_id") not in users:
@@ -120,6 +126,8 @@ def longest_calls(snap: dict, per_caller: int = 5) -> list[dict]:
                         "at_ist": utc(c["start_utc"]).astimezone(IST).strftime("%Y-%m-%d %H:%M"),
                         "minutes": round(c["duration"] / 60, 1), "course": l.get("mx_Enquired_Course") or "",
                         "stage": l.get("ProspectStage") or "", "enrolled": l.get("ProspectStage") == ENROLLED,
+                        "zip_intent": (on_call.get((c["lead_id"], c["start_utc"])) or {}).get("intent", ""),
+                        "zip_payment_step": (on_call.get((c["lead_id"], c["start_utc"])) or {}).get("payment_step"),
                         "_call": {"activity_id": c.get("activity_id") or f"{c['lead_id']}|{c['start_utc']}",
                                   "lead_number": c.get("lead_number"), "t": utc(c["start_utc"]), "duration": c["duration"]}})
     return out

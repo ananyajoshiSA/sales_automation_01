@@ -24,10 +24,10 @@ import time
 from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
-from analytics.call_markers import MARKERS, PAYMENT_STEP, marker_rates, summary_has_payment_step
-from analytics.lead_priority import strip_html
+from analytics.call_markers import MARKERS, PAYMENT_STEP, marker_rates
 from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS
-from analytics.team_report import IST, utc, zip_score
+from analytics.team_report import IST, utc
+from analytics.zip_calls import match_notes, zip_analysis
 
 VERSION = "1.3"
 REAL_SECS = REAL_CONVERSATION_SECS
@@ -121,26 +121,18 @@ def credit_enrollments(enrollments: list[dict], calls: list[dict], users: list[d
     return out
 
 
-def attribute_zip(zips: list[dict], calls: list[dict]) -> tuple[list[dict], int]:
-    """P40: each note to the caller of the lead's last answered call at or before it; the rest dropped."""
-    by_lead = defaultdict(list)
-    for c in calls:
-        if c["ans"] and c["t"]:
-            by_lead[c["lead_id"]].append(c)
-    out, dropped = [], 0
-    for a in zips:
-        t = utc(a.get("CreatedOn"))
-        prior = [c for c in by_lead.get(a.get("RelatedProspectId"), []) if t and c["t"] <= t]
-        if not prior:
-            dropped += 1
-            continue
-        c = prior[-1]
-        out.append({"team": c["team"], "name": c["name"], "lead": a.get("RelatedProspectId"),
-                    "intent": (a.get("mx_Custom_1") or "NOT_AVAILABLE").upper(),
-                    "probe": zip_score(a.get("mx_Custom_5")), "pitch": zip_score(a.get("mx_Custom_4")),
-                    "obj": zip_score(a.get("mx_Custom_6")),
-                    "payment_step": summary_has_payment_step(strip_html(a.get("ActivityEvent_Note")) + " " + (a.get("mx_Custom_2") or ""))})
-    return out, dropped
+def attribute_zip(zips: list[dict], calls: list[dict], day_end: datetime | None = None) -> tuple[list[dict], int, int]:
+    """P40: each note to the lead's last answered call at or before it, which is the call it analysed
+    (analytics/zip_calls.py). The analysis is also put on that call as ``zip``. Returns (notes with their caller,
+    notes with no call, notes written after the day that belong to no call of the day)."""
+    pairs, dropped, other_day = match_notes(zips, calls, day_end)
+    out = []
+    for a, c in pairs:
+        z = zip_analysis(a)
+        c["zip"] = {**z, "note_id": a.get("ProspectActivityId")}
+        out.append({"team": c["team"], "name": c["name"], "lead": a.get("RelatedProspectId"), "call_id": c.get("activity_id"),
+                    "after_day": bool(day_end and utc(a.get("CreatedOn")) >= day_end), **z})
+    return out, dropped, other_day
 
 
 def _mean(zs: list[dict], k: str) -> int | None:
@@ -173,7 +165,7 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
     cred_t = Counter(e["team"] for e in E if e["team"])
     cred_p = Counter((e["team"], e["caller"]) for e in E if e["team"])
     own_same = Counter(e["owner_team"] for e in E if e["day"] == d0.strftime("%Y-%m-%d"))
-    Z, dropped = attribute_zip(run["zips"], calls)
+    Z, dropped, zip_other_day = attribute_zip(run["zips"], calls, day_end)
 
     T, P, ZT, ZP = defaultdict(list), defaultdict(list), defaultdict(list), defaultdict(list)
     for c in calls:
@@ -203,7 +195,8 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
         "totals": {"calls_raw": len(run["calls"]), "outside_window_excluded": outside, "unreadable_time_excluded": bad_time,
                    "late_edits_recovered": late, "edit_margin_days": meta.get("edit_margin_days", 0), "bots_excluded": bots, "calls": len(calls), "outbound": len(out_calls),
                    "inbound": len(calls) - len(out_calls), "answered_out": sum(c["ans"] for c in out_calls),
-                   "zip_total": len(run["zips"]), "zip_attr": len(Z), "zip_dropped": dropped, "enroll_window": len(E),
+                   "zip_total": len(run["zips"]) - zip_other_day, "zip_attr": len(Z), "zip_dropped": dropped,
+                   "zip_other_day_excluded": zip_other_day, "zip_after_day_kept": sum(z["after_day"] for z in Z), "enroll_window": len(E),
                    "enroll_credited": sum(cred_t.values()), "payments": len(run["payments"]),
                    "multi_group_callers": len({c.get("user_id") for c in calls} & multi)},
         "_calls": calls, "_zip": Z,
@@ -268,15 +261,16 @@ def pick_transcripts(api_calls: list, calls: list[dict], meta: dict[str, dict]) 
     day = [c for c in calls if c["ans"] and c["t"] and normalize_phone(c.get("lead_number")) in meta]
     hits = match_to_calls(api_calls, [{**c, "activity_id": i} for i, c in enumerate(day)])
     best, shifts = {}, Counter()
-    for x, shift in hits.values():
+    for i, (x, shift) in hits.items():
         shifts[shift] += 1
         if (x.duration or 0) < REAL_SECS or not x.transcript.strip() or (x.agent_name and BOT.search(x.agent_name)):
             continue
         k = normalize_phone(x.phone)
-        if k not in best or (x.duration or 0) > (best[k].duration or 0):
-            best[k] = x
-    rows = [{**meta[k], "agent": x.agent_name, "duration": x.duration, "transcript": x.transcript}
-            for k, x in best.items() if k in meta]
+        if k not in best or (x.duration or 0) > (best[k][0].duration or 0):
+            best[k] = (x, day[i])
+    rows = [{**meta[k], "agent": x.agent_name, "duration": x.duration, "transcript": x.transcript,
+             "call_id": c.get("activity_id"), "zip": c.get("zip")}
+            for k, (x, c) in best.items() if k in meta]
     return rows, shift_counts(shifts)
 
 
@@ -345,6 +339,31 @@ def plan_tracker(A: dict, tx: dict | None = None) -> dict:
                         "payment_step_transcript_not_converted_pct": ((tx or {}).get("markers", {}).get(PAYMENT_STEP) or {}).get("not_converted")}}
 
 
+# ------------------------------------------------------------------ per-call Zipteams analysis
+
+ZIP_CALL_COLUMNS = ["call_id", "caller", "team", "start_ist", "duration_s", "zip_intent", "zip_probing", "zip_pitch",
+                    "zip_objection", "zip_payment_step"]
+
+
+def zip_call_rows(A: dict) -> list[dict]:
+    """One row per answered call that has a Zipteams analysis: call IDs and scores only, no lead details."""
+    return [{"call_id": c.get("activity_id"), "caller": c["name"], "team": c["team"],
+             "start_ist": c["t"].astimezone(IST).strftime("%Y-%m-%d %H:%M"), "duration_s": c["duration"],
+             "zip_intent": z["intent"], "zip_probing": z["probe"], "zip_pitch": z["pitch"], "zip_objection": z["obj"],
+             "zip_payment_step": z["payment_step"]} for c in A["_calls"] if (z := c.get("zip"))]
+
+
+def write_zip_calls(A: dict, path: str) -> dict:
+    import csv
+
+    rows = zip_call_rows(A)
+    with open(path, "w", newline="", encoding="utf-8") as fh:
+        w = csv.DictWriter(fh, fieldnames=ZIP_CALL_COLUMNS)
+        w.writeheader()
+        w.writerows(rows)
+    return {"with_zip": len(rows), "real": sum(c["real"] for c in A["_calls"])}
+
+
 # ------------------------------------------------------------------ PDF
 
 def chromium() -> str | None:
@@ -387,6 +406,9 @@ def main():
     as_of = datetime.strptime(a.as_of, "%Y-%m-%d %H:%M").replace(tzinfo=IST) if a.as_of else None
     run = load_run(data)
     A = analyse(run, as_of)
+    zc = write_zip_calls(A, os.path.join(data, "zip_calls.csv"))
+    print(f"Zipteams analysis on {zc['with_zip']:,} of {zc['real']:,} real conversations "
+          f"(per call: {os.path.join(data, 'zip_calls.csv')})")
 
     # ---- validation gate: every check must pass before anything is rendered
     from integrations.leadsquared import LeadSquaredClient

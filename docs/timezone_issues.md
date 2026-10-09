@@ -13,6 +13,18 @@ started then, and the new one found all 254 (35 had been edited after the window
 checked all matched their call, 2 of them after correcting a 5 h 30 m clock error. A 6-minute window
 exaggerates the share of late edits, so this does not size the full-day effect.
 
+**Follow-up (9 Oct): Zipteams analysis on its own call, and a paging gap.**
+- On 88 Zipteams notes created 14:00–14:30 IST on 5 Oct, every note was written as its call ended
+  (0 to 36 s before start + duration), and that call was always the lead's last answered call. So the
+  attribution rule names the exact call. The analysis (intent, scores, payment step) is now kept on the
+  call (`analytics/zip_calls.py`) and written per call to `data/report_{D}/zip_calls.csv`, the transcript
+  sample, the call-integrity file and the coaching sample. A note written after midnight is kept only
+  for a day call that ended within 5 minutes of it.
+- Reading a 4.5-hour window of outbound calls three times through LeadSquared's paging returned 12,203
+  rows each time but 1 to 3 of them twice, so as many real calls were skipped, differently on each run.
+  `iter_activities_started` now cuts any window bigger than one page into smaller windows instead of
+  paging.
+
 ## What was checked
 
 All read-only, on a small sample, with lead data kept under `data/tz_check/` (git-ignored):

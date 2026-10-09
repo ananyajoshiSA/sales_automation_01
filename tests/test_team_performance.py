@@ -111,6 +111,23 @@ def test_conversion_window_is_shown_in_ist():
     assert "8 Oct 23:36 IST" in html
 
 
+def test_each_call_carries_its_zipteams_analysis():
+    from analytics.team_performance import zip_call_rows
+
+    r = run()
+    r["zips"].append({"CreatedOn": "2026-10-05 18:33:00", "RelatedProspectId": "E1", "mx_Custom_1": "HIGH"})  # after midnight
+    r["zips"].append({"CreatedOn": "2026-10-05 20:00:00", "RelatedProspectId": "L1", "mx_Custom_1": "LOW"})   # next day's call
+    r["calls"].append(call("u1", "E1", "2026-10-05 18:25:00", dur=480))                                     # 23:55 IST
+    A = analyse(r)
+    rows = {x["start_ist"]: x for x in zip_call_rows(A)}
+    assert rows["2026-10-05 10:30"]["zip_intent"] == "HIGH" and rows["2026-10-05 10:30"]["zip_payment_step"] is True
+    assert rows["2026-10-05 23:55"]["zip_intent"] == "HIGH"
+    t = A["totals"]
+    assert (t["zip_after_day_kept"], t["zip_other_day_excluded"], t["zip_attr"] + t["zip_dropped"]) == (1, 1, t["zip_total"])
+    inside = next(c for c in data_checks(r, A) if c["check"] == "Every counted call and note is inside the IST day")
+    assert inside["ok"], inside["detail"]
+
+
 def test_late_edits_and_unreadable_times_are_counted():
     r = run()
     r["meta"]["edit_margin_days"] = 3
@@ -143,4 +160,5 @@ def test_transcripts_are_placed_by_their_leadsquared_call_not_their_own_clock():
                            agent_name="Asha K")]                                # longer, but another day's call
     rows, shifts = pick_transcripts(api, A["_calls"], {k: {"lead": "E1", "team": "Team A", "converted": False}})
     assert [r["transcript"] for r in rows] == ["evening call"]
+    assert rows[0]["zip"] is None                                            # no Zipteams note on that call
     assert shifts == {"on_time": 0, "api_5h30_early": 0, "api_5h30_late": 1}

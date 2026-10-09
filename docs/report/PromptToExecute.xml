@@ -38,7 +38,7 @@
     <sources mandatory="all">
       <source id="S1" name="calls">LeadSquared activities, event 22 (outbound) and 21 (inbound), parsed with parse_phone_call and read with iter_activities_started (edits up to 3 days past the day, kept by CreatedOn, because the API filters on ModifiedOn). Never use lead edits or "leads modified" as calls.</source>
       <source id="S2" name="users">LeadSquaredClient().get_users() with MemberOfGroups.</source>
-      <source id="S3" name="zipteams">"Zipteams Notes", event 237, created in the window (read with the same 3-day edit margin as S1). Required: a report without it is invalid.</source>
+      <source id="S3" name="zipteams">"Zipteams Notes", event 237, created in the window or in the 2 hours after it (read with the same 3-day edit margin as S1). Required: a report without it is invalid.</source>
       <source id="S4" name="enrollments">Leads in ProspectStage "Course Enrolled" plus stage-change history (event 3002), following the first-time-enrollment logic in scripts/d1_backfill.py.</source>
       <source id="S5" name="transcripts">integrations.transcripts.TranscriptClient.search.</source>
       <source id="S6" name="payments" use="context-only">"Payment Successful", event 213. Report the count only.</source>
@@ -71,7 +71,7 @@
     </conversion_metrics>
 
     <zipteams_metrics source="S3">
-      <metric id="P40" name="attribution">Credit each note to the caller of the lead's last answered call at or before the note's CreatedOn. Drop and count notes with no such call.</metric>
+      <metric id="P40" name="attribution">Credit each note to the caller of the lead's last answered call at or before the note's CreatedOn, and keep its analysis on that call (per call in data/report_{D}/zip_calls.csv). Drop and count notes with no such call. A note written after the day counts only if it lands within 5 minutes of the end of one of the day's calls; count the rest separately.</metric>
       <metric id="P41" name="probing_pct">Mean of mx_Custom_5 (0/100).</metric>
       <metric id="P42" name="pitch_pct">Mean of mx_Custom_4 (0/100).</metric>
       <metric id="P43" name="objection_pct">Mean of mx_Custom_6 (0/100).</metric>

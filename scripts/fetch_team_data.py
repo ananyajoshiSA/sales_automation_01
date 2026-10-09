@@ -10,6 +10,7 @@ import json
 import sys
 from datetime import timedelta
 
+from analytics.zip_calls import ZIP_LATE_WINDOW
 from integrations.leadsquared import PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, parse_activity_note, parse_phone_call
 from integrations.timeutil import ist_day_start, now_utc
 LEAD_COLUMNS = [
@@ -55,7 +56,8 @@ def main(group, start, end, out):
                 kept += 1
         log(f"event {ev}: {n} total, {kept} kept")
     for ev, sink in ((PAYMENT_SUCCESS, payments),) + tuple((z, zip_acts) for z in ZIP_EVENTS):
-        for a in c.iter_activities_started(ev, d0, last):
+        to = last if ev == PAYMENT_SUCCESS else min(last + ZIP_LATE_WINDOW, now_utc())  # a call ending after midnight
+        for a in c.iter_activities_started(ev, d0, to):
             if a.get("RelatedProspectId") in lead_ids:
                 a["note"] = parse_activity_note(a.get("ActivityEvent_Note"))
                 sink.append(a)

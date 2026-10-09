@@ -199,7 +199,7 @@ def test_iter_activities_started_reads_later_edits_and_keeps_by_start(client):
                                               margin=timedelta(days=1), now=datetime(2026, 10, 9, tzinfo=IST)))
     assert [g["ProspectActivityId"] for g in got] == ["a1", "a2", "bad", "midnight"]
     windows = [json.loads(c.request.body)["Parameter"] for c in responses.calls]
-    assert [(w["FromDate"], w["ToDate"]) for w in windows] == [("2026-10-04 18:30:00", "2026-10-05 18:29:59"),
+    assert [(w["FromDate"], w["ToDate"]) for w in windows] == [("2026-10-04 18:30:00", "2026-10-05 18:30:00"),
                                                               ("2026-10-05 18:30:00", "2026-10-06 18:29:59")]
 
 
@@ -223,3 +223,22 @@ def test_parse_phone_call_keeps_the_edit_time_and_ignores_note_start_times():
                                  'SourceData{=}{"StartTime":"2026-10-05 19:59:02","DestinationNumber":"600"}{next}'}
     c = parse_phone_call(act)
     assert (c["start_utc"], c["modified_utc"]) == ("2026-10-05 14:29:02", "2026-10-05 14:29:34")
+
+
+@responses.activate
+def test_a_window_bigger_than_a_page_is_cut_up_not_paged(client):
+    from integrations.timeutil import IST
+
+    url = HOST + "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+    responses.post(url, json={"RecordCount": 5, "List": [{"ProspectActivityId": "x"}] * 4})   # full page: cut up
+    responses.post(url, json={"RecordCount": 2, "List": [{"ProspectActivityId": "a", "CreatedOn": "2026-10-05 05:00:00"},
+                                                         {"ProspectActivityId": "b", "CreatedOn": "2026-10-05 05:30:00"}]})
+    responses.post(url, json={"RecordCount": 2, "List": [{"ProspectActivityId": "b", "CreatedOn": "2026-10-05 05:30:00"},
+                                                         {"ProspectActivityId": "c", "CreatedOn": "2026-10-05 07:00:00"}]})
+    d0 = datetime(2026, 10, 5, 10, tzinfo=IST)
+    got = list(client._iter_unpaged(22, d0, d0 + timedelta(hours=4), page_size=4))
+    assert [g["ProspectActivityId"] for g in got] == ["a", "b", "b", "c"]          # the repeat is dropped by the caller
+    windows = [json.loads(c.request.body)["Parameter"] for c in responses.calls]
+    assert [(w["FromDate"], w["ToDate"]) for w in windows[1:]] == [("2026-10-05 04:30:00", "2026-10-05 06:30:00"),
+                                                                  ("2026-10-05 06:30:00", "2026-10-05 08:30:00")]
+    assert all(json.loads(c.request.body)["Paging"]["PageIndex"] == 1 for c in responses.calls)
