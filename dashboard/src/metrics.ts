@@ -9,6 +9,19 @@ export const ACTIVE_DAY_DIALS = 20;
 export const LAG_RATIO = 0.7;
 export const DIALER_FAILURE_PCT = 50;
 const MIN_TEAM_SIZE = 3;
+// Phone-system groups (Acefone Users, Mcube Users, ...), not sales teams; LeadSquared can list one first.
+export const CALLING_SOFTWARE = /\b(acefone|mcube)\b/i;
+
+/** A user's team: the first non-blank group in LeadSquared's MemberOfGroups order that is not a
+ *  calling-software group, else "". Same rule as team_of in analytics/definitions.py. */
+export function teamFromGroups(groups: unknown): string {
+  if (!Array.isArray(groups)) return "";
+  for (const g of groups) {
+    const name = String(g ?? "").trim();
+    if (name && !CALLING_SOFTWARE.test(name)) return name;
+  }
+  return "";
+}
 
 export interface CallerDayRow {
   day: string; user_id: string; name: string; dials: number; answered: number; not_answered: number;

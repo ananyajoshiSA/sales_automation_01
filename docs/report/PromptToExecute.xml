@@ -5,7 +5,7 @@
   The full definitions live in report_parameters.md (same version). This file and that one must
   carry the same values; change both and bump the version together.
 -->
-<report_prompt version="1.4" updated="2026-10-09">
+<report_prompt version="1.5" updated="2026-10-09">
 
   <inputs>
     <target_date>TARGET_DATE</target_date>
@@ -48,8 +48,8 @@
 
     <team_mapping>
       <param id="P10">Match a call to a user by user_id, then by exact caller full name.</param>
-      <param id="P11">Team = the first group in MemberOfGroups. Each caller is in exactly one team.</param>
-      <param id="P11a">"Acefone Users" and "Mcube Users" are calling-software groups, not sales teams. When one comes first, P11 still applies; say so on page 1 (when such a group is ranked), in section 1 and in section 3, listing each group's callers by their next sales group.</param>
+      <param id="P11">Team = the first group in MemberOfGroups, in LeadSquared's order, that is not a calling-software group (a name containing the word Acefone or Mcube, any case: "Acefone Users", "Mcube Users", "New Joinees - Mcube"; groups for the phone system, not sales teams). Use analytics.definitions.team_of. Each caller is in exactly one team; a caller with only calling-software groups is Unassigned.</param>
+      <param id="P11a">Groups that share callers: section 3 also lists every group with at least one dialling caller whose team is another group, calling-software groups included (marked "phone system", listed first), each caller counted in every group they belong to: Callers, Of them counted in another team, Dials, Answer rate, Dials failed, Real conversations, Leads reached, Enrolled (credited), Conversion, and the 3 groups its callers most share. Rows overlap and are never added up or ranked. A "What this means" note compares the phone systems' answer and failed rates with the day's and names the group with the most callers counted in another team. Section 1 explains what a team is; section 11 counts the callers listed under a phone system first and in more than one group; the appendix names each caller's other groups.</param>
       <param id="P12">No group → "Unassigned". Caller not a LeadSquared user → "Not a user". Show both in totals; never rank them.</param>
       <param id="P13">Rank only teams with at least 3 callers and at least 25 real conversations.</param>
       <param id="P14">Exclude automated welcome, reminder and webinar bots from all figures.</param>
@@ -106,11 +106,11 @@
     <output>
       <rule id="P60">PDF, A4 portrait, no page limit: a one-page summary, then as many pages as the sections and the caller table need. Saved as /mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf.</rule>
       <rule id="P61">Render HTML with headless Chromium (--print-to-pdf --no-pdf-header-footer), with "Page N of M", the day and the version in each footer. Render the summary alone too: it must come to exactly 1 page; if not, draw fewer ranked teams on page 1 (15, then 12, 10, 8, 5, 3; the rest stay in section 3). Cut team names on page 1 after 32 characters. If meta.json carries a "sample" note (a layout sample from part of a day), show it in a page-1 banner and write "SAMPLE, partial data" in every footer; a normal run never sets it.</rule>
-      <rule id="P62">Page 1, the summary, readable in a minute: title with weekday and date, the conversion window and when the data was read; the day as 5 connected steps (P23a); what happened (best team, runner-up, best front-line team, busiest teams, the biggest gap or tied gaps in the P33 sample, with call counts); Teams ranked (conversion bar, enrolled, real conversations); Callers to recognise (P52, incl. the coaching case); What to do next (fix the phones first when any caller has a dialer issue, then the payment step, a full pitch and the coaching case). Then: 1. How to read this report; 2. From calls to enrolments (P23a, P29d); 3. Teams compared (P63, teams not ranked); 4. Weak spots of the day; 5. Team by team (one card per ranked team with one suggested next step); 6. Callers (P52, P52a, P52b, P53); 7. What the converting calls had in common (P33); 8. Call quality scores (Zipteams); 9. When the calls happened (P24a); 10. Calls to review (P74); 11. How this report was made and checked (method and every validation check); Appendix: every caller, by team.</rule>
+      <rule id="P62">Page 1, the summary, readable in a minute: title with weekday and date, the conversion window and when the data was read; the day as 5 connected steps (P23a); what happened (best team, runner-up, best front-line team, busiest teams, the biggest gap or tied gaps in the P33 sample, with call counts); Teams ranked (conversion bar, enrolled, real conversations); Callers to recognise (P52, incl. the coaching case); What to do next (fix the phones first when any caller has a dialer issue, then the payment step, a full pitch and the coaching case). Then: 1. How to read this report; 2. From calls to enrolments (P23a, P29d); 3. Teams and groups compared (P63, teams not ranked, groups that share callers P11a); 4. Weak spots of the day; 5. Team by team (one card per ranked team with one suggested next step); 6. Callers (P52, P52a, P52b, P53); 7. What the converting calls had in common (P33); 8. Call quality scores (Zipteams); 9. When the calls happened (P24a); 10. Calls to review (P74); 11. How this report was made and checked (method and every validation check); Appendix: every caller, by team.</rule>
       <rule id="P62a">Plain language for readers who are not analysts: explain every term in section 1; give sections 2, 3, 6, 7, 8 and 9 a "What this means" note generated from the figures, and sections 4 and 5 what to do for each finding and each team; write conversion as enrolments per 100 leads reached, never as a share of them; generate every sentence from the figures, handling ties, single teams, zero and missing values; put every chart's numbers on its marks or in a table, never rely on colour alone, show "–" for no data, and never show customer names or numbers.</rule>
-      <rule id="P63">Scorecard columns. Section 3: Team, Callers, Dials, Answer rate, Real conversations, Leads reached, Talk minutes, Enrolled (credited), Conversion, Enrolled on the day (owner's team, P29b). Section 8: calls checked, Asked about needs (probing), Explained the course fully (pitch), Answered concerns well (objection handling), Lead's interest high or moderate (intent); ranked teams first, then the others under a divider.</rule>
+      <rule id="P63">Scorecard columns. Section 3: Team, Callers, Dials, Answer rate, Real conversations, Leads reached, Talk minutes, Enrolled (credited), Conversion, Enrolled on the day (owner's team, P29b); then the group table (P11a). Section 8: calls checked, Asked about needs (probing), Explained the course fully (pitch), Answered concerns well (objection handling), Lead's interest high or moderate (intent); ranked teams first, then the others under a divider.</rule>
       <rule id="P63a">Low answer rate: a team's answer rate below 70% of the day's (all dials; the same 70% as the lagging-caller rule). Used only in the words of section 4 and the team cards, never in the ranking.</rule>
-      <rule id="P64">Section 11 must state: the conversion window, the enrollment and credit definitions, the Zipteams coverage gap, the team-mapping rule with the count of multi-group callers, the warm-lead flag, the validation summary with every check's result, and "Parameters v1.4". Section 1 explains the window, the enrollment and credit definitions, the warm-lead flag and any calling-software group (P11a) in plain words.</rule>
+      <rule id="P64">Section 11 must state: the conversion window, the enrollment and credit definitions, the Zipteams coverage gap, the team-mapping rule with the count of callers listed under a phone system first and of multi-group callers, the warm-lead flag, the validation summary with every check's result, and "Parameters v1.5". Section 1 explains the window, the enrollment and credit definitions, the warm-lead flag and what a team is (P11, P11a) in plain words.</rule>
       <rule id="P65">Compute the weekday from the date. Never write it from memory.</rule>
       <rule id="P66">Make no repository commits or pushes without the owner's approval.</rule>
     </output>
@@ -134,7 +134,7 @@
     <check>Zipteams notes attributed ÷ total is printed, and fewer than 5% were dropped.</check>
     <check>Every team figure quoted in page 1's "what happened" appears in the team tables (section 3).</check>
     <check>The summary, rendered alone, fits on exactly 1 page.</check>
-    <check>"Parameters v1.4" is printed in section 11, which lists every check with its result.</check>
+    <check>"Parameters v1.5" is printed in section 11, which lists every check with its result.</check>
     <check>No duplicate call or Zipteams activity IDs.</check>
     <check>Every call and Zipteams note falls inside the target IST day, and no call has a start time that cannot be read.</check>
     <check>Calls from callers who are not LeadSquared users stay under 5%.</check>
@@ -144,6 +144,7 @@
     <check>A seeded sample of 10 credited enrollments is re-read from LeadSquared stage history and confirmed as first-ever "Course Enrolled" in the window.</check>
     <check>Call-integrity counts reconcile (flagged and checked calls never exceed eligible calls; caller totals add up) and carry no lead details.</check>
     <check>Every P62 section is in the report, in order.</check>
+    <check>Callers in more than one group: each caller's team is one of their own groups and never a calling-software group, or Unassigned when they have no other group; every group that shares a dialling caller with another team is in section 3, and its dials, inbound calls, real conversations and credited enrolments equal the sums over its callers.</check>
   </validation>
 
   <deliverable>

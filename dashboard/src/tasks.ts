@@ -7,6 +7,7 @@ import {
 } from "./lsq";
 import { SHARED_TEAM, resolveArrival, sharedNames } from "./accountability";
 import { aggregateCalls, aggregateLeads, aggregateZip, firstEnrollment } from "./aggregate";
+import { teamFromGroups } from "./metrics";
 import { addOnConflict, int, multiInsert, str } from "./sql";
 import { sumRowsRead } from "./cache";
 
@@ -316,7 +317,7 @@ export async function runUsers(env: Env): Promise<number> {
     .map((u) => {
       const name = `${u.FirstName ?? ""} ${u.LastName ?? ""}`.trim();
       return { id: String(u.ID ?? ""), name,
-               team: shared.has(name) ? SHARED_TEAM : String((u.MemberOfGroups ?? [])[0] ?? "").trim() };
+               team: shared.has(name) ? SHARED_TEAM : teamFromGroups(u.MemberOfGroups) };
     })
     .filter((u) => u.id && u.team);
   return writeBatch(env.DB, [

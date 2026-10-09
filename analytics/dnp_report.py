@@ -14,7 +14,7 @@ import os
 import sys
 from collections import Counter, defaultdict
 
-from analytics.definitions import DIALER_FAILURE_SHARE, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
+from analytics.definitions import DIALER_FAILURE_SHARE, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS, team_of
 from analytics.team_report import IST, utc
 
 SALES_GROUP_HINTS = ("team", "us ", "closure", "id", "elite", "bootcamp", "dsv", "community", "counsel", "academic",
@@ -22,8 +22,7 @@ SALES_GROUP_HINTS = ("team", "us ", "closure", "id", "elite", "bootcamp", "dsv",
 
 
 def team_of_user(u):
-    gs = u.get("MemberOfGroups") or []
-    return gs[0] if gs else "(no group)"
+    return team_of(u.get("MemberOfGroups"), "(no group)")
 
 
 def pct(a, b):

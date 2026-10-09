@@ -1,5 +1,9 @@
-import { describe, expect, it } from "vitest";
-import { CallerDayRow, computeCallers, dataGap, median } from "../src/metrics";
+import { afterEach, describe, expect, it, vi } from "vitest";
+import { SHARED_TEAM } from "../src/accountability";
+import { CALLING_SOFTWARE, CallerDayRow, computeCallers, dataGap, median, teamFromGroups } from "../src/metrics";
+import { runUsers } from "../src/tasks";
+import type { Env } from "../src/tasks";
+import { fakeD1 } from "./fake_d1.mjs";
 
 const day = (d: string, user: string, dials: number, answered: number, real: number, talkMin: number, failures = 0): CallerDayRow =>
   ({ day: d, user_id: user, name: user, dials, answered, not_answered: dials - answered - failures, failures,
@@ -71,4 +75,49 @@ it("median", () => {
   expect(median([3, 1, 2])).toBe(2);
   expect(median([4, 1, 2, 3])).toBe(2.5);
   expect(median([])).toBe(0);
+});
+
+describe("team rule", () => {
+  afterEach(() => vi.unstubAllGlobals());
+
+  it("is the first group when that is a sales team", () => {
+    expect(teamFromGroups(["Team Alpha", "Team Beta"])).toBe("Team Alpha");
+  });
+
+  it("skips calling-software groups, in any case, to the next group", () => {
+    for (const phone of ["Acefone Users", "Mcube Users", "New Joinees - Mcube", "ACEFONE USERS", "mcube users", "new joinees - MCUBE"]) {
+      expect(teamFromGroups([phone, "Team Alpha"])).toBe("Team Alpha");
+    }
+    expect(teamFromGroups(["Acefone Users", "Mcube Users", "Team Beta", "Team Alpha"])).toBe("Team Beta");
+  });
+
+  it("trims names and skips blank entries", () => {
+    expect(teamFromGroups(["", "   ", null, undefined, "  Team Alpha  "])).toBe("Team Alpha");
+    expect(teamFromGroups([" Mcube Users ", "\tTeam Beta\n"])).toBe("Team Beta");
+  });
+
+  it("is empty when no group qualifies or the list is missing", () => {
+    for (const groups of [[], undefined, null, ["Acefone Users", "Mcube Users", "New Joinees - Mcube"], ["", "  "], "Team Alpha"]) {
+      expect(teamFromGroups(groups)).toBe("");
+    }
+  });
+
+  it("skips only the whole words acefone and mcube, not longer words that contain them", () => {
+    expect(CALLING_SOFTWARE.test("Mcubed Sales")).toBe(false);
+    expect(teamFromGroups(["Mcubed Sales", "Team Alpha"])).toBe("Mcubed Sales");
+    expect(teamFromGroups(["Acefones", "Team Alpha"])).toBe("Acefones");
+  });
+
+  it("stores the sales team, not a phone group listed first, in the daily users sync", async () => {
+    const db = fakeD1();
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify([
+      { ID: "u1", FirstName: "Asha", LastName: "K", MemberOfGroups: ["Mcube Users", "Team Alpha"] },
+      { ID: "u2", FirstName: "Ravi", LastName: "S", MemberOfGroups: ["Acefone Users"] },   // no sales team: left out
+      { ID: "u3", FirstName: "Rinku", LastName: "Jhala", MemberOfGroups: ["Mcube Users", "Team Alpha"] },   // shared account
+    ]))));
+    const env = { DB: db, LEADSQUARED_HOST: "h", LEADSQUARED_ACCESS_KEY: "k", LEADSQUARED_SECRET_KEY: "s" } as unknown as Env;
+    await runUsers(env);
+    expect(db.sqlite.prepare("SELECT id, team FROM users ORDER BY id").all())
+      .toEqual([{ id: "u1", team: "Team Alpha" }, { id: "u3", team: SHARED_TEAM }]);
+  });
 });

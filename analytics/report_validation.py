@@ -14,6 +14,7 @@ import random
 from collections import Counter
 from datetime import datetime, timedelta
 
+from analytics.definitions import is_calling_software
 from analytics.team_report import utc
 from analytics.zip_calls import ZIP_LATE_WINDOW
 
@@ -56,6 +57,19 @@ def data_checks(run: dict, A: dict) -> list[dict]:
     out.append(_check("Callers map to a team", pct < NOT_A_USER_MAX_PCT and all(c.get("team") for c in calls),
                       f"{nu_calls} calls ({pct:.1f}%) from callers who are not LeadSquared users; limit {NOT_A_USER_MAX_PCT}%"))
 
+    people, G = A["people"], A.get("groups") or {}
+    users = {(c["team"], c["name"]): c["groups"] for c in calls if c["team"] != "Not a user"}
+    wrong = [k for k, gs in users.items() if is_calling_software(k[0]) or k[0] not in gs
+             and not (k[0] == "Unassigned" and all(is_calling_software(g) for g in gs))]
+    shared = {g for p in people if p["dials"] for g in p["groups"] if g != p["team"]}
+    off = [g for g in shared | set(G) if g not in G or g not in shared or any(
+        G[g][k] != sum(p[k] for p in people if g in p["groups"]) for k in ("dials", "inbound", "real", "credited"))]
+    multi = sum(1 for gs in users.values() if len(gs) > 1)
+    out.append(_check("Callers in several groups: one team each, every shared group shown", not wrong and not off,
+                      f"{len(wrong)} callers in a team that is a phone system or not one of their groups; {multi} callers in more "
+                      f"than one group; {len(G)} groups share callers with another team, {len(off)} missing or not matching "
+                      "their callers' figures"))
+
     E = A["enrollments"]
     leads = Counter(e["lead"] for e in E)
     doubled = [l for l, n in leads.items() if n > 1]
@@ -72,7 +86,6 @@ def data_checks(run: dict, A: dict) -> list[dict]:
     out.append(_check("Rates within 0–100 and no negative durations", not rates and neg == 0,
                       f"{len(rates)} rates out of range, {neg} negative durations"))
 
-    people = A["people"]
     recon = {
         "calls = team dials + inbound": tot["calls"] == sum(s["dials"] + s["inbound"] for s in T.values()),
         "fetched = counted + other-day + unreadable-time + bot calls":

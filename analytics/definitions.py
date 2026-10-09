@@ -21,6 +21,25 @@ REAL_CONVERSATION_SECS = 120   # answered and at least this long
 WORKING_DAY_DIALS = 20         # a caller's working day
 DIALER_FAILURE_SHARE = 0.5     # 50%+ CallFailure on a working day = dialer problem, not the caller
 
+# Groups for the phone system ("Acefone Users", "Mcube Users", "New Joinees - Mcube"), not sales teams.
+# LeadSquared lists one first for some callers, which would put them in the wrong team.
+CALLING_SOFTWARE = re.compile(r"\b(acefone|mcube)\b", re.I)
+
+
+def groups_of(u: dict | None) -> list[str]:
+    """A user's LeadSquared groups in LeadSquared's order, trimmed, blanks dropped."""
+    return [g.strip() for g in (u or {}).get("MemberOfGroups") or [] if str(g or "").strip()]
+
+
+def is_calling_software(group: str) -> bool:
+    return bool(CALLING_SOFTWARE.search(group or ""))
+
+
+def team_of(groups: list[str] | None, default: str = "Unassigned") -> str:
+    """A caller's team: the first group LeadSquared lists for them that is not a calling-software group.
+    The dashboard's ``teamFromGroups`` (dashboard/src/metrics.ts) applies the same rule."""
+    return next((g.strip() for g in groups or [] if str(g or "").strip() and not is_calling_software(g)), default)
+
 SPEED_BUCKETS = ((5, "≤5 min"), (15, "5–15 min"), (60, "15–60 min"), (240, "1–4 h"), (1440, "4–24 h"))
 BUCKETS = [label for _, label in SPEED_BUCKETS] + [">24 h", "never"]
 

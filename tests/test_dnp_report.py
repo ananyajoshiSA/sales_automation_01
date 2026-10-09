@@ -1,6 +1,6 @@
 import json
 
-from analytics.dnp_report import dialer_days, main
+from analytics.dnp_report import dialer_days, main, team_of_user
 
 
 def c(name, day, status, sec="00"):
@@ -28,3 +28,8 @@ def test_dialer_day_is_left_out_of_caller_rates(tmp_path):
     a = res["callers"][0]
     assert a["dialer_failure_days"] == 1 and a["answered_%"] == 100.0 and a["active_days"] == 1
     assert res["overall"]["call_failure_%"] == 50.0                            # account totals still show the outage
+
+
+def test_team_of_user_skips_calling_software_groups():
+    assert team_of_user({"MemberOfGroups": ["Mcube Users", "T"]}) == "T"
+    assert team_of_user({"MemberOfGroups": ["Acefone Users"]}) == team_of_user({}) == "(no group)"

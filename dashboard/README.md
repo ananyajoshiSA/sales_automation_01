@@ -33,6 +33,8 @@ put new leads into a shared admin account ([docs/accountability.md](../docs/acco
 
 ## Definitions (same as the Python report)
 
+- **Team:** the first group LeadSquared lists for the user that is not a calling-software group
+  (any group named Acefone or Mcube, such as *Mcube Users*); users with no such group are left out.
 - **New leads:** lead records by `CreatedOn` (IST day), by source and owner's team.
 - **First-time enrollment:** the lead's first ever stage change to *Course Enrolled*; re-tagged
   existing students are not counted. Credited to the lead owner.

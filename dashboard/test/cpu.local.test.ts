@@ -4,6 +4,7 @@ import { readFileSync } from "node:fs";
 import { it } from "vitest";
 import { aggregateCalls, aggregateLeads, aggregateZip } from "../src/aggregate";
 import { Call, parseCall } from "../src/lsq";
+import { teamFromGroups } from "../src/metrics";
 import { addOnConflict, int, multiInsert, str } from "../src/sql";
 
 const dir = process.env.CPU_FIXTURES;
@@ -36,7 +37,7 @@ it.skipIf(!dir)("CPU per cron run", () => {
   });
   time("leads: 1 page x 500 (bulk-import day)", () => { aggregateLeads(JSON.parse(leads)); });
   time("users: daily, 1,933 users", () => {
-    const u = JSON.parse(users).map((x: any) => ({ id: x.ID, name: `${x.FirstName} ${x.LastName}`, team: (x.MemberOfGroups ?? [])[0] ?? "" }))
+    const u = JSON.parse(users).map((x: any) => ({ id: x.ID, name: `${x.FirstName} ${x.LastName}`, team: teamFromGroups(x.MemberOfGroups) }))
       .filter((x: any) => x.team);
     multiInsert("users", ["id", "name", "team"], u.map((x: any) => [str(x.id), str(x.name), str(x.team)]));
   });

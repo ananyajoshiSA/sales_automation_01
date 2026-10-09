@@ -48,6 +48,8 @@ places and in GOAL.md together, or not at all.
 - **First-time enrolment:** the lead's first ever stage change to *Course Enrolled*, credited to the owner.
   Re-tagged existing students never count.
 - **Working day:** 20+ outbound dials. **Real conversation:** answered and 120+ seconds.
+- **Team:** the first group LeadSquared lists for a user that is not a calling-software group (a name with the word
+  Acefone or Mcube): `team_of` in `analytics/definitions.py`, `teamFromGroups` in the Worker.
 - **Lagging caller:** below 70% of the team median (whole account if the team has < 3 callers) on 2+
   measures over 2+ working days, at least one of dials, real conversations or talk time.
 - **Dialer issue:** 50%+ of dials end in `CallFailure`. Such a caller is never marked lagging.

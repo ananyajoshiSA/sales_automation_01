@@ -1,6 +1,6 @@
 """HTML for the daily calling report and the plan tracker page.
 
-Layout (Parameters v1.4, P62): page 1 is a one-page summary anyone can read in a minute: the day from
+Layout (Parameters v1.5, P62): page 1 is a one-page summary anyone can read in a minute: the day from
 calls to enrolments, what happened, the teams ranked, the callers to recognise and what to do next.
 The pages after it explain every figure in plain language, each chart or table followed by what it
 means, and end with how the report was made and checked and every caller's figures. Every sentence is
@@ -12,7 +12,6 @@ from __future__ import annotations
 
 import html
 import re
-from collections import Counter
 from datetime import datetime, timedelta
 
 from analytics.report_charts import BLUE, GRAY, ORANGE, bar, columns, legend, paired_bars, stacked_bar
@@ -26,7 +25,7 @@ PAGE1_NAME = 32      # characters of a team name drawn on page 1; section 3 has 
 HOUR_MIN_SHARE = 2   # % of the day's dials an hour needs before its answer rate is called best or worst
 HOURS_PER_TABLE = 12  # hours per block of the hour table, so it never runs wider than the page
 SECTIONS = ["Teams ranked", "Callers to recognise", "What to do next", "1. How to read this report",
-            "2. From calls to enrolments", "3. Teams compared", "4. Weak spots of the day", "5. Team by team",
+            "2. From calls to enrolments", "3. Teams and groups compared", "4. Weak spots of the day", "5. Team by team",
             "6. Callers", "7. What the converting calls had in common", "8. Call quality scores (Zipteams)",
             "9. When the calls happened", "10. Calls to review", "11. How this report was made and checked",
             "Appendix: every caller"]
@@ -72,7 +71,7 @@ td.n,th.n{text-align:right} td.n{white-space:nowrap;font-variant-numeric:tabular
 .bar{display:inline-block;height:9px;border-radius:0 2px 2px 0;vertical-align:middle;margin-right:5px}
 .stack{white-space:nowrap} .stack .bar{margin-right:2px;border-radius:0}
 .tag{font-size:7pt;border-radius:3px;padding:0 4px;margin-left:4px;white-space:nowrap;font-weight:normal}
-.tag.warm{background:#fde3d6;color:#8a3510} .tag.coach{background:#e2ebfa;color:#1c4f95} .tag.dialer{background:#fff1c9;color:#6b4e00}
+.tag.warm{background:#fde3d6;color:#8a3510} .tag.phone{background:#e8eaef;color:#3d4556;margin-left:0} .tag.coach{background:#e2ebfa;color:#1c4f95} .tag.dialer{background:#fff1c9;color:#6b4e00}
 .legend{font-size:8pt;color:#5b6475;margin:3px 0} .legend span{margin-right:14px}
 .legend i{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:-1px}
 svg.chart{display:block;margin:2px 0} svg.chart text{font-family:Arial,Helvetica,sans-serif}
@@ -87,7 +86,7 @@ table.fixed{table-layout:fixed} table.fixed td{overflow-wrap:anywhere} tr.div td
 .mini b{display:block;font-size:10.5pt;color:#0f2b5b} .next{margin-top:5px;font-size:8.6pt;background:#eef3fb;border-radius:4px;padding:3px 6px}
 .note{font-size:8pt;color:#5b6475;margin-top:4px} .ok{color:#1d6b3a;font-weight:bold} ol{margin:3px 0 0 16px;padding:0} li{margin:3px 0}
 dl.terms{display:grid;grid-template-columns:155px 1fr;gap:5px 12px;margin:4px 0} dl.terms dt{font-weight:bold;color:#0f2b5b} dl.terms dd{margin:0}
-.toc{columns:2;margin:4px 0;padding-left:0;list-style:none} .app td{font-size:7.8pt;padding:2px 4px} .app tr.team td{background:#eef3fb;font-weight:bold;color:#0f2b5b}
+.toc{columns:2;margin:4px 0;padding-left:0;list-style:none} .app td{font-size:7.8pt;padding:2px 4px} .also{font-size:6.8pt;color:#5b6475} .grp td{font-size:7.8pt;padding:2px 4px} .app tr.team td{background:#eef3fb;font-weight:bold;color:#0f2b5b}
 .hours{margin-bottom:6px} .hours td,.hours th{font-size:7.4pt;padding:2px 3px;text-align:right} .hours td:first-child,.hours th:first-child{text-align:left}
 """
 TRACKER_CSS = """
@@ -200,6 +199,7 @@ def _account(A: dict) -> dict:
     tot, F, Z = A["totals"], A["funnel"], A["_zip"]
     mean = lambda k: (round(sum(z[k] for z in Z if z[k] is not None) / m) if (m := sum(z[k] is not None for z in Z)) else None)  # noqa: E731
     return {"conv": F["conv_pct"], "answer": round(100 * tot["answered_out"] / tot["outbound"], 1) if tot["outbound"] else None,
+            "failed": round(100 * tot.get("failed_out", 0) / tot["outbound"], 1) if tot["outbound"] else None,
             "probe": mean("probe"), "pitch": mean("pitch"), "obj": mean("obj")}
 
 
@@ -213,24 +213,50 @@ def _most_flagged(A: dict) -> dict[str, dict]:
     return {r["caller"]: r for r in I.get("callers", []) if r["ranked"] and r["flagged_pct"] >= 50}
 
 
-def _phone_note(A: dict, brief: bool) -> str:
-    """P11a: calling-software groups that LeadSquared lists first for some callers, and their callers' sales teams."""
-    G = {t: g for t, g in A.get("phone_groups", {}).items() if not brief or t in A["rank"]}
+def _also(c: dict[str, int], k: int = 2) -> str:
+    """'A (5), B (2) +3 more' for a group's other groups, most shared first."""
+    xs = [f"{e(short(g))} ({v})" for g, v in list(c.items())[:k]]
+    return ", ".join(xs) + (f" +{len(c) - k} more" if len(c) > k else "") if xs else "–"
+
+
+def _groups(A: dict) -> str:
+    """P11a: the groups that share callers with another team, each caller counted in every group (section 3)."""
+    G, tot, acc = A.get("groups") or {}, A["totals"], _account(A)
+    multi = tot["multi_group_callers"]
     if not G:
-        return ""
-    one = len(G) == 1
-    names = joined(sorted(e(short(t)) for t in G))
-    if brief:
-        others = Counter()
-        for g in G.values():
-            others.update({k: v for k, v in g.items() if k != "no other group"})
-        top = [e(short(k)) for k, _ in others.most_common(2)]
-        return (f" {names} {'is a group' if one else 'are groups'} for the calling software, not {'a sales team' if one else 'sales teams'}"
-                + (f": {'its' if one else 'their'} callers belong to sales teams such as {joined(top)} (section 3)." if top else "."))
-    return (f"<div class='note'>{names} {'is a group' if one else 'are groups'} for the calling software, not "
-            f"{'a sales team' if one else 'sales teams'}. LeadSquared lists {'it' if one else 'them'} first for some callers, so those "
-            "callers count under " + ("it" if one else "them") + " (rule P11). Their sales teams: "
-            + "; ".join(f"{e(short(t))}: " + ", ".join(f"{e(short(k))} ({v})" for k, v in g.items()) for t, g in sorted(G.items())) + ".</div>")
+        return ("<h3>Callers in more than one group</h3><p>" + (f"{plural(multi, 'caller')} belong to more than one group, "
+                "but every group's dialling callers all count in that group, so the team tables already show each group.</p>"
+                if multi else "No caller who called on the day belongs to more than one group.</p>"))
+    rows = "".join(
+        f"<tr><td>{e(short(g))}{'<br>' + _tag('phone', 'phone system') if s['phone'] else ''}</td><td class='n'>{s['callers']}</td>"
+        f"<td class='n'>{s['elsewhere']}</td><td class='n'>{s['dials']:,}</td><td class='n'>{f(s['answer_pct'], '%') if s['dials'] else '–'}</td>"
+        f"<td class='n'>{f(s['failed_pct'], '%')}</td><td class='n'>{s['real']}</td><td class='n'>{s['reached']}</td>"
+        f"<td class='n'><b>{s['credited']}</b></td><td class='n'>{f(s['conv_pct'], '%') if s['reached'] else '–'}</td>"
+        f"<td>{_also(s['also_in'])}</td></tr>" for g, s in G.items())
+    means = []
+    phones = [(g, s) for g, s in G.items() if s["phone"] and s["dials"]]
+    if phones:
+        means.append("Phone systems: " + "; ".join(
+            f"{e(short(g))} callers answered {s['answer_pct']}% of their dials and {f(s['failed_pct'], '%')} failed to connect" if i == 0
+            else f"{e(short(g))} callers {s['answer_pct']}% and {f(s['failed_pct'], '%')}" for i, (g, s) in enumerate(phones))
+                     + (f", against {acc['answer']}% answered and {f(acc['failed'], '%')} failed across the day." if acc["answer"] is not None else ".")
+                     + " Compare them before judging a caller who uses one.")
+    other = sorted(((g, s) for g, s in G.items() if not s["phone"]), key=lambda x: (-x[1]["elsewhere"], -x[1]["callers"], x[0]))
+    if other:
+        g, s = other[0]
+        teams = [f"{e(short(t))} ({v})" for t, v in list(s["teams_elsewhere"].items())[:2]]
+        who = ("its only caller counts" if s["callers"] == 1 else f"all {s['callers']} of its callers count"
+               if s["elsewhere"] == s["callers"] else f"{s['elsewhere']} of its {s['callers']} callers count{'s' if s['elsewhere'] == 1 else ''}")
+        means.append(f"{e(short(g))} has the most callers counted in another team: {who} in "
+                     + (joined(teams) if len(s["teams_elsewhere"]) <= 2 else ", ".join(teams) + " and others")
+                     + f" in the tables above. As a group it had {plural(s['credited'], 'enrolment')} for "
+                     f"{plural(s['reached'], 'lead')} reached" + (f", a conversion of {s['conv_pct']}%." if s["reached"] else "."))
+    means.append("A caller in three groups appears in three rows here, so the rows overlap and do not add up to the day's totals. "
+                 "The ranking and the team tables count each caller once.")
+    return f"""<h3>Groups that share callers with another team</h3>
+<p>{plural(multi, 'caller')} {'belongs' if multi == 1 else 'belong'} to more than one LeadSquared group. The tables above count each caller once, in their team: the first group LeadSquared lists for them that is not a phone system (Acefone or Mcube). So that no group's figures are lost, this table counts each caller in every group they belong to. It lists every group with at least one dialling caller who counts in another team; "In another team" says how many of its callers that is.</p>
+<table class="grp"><thead><tr><th style="width:19%">Group</th><th class='n'>Callers</th><th class='n'>In another team</th><th class='n'>Dials</th><th class='n'>Answer rate</th><th class='n'>Dials failed</th><th class='n'>Real conv.</th><th class='n'>Leads reached</th><th class='n'>Enrolled (credited)</th><th class='n'>Conversion</th><th style="width:23%">Its callers are also in</th></tr></thead>{rows}</table>
+<div class="means"><b class="h">What this means</b><ul>{''.join(f'<li>{x}</li>' for x in means)}</ul></div>"""
 
 
 # ------------------------------------------------------------------ page 1
@@ -254,7 +280,8 @@ def _verdict(A: dict, gaps: list, tx: dict | None) -> tuple[list[str], list[str]
         if t and T[t]["credited"]:
             nums += [str(T[t]["conv_pct"]), str(T[t]["credited"])]
             items.append(f"<b>{label}: {e(_clip(t))}</b>, {T[t]['conv_pct']}% ({plural(T[t]['credited'], 'enrolment')})."
-                         + (warm if T[t]["warm"] and label == "Runner-up" else ""))
+                         + ((" It also mainly calls warm leads." if best["warm"] and best["credited"] else warm)
+                            if T[t]["warm"] and label == "Runner-up" else ""))
     busy = sorted(r, key=lambda t: (-T[t]["real"], t))[:2]
     nums += [str(T[t][k]) for t in busy for k in ("real", "conv_pct")]
     if len(busy) == 1:
@@ -365,7 +392,7 @@ def _summary(A: dict, verdict: list[str], gaps: list, tx: dict | None, page1_tea
 <div class="box"><ul>{''.join(f'<li>{i}</li>' for i in verdict)}</ul></div>
 <h3>Teams ranked</h3>
 {_glance_table(A, page1_teams)}
-<div class="note">Teams with 3 or more callers and 25 or more real conversations, ranked by enrolments, then conversion. Green rows are the top three. {credit}{_phone_note(A, brief=True)} Terms are explained in section 1.</div>
+<div class="note">Teams with 3 or more callers and 25 or more real conversations, ranked by enrolments, then conversion. Green rows are the top three. {credit} Terms are explained in section 1.</div>
 <div class="cols"><div><h3>Callers to recognise</h3>{_people(A)}</div>
 <div><h3>What to do next</h3>{_actions(A, gaps, tx)}</div></div>
 </div>"""
@@ -385,14 +412,13 @@ def _how_to_read(A: dict) -> str:
         ("Enrolment", f"The first time a lead ever moved to the \"Course Enrolled\" stage, between {_dm(d0)} 00:00 and {_dm(cw_end)} {cw_end:%H:%M} IST. Existing students tagged again do not count."),
         ("Credited to", "Each enrolment goes to the caller who talked longest with that lead on the day, on answered calls of any length. A lead that no LeadSquared user spoke to that day is credited to no one."),
         ("Conversion", f"Enrolments credited for every 100 leads reached: {ex}% means about {round(ex)} enrolments for every 100 leads reached. A lead can enrol after a call shorter than 2 minutes, so a few enrolments come from leads not counted as reached."),
+        ("Team", "The first group LeadSquared lists for a caller, skipping groups for the phone system (Acefone, Mcube), which are not sales teams. A caller in several groups counts once, in their team. Section 3 also shows each group that shares callers with another team, with every one of its callers counted."),
         ("Warm-lead team", f"A team that mostly calls people who already registered for a bootcamp or enrolled before ({warm}). Their rates run higher, so compare them with each other."),
         ("Ranked team", "A team with 3 or more callers and 25 or more real conversations, ranked by enrolments credited, then conversion, then real conversations. Smaller teams are listed but not ranked."),
         ("Zipteams scores", "An automatic review of recorded calls, for some teams only. For each checked call it records whether the caller asked about the lead's needs, explained the course fully and answered the lead's concerns well, and how likely the lead seemed to buy. A team's figure is the share of its checked calls where Zipteams found the skill. One input, never the final word."),
         ("Dialer issue", "Half or more of a caller's dials failed to connect, on a day with 20+ dials. That is a phone-system problem, so the caller's numbers are not judged."),
         ("–", "No data, which is not the same as zero."),
     ]
-    if A.get("phone_groups"):
-        terms.insert(9, ("Calling-software group", f"{joined(sorted(e(short(t)) for t in A['phone_groups']))}: groups for the calling software, not sales teams. LeadSquared lists them first for some callers, so in this report those callers count under them (section 3 shows their sales teams)."))
     toc = "".join(f"<li>{e(s)}</li>" for s in SECTIONS[4:])
     return f"""<div class="newpage"><h2>{SECTIONS[3]}</h2>
 <p>This report shows how one day of sales calls turned into enrolments, team by team and caller by caller. Page 1 is the summary; the sections below explain each figure, show it as a chart or table, and say what it means and what to do. All times are India time (IST). Every figure was checked before the report was made (section 11).</p>
@@ -497,7 +523,7 @@ def _teams_compared(A: dict) -> str:
 <h3>Teams not ranked</h3>
 {table}
 <div class="note">These teams had fewer than 3 people dialling or fewer than 25 real conversations, too few to rank fairly. Also in the totals: callers with no team ("Unassigned"): {plural(ua.get('callers', 0), 'caller')} who dialled, {plural(ua.get('real', 0), 'real conversation')}, {ua.get('credited', 0)} enrolled; calls by people who are not LeadSquared users: {n(nu.get('dials', 0) + nu.get('inbound', 0))}.</div>
-{_phone_note(A, brief=False)}"""
+{_groups(A)}"""
 
 
 def _weak_spots(A: dict) -> str:
@@ -779,7 +805,7 @@ def _method(A: dict, tx: dict | None, validation: str, checks: list[dict] | None
     tot, T = A["totals"], A["teams"]
     d0, cw_end = _when(A["window"]["d0"]), _when(A["window"]["cw_end"])
     no_zip = [short(t) for t in A["rank"] if T[t]["zip_n"] == 0]
-    days, multi = tot.get("edit_margin_days", 0), tot["multi_group_callers"]
+    days, multi, moved = tot.get("edit_margin_days", 0), tot["multi_group_callers"], tot.get("phone_first_callers", 0)
     if not tx:
         tx_note = "<b>Recorded calls:</b> none were read for this report."
     else:
@@ -806,8 +832,11 @@ def _method(A: dict, tx: dict | None, validation: str, checks: list[dict] | None
          f"answered call before the note ({tot['zip_dropped']} had no such call; {tot.get('zip_after_day_kept', 0)} were written after "
          "midnight for a late call)" + (f". No Zipteams notes for {joined([e(t) for t in no_zip])} (\"–\")." if no_zip else ".")
          if tot["zip_total"] else "<b>Zipteams:</b> no Zipteams notes were written for this day, so section 8 has no scores."),
-        f"<b>Teams:</b> each caller counts in the first group LeadSquared lists for them (rule P11); {plural(multi, 'caller')} "
-        f"{'belongs' if multi == 1 else 'belong'} to more than one group. Warm-lead teams "
+        "<b>Teams:</b> each caller counts once, in the first group LeadSquared lists for them that is not a phone system "
+        "(Acefone or Mcube; rule P11)" + (f": {plural(moved, 'caller')} listed under a phone system first {'was' if moved == 1 else 'were'} "
+                                           "counted in their sales team instead" if moved else "")
+        + f". {plural(multi, 'caller')} {'belongs' if multi == 1 else 'belong'} to more than one group; section 3 also counts them in "
+        f"each group that shares callers with another team (P11a). Warm-lead teams "
         f"({joined(sorted(e(short(t)) for t in WARM))}) are marked \"warm\".",
         tx_note,
     ]
@@ -837,13 +866,15 @@ def _appendix(A: dict) -> str:
         for p in ps:
             tags = (_tag("coach", "recognised") if id(p) in rec else "") + (_tag("coach", "to coach") if p is A["coach_case"] else "") \
                 + (_tag("dialer", "dialer issue") if p["dialer_issue"] else "")
+            also = [short(g) for g in p.get("groups", ()) if g != t]
+            tags += f"<span class='also'> · also in {e(', '.join(also))}</span>" if also else ""
             body.append(f"<tr><td>{e(p['name'])}{tags}</td><td class='n'>{p['dials']:,}</td>"
                         f"<td class='n'>{f(p['answer_pct'], '%') if p['dials'] else '–'}</td><td class='n'>{p['real']}</td>"
                         f"<td class='n'>{p['talk_min']:,}</td><td class='n'>{p['credited']}</td>"
                         f"<td class='n'>{p['reached']}</td><td class='n'>{p['zip_n'] or '–'}</td>"
                         f"<td class='n'>{f(p['failed_pct'], '%')}</td></tr>")
     return f"""<div class="newpage"><h2>{SECTIONS[14]}</h2>
-<p>Every caller who made or took a call, grouped by team (ranked teams first), most enrolments first. "Dials failed" is the share of dials that did not connect; half or more on 20+ dials is a dialer issue.</p>
+<p>Every caller who made or took a call, grouped by team (ranked teams first), most enrolments first. A caller's other groups follow their name. "Dials failed" is the share of dials that did not connect; half or more on 20+ dials is a dialer issue.</p>
 <table class="app"><thead><tr><th>Caller</th><th class='n'>Dials</th><th class='n'>Answer rate</th><th class='n'>Real conv.</th><th class='n'>Talk min</th><th class='n'>Enrolled</th><th class='n'>Leads reached</th><th class='n'>Calls checked by Zipteams</th><th class='n'>Dials failed</th></tr></thead>{''.join(body)}</table></div>"""
 
 

@@ -21,6 +21,7 @@ import sys
 from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
+from analytics.definitions import team_of
 from analytics.team_report import zip_score
 from integrations.timeutil import IST
 from integrations.leadsquared import (
@@ -82,7 +83,7 @@ def main() -> None:
         sys.exit("END must be yesterday or earlier: today's totals are built by the live cron.")
     c = LeadSquaredClient(max_retries=8)
 
-    users = [u for u in c.get_users() if (u.get("MemberOfGroups") or [])]
+    users = [{**u, "team": t} for u in c.get_users() if (t := team_of(u.get("MemberOfGroups"), ""))]
     log(f"users in a team: {len(users)}")
 
     # ---- calls
@@ -182,7 +183,7 @@ def main() -> None:
     now = format_datetime(datetime.now(timezone.utc))
     sql += inserts("users", ["id", "name", "team", "updated_at"],
                    [[q(u["ID"]), q(f"{u.get('FirstName') or ''} {u.get('LastName') or ''}".strip()),
-                     q(u["MemberOfGroups"][0].strip()), q(now)] for u in users],
+                     q(u["team"]), q(now)] for u in users],
                    "ON CONFLICT(id) DO UPDATE SET name = excluded.name, team = excluded.team, updated_at = excluded.updated_at")
     cols = ["dials", "answered", "not_answered", "failures", "real_calls", "talk_secs", "inbound", "inbound_missed"]
     sql += inserts("caller_day", ["day", "user_id", "name", *cols],

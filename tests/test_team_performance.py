@@ -71,9 +71,9 @@ def test_plan_tracker_and_html():
     assert team["payment_step_zip_pct"] == 100 and team["missed_inbound_leads"] == 1
     assert team["called_back_same_day_pct"] == 100 and team["median_callback_min"] == 30
     html, nums = report_html(A, None, "Validated")
-    assert "Monday 5 October 2026" in html and "Parameters v1.4." in html
+    assert "Monday 5 October 2026" in html and "Parameters v1.5." in html
     assert verdict_numbers_check(nums, scorecard_cells(A))["ok"]
-    assert "Parameters v1.4" in tracker_html(P)
+    assert "Parameters v1.5" in tracker_html(P)
 
 
 def test_markers():
@@ -267,14 +267,54 @@ def test_enrolments_after_a_short_call_are_not_among_the_leads_reached():
     assert "2 of these leads had a real conversation on 5 Oct; 1 enrolled after only a shorter call." in html
 
 
-def test_calling_software_groups_are_named_with_their_callers_sales_teams():
+def test_callers_listed_under_a_phone_system_first_count_in_their_sales_team():
+    phones = {"u1": ["Acefone Users", "Team A"], "u2": [" Mcube Users", "Team A", "Other"], "u4": ["New Joinees - Mcube"]}
     r = run()
-    r["users"] = [{**u, "MemberOfGroups": ["Acefone Users", "Team A"]} if u["ID"] in ("u1", "u2") else u for u in USERS]
-    A = analyse(r)
-    assert A["phone_groups"] == {"Acefone Users": {"Team A": 2}}
+    r["users"] = [{**u, "MemberOfGroups": phones.get(u["ID"], u["MemberOfGroups"])} for u in USERS]
+    A, base = analyse(r), analyse(run())
+    assert A["teams"]["Team A"] == base["teams"]["Team A"]                  # same team figures as without the phone groups
+    assert A["rank"] == ["Team A"] and not {"Acefone Users", "Mcube Users", "New Joinees - Mcube"} & set(A["teams"])
+    assert A["teams"]["Unassigned"]["callers"] == 1                         # only phone-system groups: no team
+    assert A["totals"]["phone_first_callers"] == 3
+    assert list(A["groups"]) == ["Acefone Users", "Mcube Users", "New Joinees - Mcube", "Other"]   # phone systems first
+    ace, mc, other = A["groups"]["Acefone Users"], A["groups"]["Mcube Users"], A["groups"]["Other"]
+    asha = next(p for p in A["people"] if p["name"] == "Asha K")
+    assert (ace["callers"], ace["elsewhere"], ace["dials"], ace["real"], ace["credited"]) == (1, 1, asha["dials"], 10, 1)
+    assert ace["phone"] and not other["phone"] and ace["also_in"] == {"Team A": 1}
+    assert mc["also_in"] == {"Other": 1, "Team A": 1} and mc["teams_elsewhere"] == {"Team A": 1}
+    assert {c["check"]: c["ok"] for c in data_checks(r, A)}["Callers in several groups: one team each, every shared group shown"]
     html, _ = report_html(A, None, "Validated")
-    assert "Acefone Users is a group for the calling software, not a sales team" in html
-    assert "Acefone Users: Team A (2)." in html
+    assert "3. Teams and groups compared" in html and "Groups that share callers with another team" in html
+    assert "Acefone Users<br><span class='tag phone'>phone system</span>" in html
+    assert "Phone systems: Acefone Users callers answered" in html and "; Mcube Users callers " in html
+    assert "3 callers listed under a phone system first were counted in their sales team instead" in html
+    assert "Calling-software group" not in html
+
+
+def test_a_group_whose_callers_count_elsewhere_keeps_its_figures():
+    A = analyse(run())                                         # Ravi S is in Team A and Other
+    other = A["groups"]["Other"]
+    ravi = next(p for p in A["people"] if p["name"] == "Ravi S")
+    assert list(A["groups"]) == ["Other"] and ravi["team"] == "Team A" and ravi["groups"] == ["Team A", "Other"]
+    assert (other["callers"], other["elsewhere"], other["real"], other["credited"]) == (1, 1, ravi["real"], ravi["credited"])
+    html, _ = report_html(A, None, "Validated")
+    assert "Other has the most callers counted in another team: its only caller counts in Team A (1)" in html
+    assert "also in Other" in html                             # the appendix names a caller's other groups
+
+
+def test_group_check_fails_on_a_phone_team_or_a_missing_group():
+    name = "Callers in several groups: one team each, every shared group shown"
+    A = analyse(run())
+    A["groups"]["Other"]["real"] += 1
+    assert not {c["check"]: c["ok"] for c in data_checks(run(), A)}[name]
+    A = analyse(run())
+    del A["groups"]["Other"]
+    assert not {c["check"]: c["ok"] for c in data_checks(run(), A)}[name]
+    A = analyse(run())
+    for c in A["_calls"]:
+        if c["name"] == "Asha K":
+            c["team"], c["groups"] = "Mcube Users", ["Mcube Users", "Team A"]
+    assert not {c["check"]: c["ok"] for c in data_checks(run(), A)}[name]
 
 
 def test_summary_falls_back_to_fewer_teams_until_it_fits(tmp_path):
@@ -314,3 +354,13 @@ def test_page_one_reads_well_on_a_day_without_enrolments():
     html, nums = report_html(analyse(r), None, "Validated")
     assert "No ranked team had a credited enrolment" in html and "No lead enrolled from 5 Oct to 8 Oct." in html
     assert "No enrolment was credited to a caller by 8 Oct 23:59 IST." in html and "1 in –" not in html
+
+
+def test_a_warm_runner_up_after_a_warm_best_team_is_not_explained_twice():
+    from analytics.team_performance_html import _verdict
+    T = {t: {"conv_pct": c, "credited": k, "reached": 20, "callers": 4, "real": 30, "warm": w}
+         for t, c, k, w in (("W1", 40.0, 8, True), ("W2", 30.0, 6, True), ("F1", 10.0, 2, False))}
+    A = {"teams": T, "rank": ["W1", "W2", "F1"], "runner_up": "W2", "best_front_line": "F1",
+         "window": {"cw_end": "2026-10-08T23:59:59+05:30"}}
+    items, _ = _verdict(A, [], None)
+    assert " ".join(items).count("It mainly calls warm leads") == 1 and items[1].endswith("It also mainly calls warm leads.")
