@@ -10,13 +10,13 @@ from __future__ import annotations
 import csv
 import os
 import sys
-from datetime import datetime, timedelta, timezone
+from datetime import datetime
 
 import integrations  # noqa: F401  (loads .env)
 from integrations.http import ApiError
+from integrations.timeutil import IST
 from integrations.zoom import ZoomClient, attendance
 
-IST = timezone(timedelta(hours=5, minutes=30))
 COLUMNS = ["meeting_id", "topic", "start_ist", "email", "name", "minutes", "sessions", "first_join_ist",
            "last_leave_ist"]
 

@@ -6,19 +6,20 @@
 from __future__ import annotations
 
 import sys
-from datetime import date, timedelta
+from datetime import timedelta
 
 import integrations  # noqa: F401  (loads .env)
 from integrations.google_ads import GoogleAdsClient
 from integrations.http import ApiError
 from integrations.meta_ads import MetaAdsClient
 from integrations.timepay import TimePayClient
+from integrations.timeutil import now_ist
 from integrations.zoom import ACCOUNTS, ZoomClient
 
 
 def google() -> str:
     c = GoogleAdsClient()
-    end = date.today() - timedelta(days=1)
+    end = now_ist().date() - timedelta(days=1)
     rows = c.campaign_daily(end - timedelta(days=6), end)
     spend = sum(r["cost_inr"] for r in rows)
     return f"{len(c.list_accessible_customers())} accessible manager account(s); last 7 days across " \
@@ -45,7 +46,7 @@ def zoom() -> str:
 
 def timepay() -> str:
     c = TimePayClient()
-    d = (date.today() - timedelta(days=1)).isoformat()
+    d = (now_ist().date() - timedelta(days=1)).isoformat()
     n = c.count_logs(f"{d}T00:00:00", f"{d}T23:59:59", type="call")
     first = next(iter(c.paged("campaigns", max_pages=1)), None)
     return f"{n:,} call logs yesterday ({d}); campaigns readable: {'yes' if first else 'none found'}"
