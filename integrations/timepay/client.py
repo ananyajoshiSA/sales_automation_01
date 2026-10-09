@@ -8,9 +8,12 @@ Credentials come from the environment (root ``.env``):
     TIMEPAY_AUTH_HEADER  optional; header that carries the token. Default ``Authorization``
                          (sent as ``Bearer <token>``); set e.g. ``x-api-key`` to send it bare.
 
-List endpoints answer ``{"success", "data", "pagination": {"hasNext", ...}}``; ``/logs``
-returns 10 rows a page, so ``iter_logs`` stops at ``max_pages`` unless told otherwise and
-``count_logs`` asks for the total only. Log times are IST (``2026-10-08T00:00:00``).
+List endpoints answer ``{"success", "data", "pagination": {...}}``; ``/logs`` spells the
+next-page flag ``has_next``, others may say ``hasNext``. ``/logs`` returns 10 rows a page (no
+page-size parameter works), so ``iter_logs`` stops at ``max_pages`` unless told otherwise and
+``count_logs`` asks for the total only. Log times are IST (``2026-10-08T00:00:00``). The
+``start_time``/``end_time`` filter is not on a call's own ``start_time``: a 10:10–10:15 window
+returned calls that started 10:12–10:28 (checked 9 Oct 2026), so keep calls by their ``start_time``.
 
 Deliberately read-only: starting calls, WhatsApp or SMS, and editing campaigns or
 customers, reach real people and need the user's go-ahead for each run, so they are not here.
@@ -75,7 +78,8 @@ class TimePayClient:
         while True:
             data = self.get(path, {**params, "page": page}) or {}
             yield from data.get("data", [])
-            if not (data.get("pagination") or {}).get("hasNext"):
+            more = data.get("pagination") or {}
+            if not (more.get("has_next") or more.get("hasNext")):
                 return
             page += 1
             if max_pages is not None and page - int(params.get("page") or 1) >= max_pages:

@@ -1,6 +1,6 @@
-"""Read-only connection check for Google Ads, Meta Ads, Zoom and TimePay. Prints no secrets.
+"""Read-only connection check for Google Ads, Meta Ads, Zoom, TimePay and GrowthX. Prints no secrets.
 
-    PYTHONPATH=. python scripts/check_integrations.py [google meta zoom timepay]
+    PYTHONPATH=. python scripts/check_integrations.py [google meta zoom timepay growthx]
 """
 
 from __future__ import annotations
@@ -10,6 +10,7 @@ from datetime import timedelta
 
 import integrations  # noqa: F401  (loads .env)
 from integrations.google_ads import GoogleAdsClient
+from integrations.growthx import GrowthXClient
 from integrations.http import ApiError
 from integrations.meta_ads import MetaAdsClient
 from integrations.timepay import TimePayClient
@@ -52,7 +53,13 @@ def timepay() -> str:
     return f"{n:,} call logs yesterday ({d}); campaigns readable: {'yes' if first else 'none found'}"
 
 
-CHECKS = {"google": google, "meta": meta, "zoom": zoom, "timepay": timepay}
+def growthx() -> str:
+    c = GrowthXClient()
+    d = (now_ist().date() - timedelta(days=1)).isoformat()
+    return f"{c.total():,} leads in all; {c.total(d, d):,} captured on {d} (UTC day)"
+
+
+CHECKS = {"google": google, "meta": meta, "zoom": zoom, "timepay": timepay, "growthx": growthx}
 
 
 def main(argv: list[str]) -> int:

@@ -83,6 +83,16 @@ def test_timepay_headers_paging_and_max_pages():
 
 
 @responses.activate
+def test_timepay_logs_paging_uses_has_next():
+    page = lambda n, more: {"success": True, "data": [{"id": n}],
+                            "pagination": {"page": n, "per_page": 10, "has_next": more}}
+    responses.get(f"{BASE}/logs", json=page(1, True))
+    responses.get(f"{BASE}/logs", json=page(2, False))
+    tp = TimePayClient("tp_x", None, BASE, max_retries=0)
+    assert [r["id"] for r in tp.iter_logs("2026-10-08T10:00:00", "2026-10-08T10:05:00", type="call")] == [1, 2]
+
+
+@responses.activate
 def test_timepay_count_custom_header_and_failure():
     responses.get(f"{BASE}/logs", json={"success": True, "total": 43378})
     tp = TimePayClient("tp_x", None, BASE, auth_header="x-api-key", max_retries=0)

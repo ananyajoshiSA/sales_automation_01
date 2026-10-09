@@ -87,3 +87,18 @@ def test_meta_error():
     responses.get(f"{GRAPH}/v21.0/me/adaccounts", status=400, json={"error": {"message": "bad token"}})
     with pytest.raises(MetaAdsError, match="HTTP 400"):
         MetaAdsClient("t", version="v21.0", max_retries=0).ad_accounts()
+
+
+@responses.activate
+def test_fetch_ad_spend_meta_only_skips_google(monkeypatch):
+    from scripts import fetch_ad_spend
+
+    responses.get(f"{GRAPH}/v21.0/me/adaccounts", json={"data": [{"id": "act_1"}]})
+    responses.get(f"{GRAPH}/v21.0/act_1/insights", json={"data": [
+        {"campaign_id": "c1", "campaign_name": "HR", "spend": "120.5", "date_start": "2026-10-08",
+         "actions": [{"action_type": "lead", "value": "3"}]}]})
+    monkeypatch.setenv("META_TOKEN", "m")
+    rows = fetch_ad_spend.rows("2026-10-08", "2026-10-08", ("meta",))  # no Google credentials needed
+    assert rows == [{"platform": "meta", "account_id": "act_1", "date": "2026-10-08", "campaign_id": "c1",
+                     "campaign": "HR", "spend_inr": 120.5, "impressions": 0, "clicks": 0, "platform_leads": 3}]
+    assert fetch_ad_spend.main(["2026-10-08", "2026-10-08", "x.csv", "--platform", "tiktok"]) == 1
