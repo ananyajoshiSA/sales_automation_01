@@ -23,7 +23,7 @@ LeadSquared lead count.
 
 | Path | What it is |
 |---|---|
-| `integrations/` | API clients: `leadsquared` (CRM), `transcripts` (Salesa), `zipteams`; `env.py` loads `.env` |
+| `integrations/` | API clients: `leadsquared` (CRM), `transcripts` (Salesa), `zipteams`; read-only `google_ads`, `meta_ads`, `zoom` (attendance), `timepay` (AI voice-agent logs); `env.py` loads `.env` |
 | `scripts/` | Bulk fetchers (IST date ranges → JSON/JSONL in `data/`), `d1_backfill.py`, `build_plan_pdf.py` |
 | `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`; shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
 | `dashboard/` | Cloudflare Worker + D1 + static page; cron ingest every minute ([dashboard/README.md](dashboard/README.md)) |
@@ -66,9 +66,9 @@ places and in GOAL.md together, or not at all.
   until payments come through, report enrolments and say so.
 
 **Live systems**
-- Treat LeadSquared and Zipteams as production. Reads are fine. **Any write** (`create_lead`,
-  `update_lead`, `upsert_lead`, `post_activity`, any Zipteams sync) needs the user's explicit go-ahead
-  for that run.
+- Treat LeadSquared, Zipteams, TimePay, Zoom and the ad accounts as production. Reads are fine. **Any write**
+  (`create_lead`, `update_lead`, `upsert_lead`, `post_activity`, any Zipteams sync, any TimePay call, WhatsApp,
+  SMS or campaign change, any ad or Zoom change) needs the user's explicit go-ahead for that run.
 - Transcript API: at most 10 numbers per request and 9 requests per run. `TranscriptClient` enforces it;
   never raise the limit.
 - Dashboard must stay on Cloudflare's free tier: ≤ 10 ms CPU per run, ≤ 50 subrequests and D1 queries per
