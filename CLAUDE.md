@@ -25,7 +25,7 @@ LeadSquared lead count.
 |---|---|
 | `integrations/` | API clients: `leadsquared` (CRM), `transcripts` (Salesa), `zipteams`; read-only `google_ads`, `meta_ads`, `zoom` (attendance), `timepay` (AI voice-agent logs), `growthx` (funnel leads and bootcamp checkouts); `env.py` loads `.env` |
 | `scripts/` | Bulk fetchers (IST date ranges → JSON/JSONL in `data/`), `d1_backfill.py`, `build_plan_pdf.py` |
-| `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`; shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
+| `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`, `accountability` (who really assigned or transferred each lead, [docs/accountability.md](docs/accountability.md)); shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
 | `dashboard/` | Cloudflare Worker + D1 + static page; cron ingest every minute ([dashboard/README.md](dashboard/README.md)) |
 | `tests/`, `dashboard/test/` | pytest (HTTP mocked with `responses`), vitest |
 

@@ -2,7 +2,7 @@
 //   cron (every minute) -> one small ingest task (see tasks.ts)
 //   GET  /api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD   dashboard data (IST days, at most 31), cached
 //   GET  /api/health                                  sync and budget status, no names, no login
-//   POST /api/run?task=calls_out|calls_in|leads|zip|enroll|users   run one task now (Bearer RUN_TOKEN)
+//   POST /api/run?task=calls_out|calls_in|leads|zip|enroll|users|arrivals   run one task now (Bearer RUN_TOKEN)
 // Everything else is served from ./public as static assets (free, no Worker invocation).
 // The hostname sits behind Cloudflare Access; every /api/* route except /api/health also checks
 // the Access token itself (access.ts) and refuses until Access is configured.

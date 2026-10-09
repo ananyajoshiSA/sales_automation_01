@@ -6,7 +6,7 @@ import { summary } from "./metrics";
 import { Env, Task, addReadBudget, addWriteBudget, num, utcDay } from "./tasks";
 
 export const DAY = /^\d{4}-\d{2}-\d{2}$/;
-export const TASKS: Task[] = ["calls_out", "calls_in", "leads", "zip", "enroll", "users"];
+export const TASKS: Task[] = ["calls_out", "calls_in", "leads", "zip", "enroll", "users", "arrivals"];
 export const MAX_RANGE_DAYS = 31;
 // Ingest stops at WRITE_BUDGET (90k); cache writes may use the rest up to just under the free 100k.
 const SUMMARY_WRITE_STOP = 99_000;

@@ -28,7 +28,8 @@ time, and a run's totals and cursor are written in the same transaction, so a ru
 CPU limit writes nothing and is retried.
 
 Cron rotation: even minutes → outbound calls; odd minutes rotate inbound calls, new leads,
-Zipteams notes, enrollments (and the daily users/teams refresh).
+Zipteams notes, enrollments (and the daily users/teams refresh); :15 and :45 past each hour → who
+put new leads into a shared admin account ([docs/accountability.md](../docs/accountability.md)).
 
 ## Definitions (same as the Python report)
 
@@ -42,6 +43,9 @@ Zipteams notes, enrollments (and the daily users/teams refresh).
   of dials end in `CallFailure` (not judged as lagging).
 - **Zipteams:** notes (activity 237) attributed to the lead's last answered call.
 - **Data-gap alarm:** last hour's dials < 30% of the same hour's median over the previous 7 days.
+- **Shared admin accounts** (`SHARED_ACCOUNTS`, default `Rinku Jhala,Admin`): never treated as a
+  person. Their calls are listed apart from callers, enrollments on their leads are labelled
+  "(shared account)", and each lead put into one is credited to whoever actually did it, or Unverified.
 
 ## Deploy (runbook for the target account)
 
@@ -112,7 +116,7 @@ deploy command `npm run deploy:prod`, production branch `main`. The Builds token
   `rowsReadToday` / `readBudget`, `accessConfigured`, and per task `cursor`, `updatedAt`,
   `behindMin`, `hasError` and `errorHttp` (the HTTP status of a failed LeadSquared call: 401 =
   keys missing or wrong). The error text itself shows on the page (behind Access).
-- `POST /api/run?task=calls_out|calls_in|leads|zip|enroll|users` with
+- `POST /api/run?task=calls_out|calls_in|leads|zip|enroll|users|arrivals` with
   `Authorization: Bearer <RUN_TOKEN>` – run one task now.
 - `/api/summary` answers with header `x-cache: hit | miss | stale` (stale = paused copy) and 503
   when paused with nothing cached. Ranges are capped at 31 days.

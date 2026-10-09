@@ -2,9 +2,10 @@
 // new cursor in ONE D1 batch (a transaction), so a run cut off by the 10 ms CPU limit or an API
 // error writes nothing and the next run retries the same slice.
 import {
-  Activity, Call, ENROLLED, LsqEnv, PHONE_INBOUND, PHONE_OUTBOUND, ZIP_NOTES, activitiesByEvent, fmtUtc, getUsers,
-  istDay, leadsGet, parseCall, parseUtc, stageChanges,
+  Activity, Call, ENROLLED, LEAD_ASSIGNED, LsqEnv, PHONE_INBOUND, PHONE_OUTBOUND, ZIP_NOTES, activitiesByEvent, fmtUtc,
+  getUsers, istDay, leadActivities, leadsGet, parseCall, parseUtc, stageChanges,
 } from "./lsq";
+import { SHARED_TEAM, resolveArrival, sharedNames } from "./accountability";
 import { aggregateCalls, aggregateLeads, aggregateZip, firstEnrollment } from "./aggregate";
 import { addOnConflict, int, multiInsert, str } from "./sql";
 import { sumRowsRead } from "./cache";
@@ -17,6 +18,8 @@ export interface Env extends LsqEnv {
   ZIP_PAGE_SIZE?: string;          // default 40
   LEAD_PAGE_SIZE?: string;         // default 500 (4 small columns)
   ENROLL_LEADS_PER_RUN?: string;   // default 12 (one stage-history request each)
+  ARRIVAL_LEADS_PER_RUN?: string;  // default 8 (one owner-change-history request each)
+  SHARED_ACCOUNTS?: string;        // logins several people use, comma-separated; default "Rinku Jhala,Admin"
   WRITE_BUDGET?: string;           // default 90000 of the 100,000 free rows written per UTC day
   READ_BUDGET?: string;            // default 4500000 of the 5,000,000 free rows read per UTC day
   SUMMARY_TTL_SECONDS?: string;    // default 60: how long a computed summary is served from cache
@@ -26,7 +29,7 @@ export interface Env extends LsqEnv {
   ACCESS_LOCAL_DEV?: string;       // "1" in .dev.vars only: localhost requests skip the Access check
 }
 
-export type Task = "calls_out" | "calls_in" | "leads" | "zip" | "enroll" | "users";
+export type Task = "calls_out" | "calls_in" | "leads" | "zip" | "enroll" | "users" | "arrivals";
 
 const MIN = 60_000;
 const WINDOW_MIN = 5;          // activity windows
@@ -261,12 +264,60 @@ export async function runEnroll(env: Env): Promise<number> {
   ]);
 }
 
-/** Daily: team membership for every user in a team, and pruning of the attribution table. */
+/**
+ * Leads whose Assigned On moved past the cursor in each shared account, oldest first, a few per run: fetch
+ * each lead's owner changes and record who actually put it there (accountability.ts). Assigned On is
+ * also restamped after calls on these leads, so a lead can come round again; its row is then refreshed.
+ */
+export async function runArrivals(env: Env): Promise<number> {
+  const st = (await getState(env.DB, "arrivals")) ?? defaultState();
+  const accounts = (await env.DB.prepare("SELECT id, name FROM users WHERE team = ?").bind(SHARED_TEAM)
+    .all<{ id: string; name: string }>()).results;
+  if (!accounts.length) return runUsers(env);   // users last refreshed before shared accounts were recorded
+  const fresh: { lead: Activity; account: { id: string; name: string }; on: Date }[] = [];
+  for (const account of accounts) {
+    const rows = await leadsGet(env, { lookup: "OwnerId", value: account.id, page: 1, size: 100,
+      columns: ["ProspectID", "CreatedOn", "CreatedByName", "mx_Assigned_By", "mx_Assigned_On"],
+      sortBy: "mx_Assigned_On", desc: true });
+    for (const lead of rows) {
+      const on = parseUtc(lead.mx_Assigned_On);
+      if (on && on > st.cursor) fresh.push({ lead, account, on });
+    }
+  }
+  fresh.sort((a, b) => a.on.getTime() - b.on.getTime());
+  let batch = fresh.slice(0, num(env.ARRIVAL_LEADS_PER_RUN, 8));
+  const lastOn = batch[batch.length - 1]?.on;
+  if (lastOn) batch = fresh.filter((r) => r.on <= lastOn);   // keep same-timestamp leads together
+  const shared = sharedNames(env.SHARED_ACCOUNTS);
+  const now = str(fmtUtc(new Date()));
+  const values: string[][] = [];
+  for (const r of batch) {
+    const a = resolveArrival(r.lead, await leadActivities(env, String(r.lead.ProspectID), LEAD_ASSIGNED), r.account.name, shared);
+    if (!a) continue;
+    values.push([str(a.leadId), str(fmtUtc(a.at)), str(istDay(a.at)), str(r.account.id), str(a.how), str(a.login),
+      str(a.putBy), str(a.status), str(a.assignedByField), str(a.possible), str(a.putBy), str(a.status), now]);
+  }
+  return writeBatch(env.DB, [
+    ...multiInsert("account_arrival", ["lead_id", "at", "day", "account_id", "how", "login", "put_by", "status",
+      "assigned_by_field", "possible", "first_put_by", "first_status", "updated_at"], values,
+      "ON CONFLICT(lead_id, at) DO UPDATE SET put_by = excluded.put_by, status = excluded.status, " +
+      "assigned_by_field = excluded.assigned_by_field, possible = excluded.possible, updated_at = excluded.updated_at " +
+      "WHERE excluded.put_by <> account_arrival.put_by OR excluded.status <> account_arrival.status"),
+    stateSql("arrivals", { cursor: lastOn ?? st.cursor, page: 1 }),
+  ]);
+}
+
+/** Daily: team membership for every user in a team (shared admin accounts as their own "team"), and
+ *  pruning of the attribution table. */
 export async function runUsers(env: Env): Promise<number> {
   const now = fmtUtc(new Date());
+  const shared = sharedNames(env.SHARED_ACCOUNTS);
   const users = (await getUsers(env))
-    .map((u) => ({ id: String(u.ID ?? ""), name: `${u.FirstName ?? ""} ${u.LastName ?? ""}`.trim(),
-                   team: String((u.MemberOfGroups ?? [])[0] ?? "").trim() }))
+    .map((u) => {
+      const name = `${u.FirstName ?? ""} ${u.LastName ?? ""}`.trim();
+      return { id: String(u.ID ?? ""), name,
+               team: shared.has(name) ? SHARED_TEAM : String((u.MemberOfGroups ?? [])[0] ?? "").trim() };
+    })
     .filter((u) => u.id && u.team);
   return writeBatch(env.DB, [
     ...multiInsert("users", ["id", "name", "team", "updated_at"],
@@ -289,10 +340,12 @@ export async function usersDue(db: D1Database): Promise<boolean> {
   return !r || !cursor || r.last_error !== null || Date.now() - cursor.getTime() > USERS_EVERY_HOURS * 60 * MIN;
 }
 
-/** Cron rotation (every minute): even minutes = outbound calls; odd minutes rotate the rest. */
+/** Cron rotation (every minute): even minutes = outbound calls; odd minutes rotate the rest, except
+ *  :15 and :45 past each hour, which check shared-account arrivals. */
 const ODD: Task[] = ["calls_in", "leads", "zip", "enroll"];
 
 export function taskForMinute(minuteIndex: number): Task {
+  if (minuteIndex % 30 === 15) return "arrivals";
   return minuteIndex % 2 === 0 ? "calls_out" : ODD[Math.floor(minuteIndex / 2) % ODD.length];
 }
 
@@ -310,6 +363,7 @@ export async function runTask(raw: Env, task: Task): Promise<{ task: Task; rows:
       zip: () => runZip(env),
       enroll: () => runEnroll(env),
       users: () => runUsers(env),
+      arrivals: () => runArrivals(env),
     }[task])();
     await addToBudgets(raw.DB, rows, tally.rowsRead);
     return { task, rows, rowsRead: tally.rowsRead };

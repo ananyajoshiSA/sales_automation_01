@@ -12,6 +12,7 @@ export type Activity = Record<string, any>;
 export const PHONE_INBOUND = 21;
 export const PHONE_OUTBOUND = 22;
 export const ZIP_NOTES = 237;
+export const LEAD_ASSIGNED = 3001;
 export const STAGE_CHANGE = 3002;
 export const ENROLLED = "Course Enrolled";
 
@@ -162,19 +163,23 @@ export async function leadsGet(
   return Array.isArray(data) ? data : [];
 }
 
-/** A lead's stage changes (newest first). */
-export async function stageChanges(env: LsqEnv, leadId: string): Promise<Activity[]> {
+/** A lead's activities of one type, newest first (up to 100). */
+export async function leadActivities(env: LsqEnv, leadId: string, event: number): Promise<Activity[]> {
   const data = await lsq(env, "POST", "ProspectActivity.svc/Retrieve",
-    { Parameter: { ActivityEvent: STAGE_CHANGE }, Paging: { Offset: 0, RowCount: 100 } }, { leadId });
+    { Parameter: { ActivityEvent: event }, Paging: { Offset: 0, RowCount: 100 } }, { leadId });
   return (data && data.ProspectActivities) || [];
 }
+
+/** A lead's stage changes (newest first). */
+export const stageChanges = (env: LsqEnv, leadId: string) => leadActivities(env, leadId, STAGE_CHANGE);
 
 export async function getUsers(env: LsqEnv): Promise<Activity[]> {
   const data = await lsq(env, "GET", "UserManagement.svc/Users.Get");
   return Array.isArray(data) ? data : [];
 }
 
-/** {PreviousStage, CurrentStage, CreatedBy, Comment} from a StageChange activity. */
+/** The Data pairs of a system activity: {PreviousStage, CurrentStage, CreatedBy, Comment} for a stage change,
+ *  {PreviousOwner, CurrentOwner, CreatedBy} for an owner change. */
 export function stageData(a: Activity): Record<string, string> {
   const out: Record<string, string> = {};
   for (const d of a.Data ?? []) out[d.Key] = d.Value;

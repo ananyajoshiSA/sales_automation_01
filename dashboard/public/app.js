@@ -170,6 +170,18 @@ function render() {
   table("lead-teams", [{ h: "Owner's team", v: (r) => r.k }, { h: "Leads", num: true, v: (r) => fmt(r.n) }], pairs(d.leads.byTeam));
   table("enroll-teams", [{ h: "Team", v: (r) => r.k }, { h: "Enrolled", num: true, v: (r) => r.n }], pairs(d.enrollments.byTeam));
   table("enroll-owners", [{ h: "Lead owner", v: (r) => r.k }, { h: "Enrolled", num: true, v: (r) => r.n }], pairs(d.enrollments.byOwner));
+  const ac = d.accountability;
+  if (ac) {
+    $("acct-note").textContent = `${fmt(ac.arrivals)} leads went into a shared account (${ac.byAccount.map(([k, n]) => `${k} ${fmt(n)}`).join(", ") || "none"}). ` +
+      `Each is credited to the login that made the change, or to Assigned By when a shared login made it and the field matches; ` +
+      `${fmt(ac.unverified)} could not be verified and are not charged to the account owner.` +
+      (ac.toCheck.length ? ` Names to check (stale Assigned By, not proof): ${ac.toCheck.map(([k, n]) => `${k} (${n})`).join(", ")}.` : "");
+    table("acct-people", [{ h: "Done by", v: (r) => r.k }, { h: "Leads", num: true, v: (r) => fmt(r.n) }], pairs(ac.byPerson));
+    table("acct-calls", [
+      { h: "Calls through a shared account (Unverified)", v: (r) => r.account }, { h: "Dials", num: true, v: (r) => fmt(r.dials) },
+      { h: "Inbound", num: true, v: (r) => fmt(r.inbound) }, { h: "Inbound missed", num: true, v: (r) => fmt(r.inboundMissed) },
+    ], ac.sharedCalls);
+  }
   table("sync", [
     { h: "Task", v: (s) => s.task }, { h: "Behind (min)", num: true, v: (s) => s.behindMin ?? "–" },
     { h: "Last success (IST)", s: (s) => s.lastSuccess, v: (s) => istTime(s.lastSuccess) },

@@ -1,6 +1,7 @@
 // Read side: turn daily totals into the dashboard summary. Definitions match the Python report
 // (exports/insights_*): a caller's working day = >= 20 dials; lagging = >= 2 flags vs team median
 // (70% threshold), at least one of them effort/conversations, >= 2 working days, no dialer issue.
+import { SHARED_TEAM } from "./accountability";
 import { sumRowsRead } from "./cache";
 import { fmtUtc, istDay, istHour, parseUtc } from "./lsq";
 
@@ -103,7 +104,7 @@ export async function summary(db: D1Database, from: string, to: string, budgetLi
   let rowsRead = 0;
   const q = <T>(sql: string, ...args: unknown[]) => db.prepare(sql).bind(...args).all<T>()
     .then((r) => { rowsRead += sumRowsRead([r]); return r.results; });
-  const [users, callerRows, enrolls, leadsByDay, leadsBySource, leadsByOwner, zip, hours, sync, budget] = await Promise.all([
+  const [users, callerRows, enrolls, leadsByDay, leadsBySource, leadsByOwner, zip, hours, sync, budget, arrivals] = await Promise.all([
     q<{ id: string; name: string; team: string }>("SELECT id, name, team FROM users"),
     q<CallerDayRow>("SELECT * FROM caller_day WHERE day BETWEEN ? AND ? ORDER BY day", from, to),
     q<{ lead_id: string; day: string; owner_id: string; set_by: string }>(
@@ -116,6 +117,8 @@ export async function summary(db: D1Database, from: string, to: string, budgetLi
     q<{ day: string; hour: number; dials: number; answered: number }>("SELECT * FROM calls_hour WHERE day >= ?", weekAgo),
     q<{ task: string; cursor: string; updated_at: string; last_error: string | null }>("SELECT task, cursor, updated_at, last_error FROM sync_state"),
     q<{ rows: number }>("SELECT rows FROM write_budget WHERE day = ?", now.toISOString().slice(0, 10)),
+    q<{ account_id: string; put_by: string; status: string; possible: string }>(
+      "SELECT account_id, put_by, status, possible FROM account_arrival WHERE day BETWEEN ? AND ?", from, to),
   ]);
 
   const teamOf = new Map(users.map((u) => [u.id, u.team]));
@@ -123,7 +126,10 @@ export async function summary(db: D1Database, from: string, to: string, budgetLi
   for (const r of callerRows) if (r.name) nameOf.set(r.user_id, nameOf.get(r.user_id) ?? r.name);
   const conv = new Map<string, number>();
   for (const e of enrolls) conv.set(e.owner_id, (conv.get(e.owner_id) ?? 0) + 1);
-  const callers = computeCallers(callerRows, teamOf, conv);
+  // A shared admin login is never a caller: its calls are rung through it, not made by one person.
+  const isShared = (id: string) => teamOf.get(id) === SHARED_TEAM;
+  const callers = computeCallers(callerRows.filter((r) => !isShared(r.user_id)), teamOf, conv);
+  const ownerName = (id: string) => (nameOf.get(id) || id || "(unassigned)") + (isShared(id) ? " (shared account)" : "");
   const lagging = new Set(callers.filter((c) => c.status === "lagging").map((c) => c.userId));
 
   const totals = callerRows.reduce((a, r) => ({ dials: a.dials + r.dials, answered: a.answered + r.answered,
@@ -159,7 +165,21 @@ export async function summary(db: D1Database, from: string, to: string, budgetLi
       total: enrolls.length,
       byDay: sum(enrolls, (e) => e.day, () => 1).sort((a, b) => a[0].localeCompare(b[0])),
       byTeam: sum(enrolls, (e) => teamOf.get(e.owner_id) || "(no team)", () => 1),
-      byOwner: sum(enrolls, (e) => nameOf.get(e.owner_id) || e.owner_id || "(unassigned)", () => 1).slice(0, 15),
+      byOwner: sum(enrolls, (e) => ownerName(e.owner_id), () => 1).slice(0, 15),
+    },
+    // Rules in docs/accountability.md: who actually put leads into a shared account, and the calls that
+    // rang one (Unverified, never the admin's own work).
+    accountability: {
+      arrivals: arrivals.length,
+      unverified: arrivals.filter((a) => a.status === "Unverified").length,
+      byPerson: sum(arrivals, (a) => a.put_by, () => 1),
+      byAccount: sum(arrivals, (a) => ownerName(a.account_id), () => 1),
+      toCheck: sum(arrivals.filter((a) => a.possible), (a) => a.possible, () => 1).slice(0, 10),
+      sharedCalls: [...new Set(callerRows.filter((r) => isShared(r.user_id)).map((r) => r.user_id))].map((id) => {
+        const rs = callerRows.filter((r) => r.user_id === id);
+        return { account: ownerName(id), dials: rs.reduce((a, r) => a + r.dials, 0),
+          inbound: rs.reduce((a, r) => a + r.inbound, 0), inboundMissed: rs.reduce((a, r) => a + r.inbound_missed, 0) };
+      }),
     },
     calls: { dials: totals.dials, connectPct: pct(totals.answered, totals.dials), realCalls: totals.real,
       talkHours: Math.round(totals.talk / 360) / 10, failurePct: pct(totals.failures, totals.dials) },
