@@ -139,3 +139,57 @@ CPU_FIXTURES=/path/to/saved/api/pages npx vitest run test/cpu.local.test.ts   # 
 ```
 
 Not in the Worker (yet): Salesa transcripts (limited to 9 requests per run) – use the Python tools.
+
+## Conversation intelligence (`ci.html`)
+
+A second page, *Conversation Intelligence & Team Analytics*, linked from the main page's header. It shows
+transcript analysis, team and caller comparisons, calls that may not be real conversations, opportunities,
+the Zipteams comparison, coaching, accountability and revenue for a date range, with drilldowns from the
+organisation to a team, a caller, a lead and one call. Here a **real call** means answered and **3+ minutes**;
+the main page's 2-minute *real conversation* is unchanged.
+
+```
+python -m analytics.convintel report ... ──► snapshot.json ──► analytics/convintel/d1push.py ──► D1 ci_snapshot (parts)
+                                                                                                     │
+Browser (Access login) ──► /ci.html + ci.js ──► /api/ci/ranges, /api/ci/snapshot?range=7d ◄──────────┘
+```
+
+**Free tier.** The analysis runs offline in Python; the Worker computes nothing. A snapshot is one JSON text
+per range (`today`, `yesterday`, `7d`, `30d` or a day `YYYY-MM-DD`), stored in parts under 90 KB
+(migration `0004`). Each request is one D1 query that reads one range's parts (a few dozen rows) and returns
+them joined as text, never parsed; the Worker never writes these tables. A load writes about two rows per part (old parts deleted, new ones inserted) plus one index row,
+and `d1push.py` refuses a push over 5,000 rows. Snapshots are capped at 1.5 MB: the command trims the
+longest lists (calls, leads, opportunities, coverage gaps) from the end to fit, and the page still shows
+"showing N of M" from the snapshot's totals. While a load is half-way, `/api/ci/snapshot` answers 503
+"This view is being updated" and the page tries again a minute later. The 1.5 MB cap is meant to keep
+D1's hand-over of the parts inside 10 ms of CPU: locally (Node's V8, 9 Oct 2026) parsing D1's reply for a
+1.5 MB snapshot, joining the parts and building the response took about 4 ms, but it is not measured on
+Cloudflare yet: check CPU time per request with `npx wrangler tail` after the first real load before raising it.
+
+**Routes** (behind the same Access check as `/api/summary`; 404 when `CI_ENABLED` is not `"1"` in
+`wrangler.jsonc` vars):
+- `GET /api/ci/ranges` – the snapshots loaded: key, label, IST days, generated time, parts, bytes.
+- `GET /api/ci/snapshot?range=KEY` – one snapshot as stored; 400 for a malformed key, 404 when none is
+  loaded, 503 while a load is incomplete. `x-ci-generated-at` gives its UTC time.
+
+**Load a snapshot** (a remote write: only with the user's go-ahead for that run):
+
+```bash
+.venv/bin/python -m analytics.convintel report 2026-10-02 2026-10-08 --key 7d       # data/convintel/reports/7d/
+.venv/bin/python -m analytics.convintel.d1push data/convintel/reports/7d/snapshot.json --sql data/ci_7d.sql
+cd dashboard && npx wrangler d1 execute sales_dashboard --remote --file ../data/ci_7d.sql && rm ../data/ci_7d.sql
+# or straight through the D1 HTTP API (CLOUDFLARE_API_TOKEN with D1 Edit, in the root .env):
+.venv/bin/python -m analytics.convintel.d1push data/convintel/reports/7d/snapshot.json --push --yes
+```
+
+Without `--push --yes` nothing is sent. A snapshot built with `--excerpts` (verbatim transcript lines) is
+refused: excerpts stay in the local copy. A phone number quoted in free text (a model summary or reasoning) is
+replaced with "[number removed]" before loading, and a snapshot with a phone-number field is refused. The key must be one of the range keys above (give `--key` for a
+multi-day report). Apply migration `0004` first (`npm run db:migrate:remote`, or `npm run deploy:prod`).
+
+**Offline copy.** `python -m analytics.convintel.snapshot_html SNAPSHOT.json OUT.html` (the report also
+writes `index.html` next to `snapshot.json`) is the same page with the CSS, script and data inlined; it
+opens from a file with no server or network. It holds lead ids and caller names: keep it under `data/` or
+`exports/` and share it only inside the team.
+
+**Turn it off:** set `CI_ENABLED` to `"0"` and deploy; the page then explains that it is switched off.

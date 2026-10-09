@@ -1,0 +1,2005 @@
+{
+ "version": "ci-snapshot-1",
+ "range": {
+  "key": "7d",
+  "from": "2026-10-02",
+  "to": "2026-10-08",
+  "label": "Last 7 days"
+ },
+ "generatedAt": "2026-10-09 06:30:00 UTC",
+ "dataAsOf": {
+  "callsUpTo": "2026-10-09 06:10:00",
+  "lastRun": "2026-10-09 06:25:00"
+ },
+ "privacy": {
+  "excerpts": false,
+  "leadNumbers": false
+ },
+ "definitions": {
+  "realCallSecs": 180,
+  "workingDayDials": 20,
+  "analysisVersion": "ci-1.0[kw-1.0+sem-1.0]",
+  "requiredLayers": [
+   "keyword",
+   "semantic"
+  ],
+  "semanticEngine": "claude:claude-opus-5-5",
+  "notes": [
+   "Unique-lead counts do not add up across teams: a lead called by two teams counts in each; the organisation counts it once.",
+   "Each enrolment is credited once per view: to the lead owner's team at enrolment, and to the team of the last person with an answered call before it."
+  ]
+ },
+ "coverage": {
+  "total_calls": 340,
+  "by_class": {
+   "REAL_CALL": 26,
+   "SHORT_CALL": 79,
+   "NOT_CONNECTED": 229,
+   "UNKNOWN": 6
+  },
+  "expected_transcripts": 111,
+  "transcripts_found": 70,
+  "by_status": {
+   "ANALYZED": 8,
+   "PENDING_ANALYSIS": 20,
+   "ANALYSIS_IN_PROGRESS": 0,
+   "ANALYSIS_INCOMPLETE": 52,
+   "ANALYSIS_FAILED": 1,
+   "TRANSCRIPT_NOT_FOUND": 30,
+   "NO_TRANSCRIPT_EXPECTED": 229
+  },
+  "by_transcript_state": {
+   "NOT_LOOKED_UP": 10,
+   "FOUND": 70,
+   "NOT_FOUND": 20,
+   "NOT_TRANSCRIBED": 10,
+   "NO_NUMBER": 0,
+   "LOOKUP_FAILED": 1,
+   "NOT_EXPECTED": 229
+  },
+  "analyzed": 8,
+  "unanalyzed": 103,
+  "missing_transcripts": 30,
+  "pending_retries": 3,
+  "coverage_pct": 7.2,
+  "reconciles": true,
+  "byTeam": [
+   {
+    "team": "Team Alpha +Ravi",
+    "total_calls": 220,
+    "expected_transcripts": 71,
+    "analyzed": 8,
+    "transcripts_found": 40,
+    "by_status": {
+     "ANALYZED": 8,
+     "PENDING_ANALYSIS": 12,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 30,
+     "ANALYSIS_FAILED": 1,
+     "TRANSCRIPT_NOT_FOUND": 20,
+     "NO_TRANSCRIPT_EXPECTED": 149
+    },
+    "coverage_pct": 11.3
+   },
+   {
+    "team": "Team Beta",
+    "total_calls": 90,
+    "expected_transcripts": 37,
+    "analyzed": 0,
+    "transcripts_found": 22,
+    "by_status": {
+     "ANALYZED": 0,
+     "PENDING_ANALYSIS": 6,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 22,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 9,
+     "NO_TRANSCRIPT_EXPECTED": 53
+    },
+    "coverage_pct": 0.0
+   },
+   {
+    "team": "(shared logins)",
+    "total_calls": 30,
+    "expected_transcripts": 3,
+    "analyzed": 0,
+    "transcripts_found": 8,
+    "by_status": {
+     "ANALYZED": 0,
+     "PENDING_ANALYSIS": 2,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 0,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 1,
+     "NO_TRANSCRIPT_EXPECTED": 27
+    },
+    "coverage_pct": 0.0
+   }
+  ],
+  "byDay": [
+   {
+    "day": "2026-10-02",
+    "total_calls": 40,
+    "expected_transcripts": 13,
+    "analyzed": 1,
+    "transcripts_found": 9,
+    "by_status": {
+     "ANALYZED": 1,
+     "PENDING_ANALYSIS": 2,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 6,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 4,
+     "NO_TRANSCRIPT_EXPECTED": 27
+    },
+    "coverage_pct": 7.7
+   },
+   {
+    "day": "2026-10-03",
+    "total_calls": 50,
+    "expected_transcripts": 16,
+    "analyzed": 1,
+    "transcripts_found": 10,
+    "by_status": {
+     "ANALYZED": 1,
+     "PENDING_ANALYSIS": 3,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 8,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 4,
+     "NO_TRANSCRIPT_EXPECTED": 34
+    },
+    "coverage_pct": 6.2
+   },
+   {
+    "day": "2026-10-04",
+    "total_calls": 45,
+    "expected_transcripts": 14,
+    "analyzed": 1,
+    "transcripts_found": 8,
+    "by_status": {
+     "ANALYZED": 1,
+     "PENDING_ANALYSIS": 3,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 6,
+     "ANALYSIS_FAILED": 1,
+     "TRANSCRIPT_NOT_FOUND": 3,
+     "NO_TRANSCRIPT_EXPECTED": 31
+    },
+    "coverage_pct": 7.1
+   },
+   {
+    "day": "2026-10-05",
+    "total_calls": 55,
+    "expected_transcripts": 19,
+    "analyzed": 2,
+    "transcripts_found": 12,
+    "by_status": {
+     "ANALYZED": 2,
+     "PENDING_ANALYSIS": 3,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 9,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 5,
+     "NO_TRANSCRIPT_EXPECTED": 36
+    },
+    "coverage_pct": 10.5
+   },
+   {
+    "day": "2026-10-06",
+    "total_calls": 50,
+    "expected_transcripts": 17,
+    "analyzed": 1,
+    "transcripts_found": 11,
+    "by_status": {
+     "ANALYZED": 1,
+     "PENDING_ANALYSIS": 3,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 8,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 5,
+     "NO_TRANSCRIPT_EXPECTED": 33
+    },
+    "coverage_pct": 5.9
+   },
+   {
+    "day": "2026-10-07",
+    "total_calls": 52,
+    "expected_transcripts": 17,
+    "analyzed": 1,
+    "transcripts_found": 11,
+    "by_status": {
+     "ANALYZED": 1,
+     "PENDING_ANALYSIS": 3,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 8,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 5,
+     "NO_TRANSCRIPT_EXPECTED": 35
+    },
+    "coverage_pct": 5.9
+   },
+   {
+    "day": "2026-10-08",
+    "total_calls": 48,
+    "expected_transcripts": 15,
+    "analyzed": 1,
+    "transcripts_found": 9,
+    "by_status": {
+     "ANALYZED": 1,
+     "PENDING_ANALYSIS": 3,
+     "ANALYSIS_IN_PROGRESS": 0,
+     "ANALYSIS_INCOMPLETE": 7,
+     "ANALYSIS_FAILED": 0,
+     "TRANSCRIPT_NOT_FOUND": 4,
+     "NO_TRANSCRIPT_EXPECTED": 33
+    },
+    "coverage_pct": 6.7
+   }
+  ],
+  "gaps": [
+   {
+    "callId": "c-0003",
+    "leadId": "L-1002",
+    "callerId": "u-asha",
+    "caller": "Asha Verma",
+    "team": "Team Alpha +Ravi",
+    "day": "2026-10-07",
+    "startIst": "2026-10-07 11:05",
+    "class": "REAL_CALL",
+    "status": "ANALYSIS_INCOMPLETE",
+    "reason": "Model layer not run yet (no model key configured)",
+    "attempts": 0,
+    "nextRetryIst": null
+   },
+   {
+    "callId": "c-0007",
+    "leadId": "L-1004",
+    "callerId": "u-chitra",
+    "caller": "Chitra Nair",
+    "team": "Team Beta",
+    "day": "2026-10-08",
+    "startIst": "2026-10-08 10:15",
+    "class": "REAL_CALL",
+    "status": "TRANSCRIPT_NOT_FOUND",
+    "reason": "No recording matches this call yet",
+    "attempts": 2,
+    "nextRetryIst": "2026-10-09 18:00"
+   },
+   {
+    "callId": "c-0008",
+    "leadId": "L-1005",
+    "callerId": "u-admin",
+    "caller": "Admin",
+    "team": "(shared logins)",
+    "day": "2026-10-06",
+    "startIst": "2026-10-06 12:00",
+    "class": "REAL_CALL",
+    "status": "PENDING_ANALYSIS",
+    "reason": "Transcript found; waiting for the keyword layer",
+    "attempts": 0,
+    "nextRetryIst": "2026-10-09 12:05"
+   },
+   {
+    "callId": "c-0009",
+    "leadId": "L-1006",
+    "callerId": "u-bilal",
+    "caller": "Bilal Khan",
+    "team": "Team Alpha +Ravi",
+    "day": "2026-10-04",
+    "startIst": "2026-10-04 17:30",
+    "class": "SHORT_CALL",
+    "status": "ANALYSIS_FAILED",
+    "reason": "Model reply could not be read; retrying",
+    "attempts": 1,
+    "nextRetryIst": "2026-10-09 12:30"
+   }
+  ],
+  "gapsTotal": 103
+ },
+ "org": {
+  "calls": 340,
+  "dials": 320,
+  "inbound": 20,
+  "connected": 111,
+  "realCalls": 26,
+  "shortCalls": 79,
+  "unknownCalls": 6,
+  "notConnected": 229,
+  "connectPct": 34.7,
+  "realRatePct": 23.4,
+  "talkMin": 224.7,
+  "avgRealMin": 5.6,
+  "workingDays": 14,
+  "realPerWorkingDay": 1.86,
+  "leadsContacted": 80,
+  "leadsReal": 22,
+  "enrolmentsOwner": 4,
+  "enrolmentsLastCaller": 3,
+  "revenue": null,
+  "revenuePerCaller": null,
+  "convPerRealPct": 13.6,
+  "convPerContactedPct": 3.8,
+  "missedInbound": 4,
+  "pendingCallbacks": 3,
+  "overdueFollowUps": 2,
+  "paymentReady": 2,
+  "highIntentUnconverted": 4,
+  "qualityAvg": 5.8,
+  "qualityByDim": {
+   "questioning": 6,
+   "active_listening": 6,
+   "objection_handling": 4,
+   "product_explanation": 6,
+   "pricing_explanation": 5,
+   "payment_guidance": 5,
+   "follow_up_discipline": 5,
+   "customer_engagement": 6,
+   "closing": 4
+  },
+  "transcriptsExpected": 111,
+  "transcriptsFound": 70,
+  "analyzed": 8,
+  "coveragePct": 7.2,
+  "objections": {
+   "price": 4,
+   "time": 2,
+   "family_approval": 2,
+   "emi_or_finance": 2,
+   "course_fit": 1
+  },
+  "integrityFlagged": 6,
+  "integrityPct": 18.8,
+  "callers": 3,
+  "workloadCv": 0.12,
+  "enrolmentsUnattributed": {
+   "ownerAtEnrolment": 1,
+   "lastAnsweredCaller": 1
+  },
+  "prior": null
+ },
+ "teams": [
+  {
+   "team": "Team Alpha +Ravi",
+   "teamLeader": "Ravi",
+   "teamLeaderSource": "team name",
+   "kind": "team",
+   "calls": 220,
+   "dials": 210,
+   "inbound": 10,
+   "connected": 70,
+   "realCalls": 16,
+   "shortCalls": 51,
+   "unknownCalls": 3,
+   "notConnected": 150,
+   "connectPct": 33.3,
+   "realRatePct": 22.9,
+   "talkMin": 135.7,
+   "avgRealMin": 5.4,
+   "workingDays": 10,
+   "realPerWorkingDay": 1.6,
+   "leadsContacted": 52,
+   "leadsReal": 13,
+   "enrolmentsOwner": 2,
+   "enrolmentsLastCaller": 1,
+   "revenue": null,
+   "revenuePerCaller": null,
+   "convPerRealPct": 7.7,
+   "convPerContactedPct": 1.9,
+   "missedInbound": 1,
+   "pendingCallbacks": 3,
+   "overdueFollowUps": 2,
+   "paymentReady": 1,
+   "highIntentUnconverted": 3,
+   "qualityAvg": 5.8,
+   "qualityByDim": {
+    "questioning": 6,
+    "active_listening": 6,
+    "objection_handling": 4,
+    "product_explanation": 6,
+    "pricing_explanation": 5,
+    "payment_guidance": 5,
+    "follow_up_discipline": 5,
+    "customer_engagement": 6,
+    "closing": 4
+   },
+   "transcriptsExpected": 71,
+   "transcriptsFound": 48,
+   "analyzed": 8,
+   "coveragePct": 11.3,
+   "objections": {
+    "price": 4,
+    "time": 2,
+    "family_approval": 2
+   },
+   "integrityFlagged": 5,
+   "integrityPct": 26.3,
+   "callers": 2,
+   "workloadCv": 0.05,
+   "vsOrg": {
+    "connectPct": -1.4,
+    "realRatePct": -0.5,
+    "avgRealMin": -0.2,
+    "realPerWorkingDay": -0.3,
+    "convPerRealPct": -5.9,
+    "convPerContactedPct": -1.9,
+    "qualityAvg": 0.0,
+    "coveragePct": 4.1,
+    "integrityPct": 7.5
+   },
+   "prior": {
+    "calls": 200,
+    "dials": 190,
+    "inbound": 10,
+    "connected": 70,
+    "realCalls": 12,
+    "shortCalls": 51,
+    "unknownCalls": 3,
+    "notConnected": 150,
+    "connectPct": 30.1,
+    "realRatePct": 19.0,
+    "talkMin": 135.7,
+    "avgRealMin": 5.4,
+    "workingDays": 10,
+    "realPerWorkingDay": 1.6,
+    "leadsContacted": 52,
+    "leadsReal": 13,
+    "enrolmentsOwner": 1,
+    "enrolmentsLastCaller": 1,
+    "revenue": null,
+    "revenuePerCaller": null,
+    "convPerRealPct": 7.7,
+    "convPerContactedPct": 1.9,
+    "missedInbound": 1,
+    "pendingCallbacks": 3,
+    "overdueFollowUps": 2,
+    "paymentReady": 1,
+    "highIntentUnconverted": 3,
+    "qualityAvg": 5.8,
+    "qualityByDim": {
+     "questioning": 6,
+     "active_listening": 6,
+     "objection_handling": 4,
+     "product_explanation": 6,
+     "pricing_explanation": 5,
+     "payment_guidance": 5,
+     "follow_up_discipline": 5,
+     "customer_engagement": 6,
+     "closing": 4
+    },
+    "transcriptsExpected": 71,
+    "transcriptsFound": 48,
+    "analyzed": 8,
+    "coveragePct": 11.3,
+    "objections": {
+     "price": 4,
+     "time": 2,
+     "family_approval": 2
+    },
+    "integrityFlagged": 5,
+    "integrityPct": 26.3,
+    "callers": 2,
+    "workloadCv": 0.05
+   }
+  },
+  {
+   "team": "Team Beta",
+   "teamLeader": "(not recorded)",
+   "teamLeaderSource": "not recorded",
+   "kind": "team",
+   "calls": 90,
+   "dials": 85,
+   "inbound": 5,
+   "connected": 33,
+   "realCalls": 9,
+   "shortCalls": 22,
+   "unknownCalls": 2,
+   "notConnected": 57,
+   "connectPct": 38.8,
+   "realRatePct": 27.3,
+   "talkMin": 80.0,
+   "avgRealMin": 6.5,
+   "workingDays": 4,
+   "realPerWorkingDay": 2.25,
+   "leadsContacted": 26,
+   "leadsReal": 8,
+   "enrolmentsOwner": 1,
+   "enrolmentsLastCaller": 2,
+   "revenue": null,
+   "revenuePerCaller": null,
+   "convPerRealPct": 25.0,
+   "convPerContactedPct": 7.7,
+   "missedInbound": 2,
+   "pendingCallbacks": 0,
+   "overdueFollowUps": 0,
+   "paymentReady": 1,
+   "highIntentUnconverted": 1,
+   "qualityAvg": null,
+   "qualityByDim": {
+    "questioning": null,
+    "active_listening": null,
+    "objection_handling": null,
+    "product_explanation": null,
+    "pricing_explanation": null,
+    "payment_guidance": null,
+    "follow_up_discipline": null,
+    "customer_engagement": null,
+    "closing": null
+   },
+   "transcriptsExpected": 35,
+   "transcriptsFound": 22,
+   "analyzed": 0,
+   "coveragePct": 0.0,
+   "objections": {
+    "emi_or_finance": 2,
+    "course_fit": 1
+   },
+   "integrityFlagged": 1,
+   "integrityPct": 9.1,
+   "callers": 1,
+   "workloadCv": 0.0,
+   "vsOrg": {
+    "connectPct": 4.1,
+    "realRatePct": 3.9,
+    "avgRealMin": 0.9,
+    "realPerWorkingDay": 0.4,
+    "convPerRealPct": 11.4,
+    "convPerContactedPct": 3.9,
+    "qualityAvg": null,
+    "coveragePct": -7.2,
+    "integrityPct": -9.7
+   },
+   "prior": null
+  },
+  {
+   "team": "(shared logins)",
+   "teamLeader": "(not recorded)",
+   "teamLeaderSource": "not recorded",
+   "kind": "shared",
+   "calls": 30,
+   "dials": 25,
+   "inbound": 5,
+   "connected": 8,
+   "realCalls": 1,
+   "shortCalls": 6,
+   "unknownCalls": 1,
+   "notConnected": 22,
+   "connectPct": 32.0,
+   "realRatePct": 12.5,
+   "talkMin": 9.0,
+   "avgRealMin": 3.2,
+   "workingDays": 1,
+   "realPerWorkingDay": 1.0,
+   "leadsContacted": 7,
+   "leadsReal": 1,
+   "enrolmentsOwner": 0,
+   "enrolmentsLastCaller": 0,
+   "revenue": null,
+   "revenuePerCaller": null,
+   "convPerRealPct": 0.0,
+   "convPerContactedPct": 0.0,
+   "missedInbound": 1,
+   "pendingCallbacks": 0,
+   "overdueFollowUps": 0,
+   "paymentReady": 0,
+   "highIntentUnconverted": 0,
+   "qualityAvg": null,
+   "qualityByDim": {
+    "questioning": null,
+    "active_listening": null,
+    "objection_handling": null,
+    "product_explanation": null,
+    "pricing_explanation": null,
+    "payment_guidance": null,
+    "follow_up_discipline": null,
+    "customer_engagement": null,
+    "closing": null
+   },
+   "transcriptsExpected": 5,
+   "transcriptsFound": 0,
+   "analyzed": 0,
+   "coveragePct": 0.0,
+   "objections": {},
+   "integrityFlagged": 0,
+   "integrityPct": 0.0,
+   "callers": 0,
+   "workloadCv": null,
+   "vsOrg": {
+    "connectPct": -2.7,
+    "realRatePct": -10.9,
+    "avgRealMin": -2.4,
+    "realPerWorkingDay": -0.9,
+    "convPerRealPct": -13.6,
+    "convPerContactedPct": -3.8,
+    "qualityAvg": null,
+    "coveragePct": -7.2,
+    "integrityPct": -18.8
+   },
+   "prior": null
+  }
+ ],
+ "callers": [
+  {
+   "callerId": "u-asha",
+   "caller": "Asha Verma",
+   "team": "Team Alpha +Ravi",
+   "kind": "person",
+   "calls": 120,
+   "dials": 110,
+   "inbound": 10,
+   "connected": 40,
+   "realCalls": 12,
+   "shortCalls": 26,
+   "unknownCalls": 2,
+   "notConnected": 80,
+   "connectPct": 36.4,
+   "realRatePct": 30.0,
+   "talkMin": 95.5,
+   "avgRealMin": 5.8,
+   "workingDays": 5,
+   "realPerWorkingDay": 2.4,
+   "leadsContacted": 30,
+   "leadsReal": 10,
+   "enrolmentsOwner": 2,
+   "enrolmentsLastCaller": 1,
+   "revenue": null,
+   "revenuePerCaller": null,
+   "convPerRealPct": 10.0,
+   "convPerContactedPct": 3.3,
+   "missedInbound": 1,
+   "pendingCallbacks": 2,
+   "overdueFollowUps": 1,
+   "paymentReady": 1,
+   "highIntentUnconverted": 2,
+   "qualityAvg": 6.2,
+   "qualityByDim": {
+    "questioning": 7,
+    "active_listening": 6,
+    "objection_handling": 5,
+    "product_explanation": 7,
+    "pricing_explanation": 6,
+    "payment_guidance": 5,
+    "follow_up_discipline": 6,
+    "customer_engagement": 7,
+    "closing": 5
+   },
+   "transcriptsExpected": 40,
+   "transcriptsFound": 28,
+   "analyzed": 6,
+   "coveragePct": 15.0,
+   "objections": {
+    "price": 3,
+    "time": 2
+   },
+   "integrityFlagged": 3,
+   "integrityPct": 21.4,
+   "dialsShare": 52.4,
+   "vsTeam": {
+    "connectPct": 3.1,
+    "realRatePct": 7.1,
+    "avgRealMin": 0.4,
+    "realPerWorkingDay": 0.8,
+    "convPerRealPct": 2.3,
+    "convPerContactedPct": 1.4,
+    "qualityAvg": 0.4,
+    "coveragePct": 3.7,
+    "integrityPct": -4.9
+   },
+   "prior": null,
+   "integrity": {
+    "flagged": 3,
+    "flaggedPct": 21.4,
+    "byFlag": {
+     "under_3_min": 26,
+     "thin": 1,
+     "repeat": 2
+    },
+    "shortCalls": 26,
+    "shortPct": 65.0
+   },
+   "coaching": {
+    "strengths": [
+     {
+      "item": "Explains the course clearly",
+      "n": 4
+     },
+     {
+      "item": "Customer engagement",
+      "n": 3
+     }
+    ],
+    "weaknesses": [
+     {
+      "item": "Closing: no clear ask for payment",
+      "n": 3
+     }
+    ],
+    "actions": [
+     "Ask for the payment date before ending a call where the fee was accepted.",
+     "Confirm EMI options in the first fee discussion."
+    ],
+    "weeklySample": {
+     "2026-10-06": [
+      "c-0001",
+      "c-0003",
+      "c-0002"
+     ]
+    }
+   }
+  },
+  {
+   "callerId": "u-bilal",
+   "caller": "Bilal Khan",
+   "team": "Team Alpha +Ravi",
+   "kind": "person",
+   "calls": 100,
+   "dials": 100,
+   "inbound": 0,
+   "connected": 30,
+   "realCalls": 4,
+   "shortCalls": 25,
+   "unknownCalls": 1,
+   "notConnected": 70,
+   "connectPct": 30.0,
+   "realRatePct": 13.3,
+   "talkMin": 40.2,
+   "avgRealMin": 4.1,
+   "workingDays": 5,
+   "realPerWorkingDay": 0.8,
+   "leadsContacted": 25,
+   "leadsReal": 4,
+   "enrolmentsOwner": 0,
+   "enrolmentsLastCaller": 0,
+   "revenue": null,
+   "revenuePerCaller": null,
+   "convPerRealPct": 0.0,
+   "convPerContactedPct": 0.0,
+   "missedInbound": 0,
+   "pendingCallbacks": 1,
+   "overdueFollowUps": 1,
+   "paymentReady": 0,
+   "highIntentUnconverted": 1,
+   "qualityAvg": 4.5,
+   "qualityByDim": {
+    "questioning": 4,
+    "active_listening": 5,
+    "objection_handling": 3,
+    "product_explanation": 5,
+    "pricing_explanation": 4,
+    "payment_guidance": 4,
+    "follow_up_discipline": 3,
+    "customer_engagement": 5,
+    "closing": 3
+   },
+   "transcriptsExpected": 31,
+   "transcriptsFound": 20,
+   "analyzed": 2,
+   "coveragePct": 6.5,
+   "objections": {
+    "price": 1,
+    "family_approval": 2
+   },
+   "integrityFlagged": 2,
+   "integrityPct": 40.0,
+   "dialsShare": 47.6,
+   "vsTeam": {
+    "connectPct": -3.3,
+    "realRatePct": -9.6,
+    "avgRealMin": -1.3,
+    "realPerWorkingDay": -0.8,
+    "convPerRealPct": -7.7,
+    "convPerContactedPct": -1.9,
+    "qualityAvg": -1.3,
+    "coveragePct": -4.8,
+    "integrityPct": 13.7
+   },
+   "prior": null,
+   "integrity": {
+    "flagged": 2,
+    "flaggedPct": 40.0,
+    "byFlag": {
+     "under_3_min": 25,
+     "machine": 1,
+     "just_over_3_min": 1
+    },
+    "shortCalls": 25,
+    "shortPct": 83.3
+   },
+   "coaching": {
+    "strengths": [
+     {
+      "item": "Follows up on time",
+      "n": 2
+     }
+    ],
+    "weaknesses": [
+     {
+      "item": "Objection handling",
+      "n": 3
+     },
+     {
+      "item": "Questioning",
+      "n": 2
+     }
+    ],
+    "actions": [
+     "When the lead says family must agree, offer a call with the family member and book it."
+    ],
+    "weeklySample": {
+     "2026-09-29": [
+      "c-0004"
+     ]
+    }
+   }
+  },
+  {
+   "callerId": "u-chitra",
+   "caller": "Chitra Nair",
+   "team": "Team Beta",
+   "kind": "person",
+   "calls": 90,
+   "dials": 85,
+   "inbound": 5,
+   "connected": 33,
+   "realCalls": 9,
+   "shortCalls": 22,
+   "unknownCalls": 2,
+   "notConnected": 57,
+   "connectPct": 38.8,
+   "realRatePct": 27.3,
+   "talkMin": 80.0,
+   "avgRealMin": 6.5,
+   "workingDays": 4,
+   "realPerWorkingDay": 2.25,
+   "leadsContacted": 26,
+   "leadsReal": 8,
+   "enrolmentsOwner": 1,
+   "enrolmentsLastCaller": 2,
+   "revenue": null,
+   "revenuePerCaller": null,
+   "convPerRealPct": 25.0,
+   "convPerContactedPct": 7.7,
+   "missedInbound": 2,
+   "pendingCallbacks": 0,
+   "overdueFollowUps": 0,
+   "paymentReady": 1,
+   "highIntentUnconverted": 1,
+   "qualityAvg": null,
+   "qualityByDim": {
+    "questioning": null,
+    "active_listening": null,
+    "objection_handling": null,
+    "product_explanation": null,
+    "pricing_explanation": null,
+    "payment_guidance": null,
+    "follow_up_discipline": null,
+    "customer_engagement": null,
+    "closing": null
+   },
+   "transcriptsExpected": 35,
+   "transcriptsFound": 22,
+   "analyzed": 0,
+   "coveragePct": 0.0,
+   "objections": {
+    "emi_or_finance": 2,
+    "course_fit": 1
+   },
+   "integrityFlagged": 1,
+   "integrityPct": 9.1,
+   "dialsShare": 100.0,
+   "vsTeam": {
+    "connectPct": 0.0,
+    "realRatePct": 0.0,
+    "avgRealMin": 0.0,
+    "realPerWorkingDay": 0.0,
+    "convPerRealPct": 0.0,
+    "convPerContactedPct": 0.0,
+    "qualityAvg": null,
+    "coveragePct": 0.0,
+    "integrityPct": 0.0
+   },
+   "prior": null,
+   "integrity": {
+    "flagged": 1,
+    "flaggedPct": 9.1,
+    "byFlag": {
+     "under_3_min": 22,
+     "duration_mismatch": 1
+    },
+    "shortCalls": 22,
+    "shortPct": 66.7
+   },
+   "coaching": {
+    "strengths": [],
+    "weaknesses": [],
+    "actions": [
+     "Keyword-based hint: real calls with buying signals but no payment step (2 calls)."
+    ],
+    "weeklySample": {
+     "2026-09-29": [
+      "c-0006"
+     ],
+     "2026-10-06": [
+      "c-0007"
+     ]
+    }
+   }
+  },
+  {
+   "callerId": "u-admin",
+   "caller": "Admin",
+   "team": "(shared logins)",
+   "kind": "shared",
+   "calls": 30,
+   "dials": 25,
+   "inbound": 5,
+   "connected": 8,
+   "realCalls": 1,
+   "shortCalls": 6,
+   "unknownCalls": 1,
+   "notConnected": 22,
+   "connectPct": 32.0,
+   "realRatePct": 12.5,
+   "talkMin": 9.0,
+   "avgRealMin": 3.2,
+   "workingDays": 1,
+   "realPerWorkingDay": 1.0,
+   "leadsContacted": 7,
+   "leadsReal": 1,
+   "enrolmentsOwner": 0,
+   "enrolmentsLastCaller": 0,
+   "revenue": null,
+   "revenuePerCaller": null,
+   "convPerRealPct": 0.0,
+   "convPerContactedPct": 0.0,
+   "missedInbound": 1,
+   "pendingCallbacks": 0,
+   "overdueFollowUps": 0,
+   "paymentReady": 0,
+   "highIntentUnconverted": 0,
+   "qualityAvg": null,
+   "qualityByDim": {
+    "questioning": null,
+    "active_listening": null,
+    "objection_handling": null,
+    "product_explanation": null,
+    "pricing_explanation": null,
+    "payment_guidance": null,
+    "follow_up_discipline": null,
+    "customer_engagement": null,
+    "closing": null
+   },
+   "transcriptsExpected": 5,
+   "transcriptsFound": 0,
+   "analyzed": 0,
+   "coveragePct": 0.0,
+   "objections": {},
+   "integrityFlagged": 0,
+   "integrityPct": 0.0,
+   "dialsShare": 100.0,
+   "vsTeam": {
+    "connectPct": 0.0,
+    "realRatePct": 0.0,
+    "avgRealMin": 0.0,
+    "realPerWorkingDay": 0.0,
+    "convPerRealPct": 0.0,
+    "convPerContactedPct": 0.0,
+    "qualityAvg": null,
+    "coveragePct": 0.0,
+    "integrityPct": 0.0
+   },
+   "prior": null,
+   "integrity": {
+    "flagged": 0,
+    "flaggedPct": 0.0,
+    "byFlag": {
+     "under_3_min": 6
+    },
+    "shortCalls": 6,
+    "shortPct": 75.0
+   },
+   "coaching": {
+    "strengths": [],
+    "weaknesses": [],
+    "actions": [],
+    "weeklySample": {}
+   }
+  }
+ ],
+ "leads": [
+  {
+   "leadId": "L-1001",
+   "owner": "Asha Verma",
+   "team": "Team Alpha +Ravi",
+   "stage": "Prospect",
+   "course": "Diploma in Contract Drafting",
+   "priority": "hot",
+   "score": 72,
+   "calls": 4,
+   "realCalls": 2,
+   "lastCallIst": "2026-10-08 16:20",
+   "readiness": 78,
+   "readinessSource": "semantic",
+   "readinessBand": "hot",
+   "readinessTrend": "rising",
+   "trendSource": "semantic",
+   "repeatedObjections": [
+    "price"
+   ],
+   "missedCommitments": 0,
+   "flags": [
+    "hot lead, no call in 48 h"
+   ],
+   "nextAction": "Call today and confirm the payment date for the EMI plan.",
+   "enrolled": false,
+   "lastCallerId": "u-asha",
+   "lastCaller": "Asha Verma",
+   "lastCallerTeam": "Team Alpha +Ravi"
+  },
+  {
+   "leadId": "L-1002",
+   "owner": "Bilal Khan",
+   "team": "Team Alpha +Ravi",
+   "stage": "Follow Up",
+   "course": "Certificate course on Arbitration",
+   "priority": "warm",
+   "score": 40,
+   "calls": 6,
+   "realCalls": 1,
+   "lastCallIst": "2026-10-07 11:05",
+   "readiness": 45,
+   "readinessSource": "semantic",
+   "readinessBand": "warm",
+   "readinessTrend": "flat",
+   "trendSource": "semantic",
+   "repeatedObjections": [
+    "family_approval"
+   ],
+   "missedCommitments": 1,
+   "flags": [
+    "same objection in 2 calls",
+    "promised callback missed"
+   ],
+   "nextAction": "Call back as promised and offer a short call with the parent who decides.",
+   "enrolled": false,
+   "lastCallerId": "u-bilal",
+   "lastCaller": "Bilal Khan",
+   "lastCallerTeam": "Team Alpha +Ravi"
+  },
+  {
+   "leadId": "L-1003",
+   "owner": "Chitra Nair",
+   "team": null,
+   "stage": "Course Enrolled",
+   "course": "Bootcamp: Legal Research",
+   "priority": "hot",
+   "score": 90,
+   "calls": 3,
+   "realCalls": 2,
+   "lastCallIst": "2026-10-05 18:40",
+   "readiness": 88,
+   "readinessSource": "keyword",
+   "readinessBand": "hot",
+   "readinessTrend": "rising",
+   "trendSource": "keyword",
+   "repeatedObjections": [],
+   "missedCommitments": 0,
+   "flags": [],
+   "nextAction": "Enrolled: hand over to onboarding.",
+   "enrolled": true,
+   "lastCallerId": "u-chitra",
+   "lastCaller": "Chitra Nair",
+   "lastCallerTeam": "Team Beta"
+  },
+  {
+   "leadId": "L-1004",
+   "owner": "Chitra Nair",
+   "team": "Team Beta",
+   "stage": "Prospect",
+   "course": "Diploma in Contract Drafting",
+   "priority": "cool",
+   "score": null,
+   "calls": 2,
+   "realCalls": 1,
+   "lastCallIst": "2026-10-08 10:15",
+   "readiness": 30,
+   "readinessSource": "keyword",
+   "readinessBand": "cool",
+   "readinessTrend": "single call",
+   "trendSource": "keyword",
+   "repeatedObjections": [],
+   "missedCommitments": 0,
+   "flags": [],
+   "nextAction": "Send the EMI breakdown and call in two days.",
+   "enrolled": false,
+   "lastCallerId": "u-chitra",
+   "lastCaller": "Chitra Nair",
+   "lastCallerTeam": "Team Beta"
+  },
+  {
+   "leadId": "L-1005",
+   "owner": "Admin",
+   "team": "(shared logins)",
+   "stage": "New",
+   "course": null,
+   "priority": "unclear",
+   "score": null,
+   "calls": 1,
+   "realCalls": 0,
+   "lastCallIst": "2026-10-06 12:00",
+   "readiness": null,
+   "readinessSource": null,
+   "readinessBand": null,
+   "readinessTrend": "unknown",
+   "trendSource": null,
+   "repeatedObjections": [],
+   "missedCommitments": 0,
+   "flags": [],
+   "nextAction": "Assign an owner, then call within the day.",
+   "enrolled": false,
+   "lastCallerId": null,
+   "lastCaller": null,
+   "lastCallerTeam": null
+  }
+ ],
+ "leadsTotal": 80,
+ "calls": [
+  {
+   "callId": "c-0001",
+   "leadId": "L-1001",
+   "callerId": "u-asha",
+   "caller": "Asha Verma",
+   "team": "Team Alpha +Ravi",
+   "kind": "person",
+   "day": "2026-10-08",
+   "startIst": "2026-10-08 16:20",
+   "direction": "outbound",
+   "durationS": 612,
+   "class": "REAL_CALL",
+   "status": "ANALYZED",
+   "statusReason": "both layers done",
+   "transcriptState": "FOUND",
+   "engine": "semantic",
+   "readiness": 78,
+   "readinessBand": "hot",
+   "quality": 7,
+   "objections": [
+    "price"
+   ],
+   "signals": [
+    "fee_question",
+    "emi_interest"
+   ],
+   "integrityFlags": [],
+   "integrityReasons": [],
+   "zipIntent": "HIGH",
+   "zipAgrees": true,
+   "summary": "The lead asked about fees and EMI for the contract drafting diploma and agreed to pay by Friday.",
+   "findings": [
+    {
+     "category": "payment_ready",
+     "confidence": "high",
+     "reasoning": "The lead asked for the EMI plan and named a payment day.",
+     "action": "Send the payment link today and confirm on Friday morning."
+    },
+    {
+     "category": "buying_signal_missed",
+     "confidence": "medium",
+     "reasoning": "The lead asked when the batch starts; the caller moved on to fees.",
+     "action": "Answer start-date questions before discussing the fee."
+    }
+   ]
+  },
+  {
+   "callId": "c-0002",
+   "leadId": "L-1001",
+   "callerId": "u-asha",
+   "caller": "Asha Verma",
+   "team": "Team Alpha +Ravi",
+   "kind": "person",
+   "day": "2026-10-06",
+   "startIst": "2026-10-06 12:02",
+   "direction": "outbound",
+   "durationS": 195,
+   "class": "REAL_CALL",
+   "status": "ANALYZED",
+   "statusReason": "both layers done",
+   "transcriptState": "FOUND",
+   "engine": "semantic",
+   "readiness": 55,
+   "readinessBand": "warm",
+   "quality": 6,
+   "objections": [
+    "price"
+   ],
+   "signals": [
+    "fee_question"
+   ],
+   "integrityFlags": [
+    "just_over_3_min"
+   ],
+   "integrityReasons": [
+    "This caller's real calls bunch at 3:00-3:29 (3x the account's share that day); needs a listen, not proof."
+   ],
+   "zipIntent": "MODERATE",
+   "zipAgrees": true,
+   "summary": "First conversation about the diploma; the fee felt high.",
+   "findings": [
+    {
+     "category": "objection_unhandled",
+     "confidence": "medium",
+     "reasoning": "The price concern got no reply about value or EMI.",
+     "action": "Answer a price concern with the EMI option and what the course leads to."
+    }
+   ]
+  },
+  {
+   "callId": "c-0003",
+   "leadId": "L-1002",
+   "callerId": "u-asha",
+   "caller": "Asha Verma",
+   "team": "Team Alpha +Ravi",
+   "kind": "person",
+   "day": "2026-10-07",
+   "startIst": "2026-10-07 11:05",
+   "direction": "outbound",
+   "durationS": 420,
+   "class": "REAL_CALL",
+   "status": "ANALYSIS_INCOMPLETE",
+   "statusReason": "keyword layer done; model layer not run yet",
+   "transcriptState": "FOUND",
+   "engine": "keyword",
+   "readiness": 45,
+   "readinessBand": "warm",
+   "quality": null,
+   "objections": [
+    "family_approval"
+   ],
+   "signals": [
+    "start_date"
+   ],
+   "integrityFlags": [
+    "repeat"
+   ],
+   "integrityReasons": [
+    "3 real calls to this lead on 7 Oct by the same caller; needs a listen, not proof."
+   ],
+   "zipIntent": null,
+   "zipAgrees": null,
+   "summary": null,
+   "findings": [
+    {
+     "category": "callback_promised",
+     "confidence": "medium",
+     "reasoning": "Keyword match: the caller said they would call back tomorrow.",
+     "action": "Log the callback time in LeadSquared and call at that time."
+    }
+   ]
+  },
+  {
+   "callId": "c-0004",
+   "leadId": "L-1002",
+   "callerId": "u-bilal",
+   "caller": "Bilal Khan",
+   "team": "Team Alpha +Ravi",
+   "kind": "person",
+   "day": "2026-10-05",
+   "startIst": "2026-10-05 15:40",
+   "direction": "outbound",
+   "durationS": 186,
+   "class": "REAL_CALL",
+   "status": "ANALYZED",
+   "statusReason": "both layers done",
+   "transcriptState": "FOUND",
+   "engine": "semantic",
+   "readiness": 30,
+   "readinessBand": "cool",
+   "quality": 3,
+   "objections": [
+    "family_approval"
+   ],
+   "signals": [],
+   "integrityFlags": [
+    "machine"
+   ],
+   "integrityReasons": [
+    "The transcript reads like a recorded message or IVR; needs a listen, not proof."
+   ],
+   "zipIntent": "HIGH",
+   "zipAgrees": false,
+   "summary": "Mostly a recorded message followed by a short exchange.",
+   "findings": [
+    {
+     "category": "possible_not_real",
+     "confidence": "medium",
+     "reasoning": "Most of the transcript is a recorded message.",
+     "action": "Listen to the recording before counting this as a real conversation."
+    }
+   ]
+  },
+  {
+   "callId": "c-0005",
+   "leadId": "L-1002",
+   "callerId": "u-bilal",
+   "caller": "Bilal Khan",
+   "team": "Team Alpha +Ravi",
+   "kind": "person",
+   "day": "2026-10-05",
+   "startIst": "2026-10-05 15:45",
+   "direction": "outbound",
+   "durationS": 95,
+   "class": "SHORT_CALL",
+   "status": "ANALYSIS_INCOMPLETE",
+   "statusReason": "keyword layer done; model layer not run yet",
+   "transcriptState": "FOUND",
+   "engine": "keyword",
+   "readiness": 20,
+   "readinessBand": "cold",
+   "quality": null,
+   "objections": [],
+   "signals": [],
+   "integrityFlags": [
+    "under_3_min"
+   ],
+   "integrityReasons": [
+    "Answered, 95 s of talk (under 3 minutes)."
+   ],
+   "zipIntent": null,
+   "zipAgrees": null,
+   "summary": null,
+   "findings": []
+  },
+  {
+   "callId": "c-0006",
+   "leadId": "L-1003",
+   "callerId": "u-chitra",
+   "caller": "Chitra Nair",
+   "team": "Team Beta",
+   "kind": "person",
+   "day": "2026-10-05",
+   "startIst": "2026-10-05 18:40",
+   "direction": "outbound",
+   "durationS": 540,
+   "class": "REAL_CALL",
+   "status": "ANALYSIS_INCOMPLETE",
+   "statusReason": "keyword layer done; model layer not run yet",
+   "transcriptState": "FOUND",
+   "engine": "keyword",
+   "readiness": 70,
+   "readinessBand": "hot",
+   "quality": null,
+   "objections": [
+    "emi_or_finance"
+   ],
+   "signals": [
+    "payment_intent",
+    "emi_interest"
+   ],
+   "integrityFlags": [],
+   "integrityReasons": [],
+   "zipIntent": null,
+   "zipAgrees": null,
+   "summary": null,
+   "findings": [
+    {
+     "category": "payment_ready",
+     "confidence": "medium",
+     "reasoning": "Keyword match: the lead asked how to pay and about EMI.",
+     "action": "Send the payment link and confirm the EMI plan on the same call."
+    }
+   ]
+  },
+  {
+   "callId": "c-0007",
+   "leadId": "L-1004",
+   "callerId": "u-chitra",
+   "caller": "Chitra Nair",
+   "team": "Team Beta",
+   "kind": "person",
+   "day": "2026-10-08",
+   "startIst": "2026-10-08 10:15",
+   "direction": "outbound",
+   "durationS": 260,
+   "class": "REAL_CALL",
+   "status": "TRANSCRIPT_NOT_FOUND",
+   "statusReason": "no recording matches this call yet; next search 9 Oct 18:00 IST",
+   "transcriptState": "NOT_FOUND",
+   "engine": null,
+   "readiness": null,
+   "readinessBand": null,
+   "quality": null,
+   "objections": [],
+   "signals": [],
+   "integrityFlags": [
+    "no_recording_long_call"
+   ],
+   "integrityReasons": [
+    "A 260 s call with no recording after every automatic search; needs a listen, not proof."
+   ],
+   "zipIntent": null,
+   "zipAgrees": null,
+   "summary": null,
+   "findings": []
+  },
+  {
+   "callId": "c-0008",
+   "leadId": "L-1005",
+   "callerId": "u-admin",
+   "caller": "Admin",
+   "team": "(shared logins)",
+   "kind": "shared",
+   "day": "2026-10-06",
+   "startIst": "2026-10-06 12:00",
+   "direction": "outbound",
+   "durationS": 240,
+   "class": "REAL_CALL",
+   "status": "PENDING_ANALYSIS",
+   "statusReason": "transcript found; waiting for the keyword layer",
+   "transcriptState": "FOUND",
+   "engine": null,
+   "readiness": null,
+   "readinessBand": null,
+   "quality": null,
+   "objections": [],
+   "signals": [],
+   "integrityFlags": [],
+   "integrityReasons": [],
+   "zipIntent": null,
+   "zipAgrees": null,
+   "summary": null,
+   "findings": []
+  }
+ ],
+ "callsTotal": 340,
+ "objections": {
+  "org": {
+   "price": 4,
+   "time": 2,
+   "family_approval": 2,
+   "emi_or_finance": 2,
+   "course_fit": 1
+  },
+  "byTeam": {
+   "Team Alpha +Ravi": {
+    "price": 4,
+    "time": 2,
+    "family_approval": 2
+   },
+   "Team Beta": {
+    "emi_or_finance": 2,
+    "course_fit": 1
+   },
+   "(shared logins)": {}
+  }
+ },
+ "integrity": {
+  "flaggedCalls": 6,
+  "shortCalls": 79,
+  "byFlag": {
+   "under_3_min": 79,
+   "no_content": 0,
+   "thin": 1,
+   "machine": 1,
+   "loop": 0,
+   "duration_mismatch": 1,
+   "overlap": 0,
+   "repeat": 2,
+   "just_over_3_min": 1,
+   "no_recording_long_call": 1,
+   "one_sided": 0,
+   "not_sales_talk": 0
+  },
+  "byTier": {
+   "suspect": 3,
+   "pattern": 3,
+   "short": 79
+  },
+  "byCaller": [
+   {
+    "callerId": "u-bilal",
+    "caller": "Bilal Khan",
+    "team": "Team Alpha +Ravi",
+    "kind": "person",
+    "calls": 30,
+    "realCalls": 4,
+    "unknownCalls": 1,
+    "shortCalls": 25,
+    "suspect": 1,
+    "pattern": 1,
+    "flagged": 2,
+    "byFlag": {
+     "under_3_min": 25,
+     "machine": 1,
+     "just_over_3_min": 1
+    },
+    "shortPct": 83.3,
+    "flaggedPct": 40.0,
+    "callIds": [
+     "c-0004",
+     "c-0005"
+    ],
+    "callIdsTotal": 27
+   },
+   {
+    "callerId": "u-asha",
+    "caller": "Asha Verma",
+    "team": "Team Alpha +Ravi",
+    "kind": "person",
+    "calls": 40,
+    "realCalls": 12,
+    "unknownCalls": 2,
+    "shortCalls": 26,
+    "suspect": 1,
+    "pattern": 2,
+    "flagged": 3,
+    "byFlag": {
+     "under_3_min": 26,
+     "thin": 1,
+     "repeat": 2
+    },
+    "shortPct": 65.0,
+    "flaggedPct": 21.4,
+    "callIds": [
+     "c-0003",
+     "c-0002"
+    ],
+    "callIdsTotal": 29
+   },
+   {
+    "callerId": "u-chitra",
+    "caller": "Chitra Nair",
+    "team": "Team Beta",
+    "kind": "person",
+    "calls": 33,
+    "realCalls": 9,
+    "unknownCalls": 2,
+    "shortCalls": 22,
+    "suspect": 1,
+    "pattern": 0,
+    "flagged": 1,
+    "byFlag": {
+     "under_3_min": 22,
+     "duration_mismatch": 1,
+     "no_recording_long_call": 1
+    },
+    "shortPct": 66.7,
+    "flaggedPct": 9.1,
+    "callIds": [
+     "c-0007"
+    ],
+    "callIdsTotal": 23
+   },
+   {
+    "callerId": "u-admin",
+    "caller": "Admin",
+    "team": "(shared logins)",
+    "kind": "shared",
+    "calls": 8,
+    "realCalls": 1,
+    "unknownCalls": 1,
+    "shortCalls": 6,
+    "suspect": 0,
+    "pattern": 0,
+    "flagged": 0,
+    "byFlag": {
+     "under_3_min": 6
+    },
+    "shortPct": 75.0,
+    "flaggedPct": 0.0,
+    "callIds": [],
+    "callIdsTotal": 6
+   }
+  ],
+  "notes": [
+   "A flag means the call needs a listen, not that it was faked.",
+   "Short calls (answered, under 3 minutes) are counted on their own."
+  ]
+ },
+ "opportunities": [
+  {
+   "kind": "payment_ready_unconverted",
+   "leadId": "L-1001",
+   "callId": "c-0001",
+   "callerId": "u-asha",
+   "caller": "Asha Verma",
+   "team": "Team Alpha +Ravi",
+   "day": "2026-10-08",
+   "evidence": "Readiness 78 (hot); asked about fees and EMI; no enrolment yet.",
+   "nextAction": "Send the payment link today and confirm the EMI plan.",
+   "confidence": "high"
+  },
+  {
+   "kind": "missed_callback",
+   "leadId": "L-1004",
+   "callId": null,
+   "callerId": "u-chitra",
+   "caller": "Chitra Nair",
+   "team": "Team Beta",
+   "day": "2026-10-08",
+   "evidence": "Inbound call missed at 14:10 IST; no answered call within 2 h.",
+   "nextAction": "Call the lead back now.",
+   "confidence": "high"
+  },
+  {
+   "kind": "unresolved_objection",
+   "leadId": "L-1002",
+   "callId": "c-0004",
+   "callerId": "u-bilal",
+   "caller": "Bilal Khan",
+   "team": "Team Alpha +Ravi",
+   "day": "2026-10-05",
+   "evidence": "Family approval raised in 2 calls; not handled on the latest real call.",
+   "nextAction": "Offer a short call with the family member who decides.",
+   "confidence": "medium"
+  },
+  {
+   "kind": "emi_friction",
+   "leadId": "L-1004",
+   "callId": "c-0007",
+   "callerId": "u-chitra",
+   "caller": "Chitra Nair",
+   "team": "Team Beta",
+   "day": "2026-10-08",
+   "evidence": "EMI asked about; no EMI option given (keyword match).",
+   "nextAction": "Send the EMI breakdown and call in two days.",
+   "confidence": "medium"
+  }
+ ],
+ "opportunitiesTotal": 9,
+ "opportunitiesByKind": {
+  "payment_ready_unconverted": 2,
+  "missed_callback": 3,
+  "unresolved_objection": 2,
+  "emi_friction": 2
+ },
+ "zip": {
+  "compared": 5,
+  "agree": 3,
+  "disagree": 2,
+  "noBaseline": 3,
+  "zipNoIntent": 0,
+  "ourUnclear": 1,
+  "unsupportedHot": 1,
+  "missedHot": 0,
+  "zipOnly": 4,
+  "analysed": 9,
+  "agreePct": 60.0,
+  "byEngine": {
+   "semantic": 3,
+   "keyword": 2
+  },
+  "byTeam": [
+   {
+    "team": "Team Alpha +Ravi",
+    "kind": "team",
+    "analysed": 7,
+    "compared": 5,
+    "agree": 3,
+    "disagree": 2,
+    "agreePct": 60.0,
+    "noBaseline": 1,
+    "ourUnclear": 1,
+    "unsupportedHot": 1,
+    "missedHot": 0,
+    "baseline": true,
+    "note": null
+   },
+   {
+    "team": "Team Beta",
+    "kind": "team",
+    "analysed": 2,
+    "compared": 0,
+    "agree": 0,
+    "disagree": 0,
+    "agreePct": null,
+    "noBaseline": 2,
+    "ourUnclear": 0,
+    "unsupportedHot": 0,
+    "missedHot": 0,
+    "baseline": false,
+    "note": "No Zipteams rating on this team's analysed calls, so there is nothing to compare (this is not a disagreement)."
+   }
+  ],
+  "examples": [
+   {
+    "callId": "c-0004",
+    "leadId": "L-1002",
+    "callerId": "u-bilal",
+    "caller": "Bilal Khan",
+    "team": "Team Alpha +Ravi",
+    "day": "2026-10-05",
+    "zipIntent": "HIGH",
+    "zipLevel": "high",
+    "ourLevel": "low",
+    "ourReadiness": 30,
+    "engine": "semantic",
+    "kind": "unsupported_hot",
+    "signals": [],
+    "objections": [
+     "family_approval"
+    ]
+   }
+  ],
+  "examplesTotal": 2,
+  "findings": [
+   {
+    "category": "zip_disagreement",
+    "callId": "c-0004",
+    "leadId": "L-1002",
+    "callerId": "u-bilal",
+    "caller": "Bilal Khan",
+    "team": "Team Alpha +Ravi",
+    "day": "2026-10-05",
+    "confidence": "low",
+    "reasoning": "Zipteams rated intent HIGH; our reading is low (readiness 30) with no buying signal.",
+    "recommended_action": "Listen to the call before treating this lead as hot."
+   }
+  ],
+  "findingsTotal": 2,
+  "benchmark": {
+   "zipHigh": {
+    "leads": 4,
+    "enrolled": 1,
+    "pct": 25.0,
+    "smallSample": true,
+    "alreadyEnrolled": 0
+   },
+   "ourHigh": {
+    "leads": 3,
+    "enrolled": 1,
+    "pct": 33.3,
+    "smallSample": true,
+    "alreadyEnrolled": 0
+   },
+   "ourHighAllCalls": {
+    "leads": 5,
+    "enrolled": 2,
+    "pct": 40.0,
+    "smallSample": true,
+    "alreadyEnrolled": 1
+   },
+   "note": "Share of high-intent leads that later enrolled. Under 30 leads the share is not reliable (smallSample)."
+  },
+  "notes": [
+   "Zipteams intent is one input, never the answer.",
+   "Teams with no Zipteams baseline: Team Beta."
+  ]
+ },
+ "coachingTeams": [
+  {
+   "team": "Team Alpha +Ravi",
+   "callers": 2,
+   "gaps": [
+    {
+     "item": "objection handling",
+     "callers": 2,
+     "n": 5,
+     "who": [
+      "Asha Verma",
+      "Bilal Khan"
+     ]
+    }
+   ],
+   "practices": [
+    {
+     "item": "Explains the course clearly",
+     "n": 4,
+     "from": [
+      "Asha Verma"
+     ]
+    }
+   ],
+   "priorities": [
+    "Objection handling (2 callers, 5 calls): practise answering price concerns with the EMI option and the course outcome."
+   ]
+  },
+  {
+   "team": "Team Beta",
+   "callers": 1,
+   "gaps": [],
+   "practices": [],
+   "priorities": []
+  }
+ ],
+ "accountability": {
+  "rows": 12,
+  "byStatus": {
+   "VERIFIED": 7,
+   "VERIFIED_ASSIGNED_BY": 2,
+   "UNVERIFIED": 2,
+   "AUTOMATED": 1,
+   "CORRECTED": 0
+  },
+  "byPerson": [
+   [
+    "Asha Verma",
+    5
+   ],
+   [
+    "Chitra Nair",
+    4
+   ]
+  ],
+  "unverified": 2,
+  "notes": [
+   "A shared admin login is never the responsible person.",
+   "LeadSquared keeps no team history: the team shown is the person's current team."
+  ]
+ },
+ "revenue": {
+  "measurable": false,
+  "reason": "LeadSquared returned no payment records for this period; enrolments are shown instead",
+  "paymentEvents": 0,
+  "amountField": null,
+  "total": null,
+  "currency": "INR",
+  "enrolments": {
+   "total": 4,
+   "byTeam": {
+    "ownerAtEnrolment": {
+     "Team Alpha +Ravi": 2,
+     "Team Beta": 1
+    },
+    "lastAnsweredCaller": {
+     "Team Beta": 2,
+     "Team Alpha +Ravi": 1
+    }
+   },
+   "unattributed": {
+    "ownerAtEnrolment": 1,
+    "lastAnsweredCaller": 1
+   },
+   "unattributedReasons": {
+    "ownerAtEnrolment": {
+     "owner was a shared login, which is not one person": 1
+    },
+    "lastAnsweredCaller": {
+     "no answered call by a person on the lead at or before it, in the calls read": 1
+    }
+   }
+  },
+  "amounts": null,
+  "byCaller": {
+   "ownerAtEnrolment": {
+    "Asha Verma": 2,
+    "Chitra Nair": 1
+   },
+   "lastAnsweredCaller": {
+    "Chitra Nair": 2,
+    "Asha Verma": 1
+   }
+  },
+  "byCallerDetail": {
+   "ownerAtEnrolment": [
+    {
+     "callerId": "u-asha",
+     "caller": "Asha Verma",
+     "team": "Team Alpha +Ravi",
+     "enrolments": 2,
+     "revenue": null
+    },
+    {
+     "callerId": "u-chitra",
+     "caller": "Chitra Nair",
+     "team": "Team Beta",
+     "enrolments": 1,
+     "revenue": null
+    }
+   ],
+   "lastAnsweredCaller": [
+    {
+     "callerId": "u-chitra",
+     "caller": "Chitra Nair",
+     "team": "Team Beta",
+     "enrolments": 2,
+     "revenue": null
+    },
+    {
+     "callerId": "u-asha",
+     "caller": "Asha Verma",
+     "team": "Team Alpha +Ravi",
+     "enrolments": 1,
+     "revenue": null
+    }
+   ]
+  },
+  "fields": {
+   "records": 0,
+   "fields": [],
+   "amountCandidates": [],
+   "note": "Field names, how many records fill each and value types only; values are never shown."
+  },
+  "notes": [
+   "Revenue is counted only from LeadSquared payment records (event 213) with a readable amount; it is never estimated from enrolments or an average fee.",
+   "Each first-time enrolment is credited once per view: to the team of the lead owner recorded with the enrolment (the owner's current LeadSquared group), and to the team of the last person with an answered call on the lead at or before it (the team stamped on that call). Otherwise it is unattributed.",
+   "Payments are credited the same way: the owner at the lead's first-time enrolment, and the last person with an answered call before the payment."
+  ]
+ },
+ "reconciliation": [
+  {
+   "check": "every day read from LeadSquared",
+   "ok": true,
+   "detail": "all days read"
+  },
+  {
+   "check": "statuses add up",
+   "ok": true,
+   "detail": "340 calls = 8 analysed + 103 not yet + 229 not connected (no recording expected)"
+  },
+  {
+   "check": "100% coverage confirmed",
+   "ok": false,
+   "detail": "coverage is 7.2% (8 of 111); not claimed as complete"
+  }
+ ],
+ "filters": {
+  "teams": [
+   "Team Alpha +Ravi",
+   "Team Beta",
+   "(shared logins)"
+  ],
+  "teamLeaders": [
+   "Ravi"
+  ],
+  "callers": [
+   "Admin",
+   "Asha Verma",
+   "Bilal Khan",
+   "Chitra Nair"
+  ],
+  "courses": [
+   "Bootcamp: Legal Research",
+   "Certificate course on Arbitration",
+   "Diploma in Contract Drafting"
+  ],
+  "stages": [
+   "Course Enrolled",
+   "Follow Up",
+   "New",
+   "Prospect"
+  ],
+  "priorities": [
+   "hot",
+   "warm",
+   "cool",
+   "unclear"
+  ],
+  "categories": [
+   "buying_signal_missed",
+   "callback_promised",
+   "commitment_made",
+   "course_fit",
+   "course_unavailable",
+   "emi_or_finance",
+   "family_approval",
+   "job_or_placement",
+   "joined_elsewhere",
+   "language",
+   "misinformation_risk",
+   "not_interested",
+   "objection_unhandled",
+   "other",
+   "payment_friction",
+   "payment_ready",
+   "possible_not_real",
+   "pressure_excessive",
+   "price",
+   "question_unanswered",
+   "strong_practice",
+   "technical",
+   "time",
+   "trust",
+   "value_doubt",
+   "zip_disagreement"
+  ],
+  "statuses": [
+   "ANALYZED",
+   "PENDING_ANALYSIS",
+   "ANALYSIS_IN_PROGRESS",
+   "ANALYSIS_INCOMPLETE",
+   "ANALYSIS_FAILED",
+   "TRANSCRIPT_NOT_FOUND",
+   "NO_TRANSCRIPT_EXPECTED"
+  ]
+ }
+}

@@ -68,3 +68,45 @@ th .arrow { font-size: 10px; }
   .grid { grid-template-columns: minmax(0, 1fr); }
 }
 @media (max-width: 480px) { .tile .value { font-size: 22px; } }
+
+/* Conversation intelligence page (ci.html, ci.js): every rule below is scoped to it, except the
+   main page's single link to it (.ci-link). */
+.ci-link { color: var(--accent); font-size: 12px; font-weight: 600; text-decoration: none; }
+.ci-link:hover, .ci-link:focus-visible { text-decoration: underline; }
+.ci a { color: var(--accent); }
+.ci h3 { margin: 10px 0 4px; font-size: 13px; color: var(--muted); }
+.ci .alert { padding: 10px 12px; border-radius: 8px; margin-bottom: 12px; background: var(--warn-bg); color: var(--warn); }
+.ci .alert.bad { background: var(--bad-bg); color: var(--bad); }
+.ci .tile .muted { margin: 0; }
+.ci-intro { background: var(--card); border: 1px solid var(--line); border-left: 4px solid var(--accent); border-radius: 10px;
+  padding: 8px 12px; margin-bottom: 12px; font-size: 13px; }
+.ci-intro p { margin: 3px 0; }
+.ci-tabs { margin-bottom: 12px; }
+.ci-tabs a { padding: 6px 12px; border: 1px solid var(--line); border-radius: 8px; background: var(--card); color: var(--text);
+  text-decoration: none; }
+.ci-tabs a.on { background: var(--accent); border-color: var(--accent); color: #fff; }
+.ci-crumbs { margin-bottom: 12px; align-items: center; font-weight: 600; }
+.ci-crumbs span { color: var(--muted); }
+.ci-filterbar .filters select { max-width: 220px; }
+.ci-filterbar .muted { margin-top: 6px; }
+.ci-count { margin: 0 0 6px; }
+.ci-diff { font-size: 11px; color: var(--muted); }
+.ci-diff.good { color: var(--ok); }
+.ci-diff.bad { color: var(--bad); }
+.ci-kv { display: grid; grid-template-columns: minmax(120px, max-content) 1fr; gap: 4px 14px; margin: 0; }
+.ci-kv dt { color: var(--muted); font-size: 12px; padding-top: 2px; }
+.ci-kv dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
+.ci-cols { display: grid; grid-template-columns: repeat(auto-fit, minmax(220px, 1fr)); gap: 12px; }
+.ci-cols ul, .ci-notes, .ci-findings { margin: 0; padding-left: 18px; }
+.ci-findings { list-style: none; padding: 0; }
+.ci-findings li { border: 1px solid var(--line); border-radius: 8px; padding: 8px 10px; margin-bottom: 8px; }
+.ci-findings p { margin: 6px 0 0; }
+.ci-excerpt { margin: 6px 0 0; padding: 4px 10px; border-left: 3px solid var(--line); color: var(--muted); font-style: italic; }
+.ci-next { margin: 0 0 10px; padding: 8px 10px; border-radius: 8px; background: var(--chip); }
+.ci .ci-table td.flags { max-width: 360px; }
+@media (max-width: 600px) {
+  .ci-filterbar .filters select { max-width: none; }
+  .ci-kv { grid-template-columns: 1fr; }
+  .ci-kv dt { padding-top: 6px; }
+  .ci-tabs a { padding: 6px 10px; }
+}

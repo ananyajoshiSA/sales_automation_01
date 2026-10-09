@@ -3,10 +3,12 @@
 //   GET  /api/summary?from=YYYY-MM-DD&to=YYYY-MM-DD   dashboard data (IST days, at most 31), cached
 //   GET  /api/health                                  sync and budget status, no names, no login
 //   POST /api/run?task=calls_out|calls_in|leads|zip|enroll|users|arrivals   run one task now (Bearer RUN_TOKEN)
+//   GET  /api/ci/ranges, /api/ci/snapshot?range=KEY   conversation intelligence snapshots (ci.ts)
 // Everything else is served from ./public as static assets (free, no Worker invocation).
 // The hostname sits behind Cloudflare Access; every /api/* route except /api/health also checks
 // the Access token itself (access.ts) and refuses until Access is configured.
 import { NOT_PROTECTED, verifyAccess } from "./access";
+import { serveCi } from "./ci";
 import { istDay } from "./lsq";
 import { TASKS, health, json, localDev, parseRange, runAuthorized, serveSummary } from "./routes";
 import { Env, Task, runTask, taskForMinute } from "./tasks";
@@ -29,6 +31,7 @@ export default {
         if ("error" in r) return json({ error: r.error }, 400);
         return await serveSummary(env, r.from, r.to);
       }
+      if (url.pathname.startsWith("/api/ci/")) return await serveCi(url, req, env);
       if (run) {
         const task = url.searchParams.get("task") as Task;
         if (!TASKS.includes(task)) return json({ error: `task must be one of ${TASKS.join(", ")}` }, 400);
