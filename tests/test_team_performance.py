@@ -71,9 +71,9 @@ def test_plan_tracker_and_html():
     assert team["payment_step_zip_pct"] == 100 and team["missed_inbound_leads"] == 1
     assert team["called_back_same_day_pct"] == 100 and team["median_callback_min"] == 30
     html, nums = report_html(A, None, "Validated")
-    assert "Monday 5 October 2026" in html and "Parameters v1.3." in html
+    assert "Monday 5 October 2026" in html and "Parameters v1.4." in html
     assert verdict_numbers_check(nums, scorecard_cells(A))["ok"]
-    assert "Parameters v1.3" in tracker_html(P)
+    assert "Parameters v1.4" in tracker_html(P)
 
 
 def test_markers():
@@ -162,3 +162,155 @@ def test_transcripts_are_placed_by_their_leadsquared_call_not_their_own_clock():
     assert [r["transcript"] for r in rows] == ["evening call"]
     assert rows[0]["zip"] is None                                            # no Zipteams note on that call
     assert shifts == {"on_time": 0, "api_5h30_early": 0, "api_5h30_late": 1}
+
+
+def test_funnel_hours_and_enrolment_days():
+    A = analyse(run())
+    F = A["funnel"]
+    assert (F["calls"], F["answered"], F["real"], F["reached"], F["credited"]) == (36, 33, 32, 32, 2)  # the bot call is out
+    assert F["conv_pct"] == round(100 * 2 / 32, 1)
+    hours = {h["hour"]: h for h in A["hours"]}
+    assert list(hours) == list(range(10, 17))                          # 05:00-10:30 UTC = 10:30-16:00 IST
+    assert hours[10]["dials"] == 10 and hours[10]["answer_pct"] == 100.0 and hours[10]["real"] == 10
+    assert (hours[14]["dials"], hours[14]["answered"], hours[14]["answer_pct"]) == (3, 2, 66.7)
+    assert hours[15]["inbound"] == 1 and hours[15]["answer_pct"] is None   # no dials: no answer rate, not 0
+    assert hours[16]["dials"] == 1 and hours[16]["answer_pct"] == 0.0
+    assert sum(h["dials"] for h in A["hours"]) == A["totals"]["outbound"]
+    days = {d["day"]: d for d in A["enrol_days"]}
+    assert list(days) == ["2026-10-05", "2026-10-06", "2026-10-07", "2026-10-08"]
+    assert (days["2026-10-05"]["credited"], days["2026-10-05"]["not_credited"], days["2026-10-06"]["credited"]) == (1, 1, 1)
+
+
+def test_dialer_issue_and_callers_who_need_support():
+    r = run()
+    r["calls"] += [call("u3", f"F{i}", "2026-10-05 11:00:00", status="CallFailure", dur=0) for i in range(20)]
+    A = analyse(r)
+    meena = next(p for p in A["people"] if p["name"] == "Meena P")
+    assert meena["dials"] == 31 and meena["failed_pct"] == round(100 * 20 / 31, 1) and meena["dialer_issue"]
+    assert A["teams"]["Team A"]["dialer_issue_callers"] == 1
+    assert not next(p for p in A["people"] if p["name"] == "Asha K")["dialer_issue"]
+    assert A["support"] == [] and A["coach_case"] is None  # Asha and Ravi are recognised; Meena has a dialer issue
+    r["users"] = USERS + [{"ID": "u5", "FirstName": "Dev", "LastName": "R", "MemberOfGroups": ["Team A"]},
+                          {"ID": "u6", "FirstName": "Gita", "LastName": "M", "MemberOfGroups": ["Team A"]}]
+    r["calls"] += [call("u5", f"D{i}", "2026-10-05 07:30:00", dur=600) for i in range(5)]
+    r["calls"] += [call("u6", f"G{i}", "2026-10-05 07:40:00", dur=150) for i in range(5)]  # same real conversations, less talk
+    A = analyse(r)
+    assert [p["name"] for p in A["support"]] == ["Dev R", "Gita M"] and A["support"][0] is A["coach_case"]
+    assert A["ties_left_out"] == {"rec": 0, "support": 0}
+
+
+def test_report_has_every_section_and_plain_language():
+    from analytics.team_performance_html import SECTIONS, sections_present
+
+    r = run()
+    r["meta"]["sample"] = "Built from a few calls only."
+    A = analyse(r)
+    html, _ = report_html(A, None, "Validated", [{"check": "No duplicate activity IDs", "ok": True, "detail": "0 duplicates"}])
+    assert sections_present(html) == []
+    assert "What this means" in html and "Words used in this report" in html and "Built from a few calls only." in html
+    assert "No duplicate activity IDs" in html and "0 duplicates" in html            # the checks are printed in section 11
+    assert "SAMPLE, partial data" in html                                          # in every page's footer
+    summary, _ = report_html(A, None, summary_only=True)
+    for doc in (html, summary):                                                    # no customer numbers or lead IDs
+        assert not any(c["lead_number"] in doc or f">{c['lead_id']}<" in doc or f" {c['lead_id']} " in doc for c in r["calls"])
+    assert SECTIONS[3] not in summary and sections_present(summary) == SECTIONS[3:]
+    out_of_order = html.replace(f">{SECTIONS[5]}</h", ">moved</h") + f"<h2>{SECTIONS[5]}</h2>"
+    assert sections_present(out_of_order) == SECTIONS[6:]
+
+
+def test_team_story_suggests_the_dialer_first():
+    from analytics.team_performance_html import _account, _team_story
+
+    r = run()
+    r["calls"] += [call("u3", f"F{i}", "2026-10-05 11:00:00", status="CallFailure", dur=0) for i in range(20)]
+    A = analyse(r)
+    lines, step = _team_story(A, "Team A", _account(A))
+    assert step.startswith("First fix the dialer for Meena P (half or more of their dials failed). Then: ")
+    assert any("1 caller had a dialer issue" in x for x in lines)
+    A = analyse(run())
+    A["teams"]["Team A"]["credited"] = 0
+    assert _team_story(A, "Team A", _account(A))[1].startswith("Listen to three of the longest calls")
+
+
+def test_report_without_ranked_teams_still_renders():
+    from analytics.team_performance_html import sections_present
+
+    r = run()
+    r["calls"] = [c for c in r["calls"] if c["user_id"] != "u3"]   # 2 callers: Team A can't be ranked
+    A = analyse(r)
+    assert A["rank"] == []
+    html, nums = report_html(A, None, "Validated")
+    assert nums == [] and sections_present(html) == [] and "No team met the ranking rule" in html
+
+
+def test_sections_check():
+    from analytics.report_validation import sections_check
+
+    assert sections_check([], 15)["ok"]
+    assert not sections_check(["3. Teams compared"], 15)["ok"]
+
+
+def test_ties_left_out_of_a_list():
+    from analytics.team_performance import _ties
+
+    ps = [{"credited": 0, "real": 5}, {"credited": 0, "real": 5}, {"credited": 0, "real": 5}, {"credited": 0, "real": 4}]
+    assert (_ties(ps, 1), _ties(ps, 3), _ties(ps, 4), _ties(ps, 0)) == (2, 0, 0, 0)
+
+
+def test_enrolments_after_a_short_call_are_not_among_the_leads_reached():
+    r = run()
+    r["calls"].append(call("u1", "S1", "2026-10-05 05:30:00", dur=60))     # answered, under 2 minutes
+    r["enrollments"].append({"ProspectID": "S1", "OwnerId": "u1", "enrolled_at": "2026-10-06 06:00:00"})
+    F = analyse(r)["funnel"]
+    assert (F["reached"], F["credited"], F["credited_reached"]) == (32, 3, 2)
+    html, _ = report_html(analyse(r), None, "Validated")
+    assert "2 of these leads had a real conversation on 5 Oct; 1 enrolled after only a shorter call." in html
+
+
+def test_calling_software_groups_are_named_with_their_callers_sales_teams():
+    r = run()
+    r["users"] = [{**u, "MemberOfGroups": ["Acefone Users", "Team A"]} if u["ID"] in ("u1", "u2") else u for u in USERS]
+    A = analyse(r)
+    assert A["phone_groups"] == {"Acefone Users": {"Team A": 2}}
+    html, _ = report_html(A, None, "Validated")
+    assert "Acefone Users is a group for the calling software, not a sales team" in html
+    assert "Acefone Users: Team A (2)." in html
+
+
+def test_summary_falls_back_to_fewer_teams_until_it_fits(tmp_path):
+    from analytics.team_performance import fit_summary
+    from analytics.team_performance_html import PAGE1_TEAMS
+
+    pages = iter([2, 2, 1])
+    k, n = fit_summary(analyse(run()), None, str(tmp_path / "s.html"), str(tmp_path / "s.pdf"), render=lambda h, p: next(pages))
+    assert (k, n) == (PAGE1_TEAMS[2], 1)
+    k, n = fit_summary(analyse(run()), None, str(tmp_path / "s.html"), str(tmp_path / "s.pdf"), render=lambda h, p: 2)
+    assert (k, n) == (PAGE1_TEAMS[-1], 2)                                # never fits: the gate's check then fails
+
+
+def test_a_quiet_hour_is_not_named_best_or_worst():
+    from analytics.team_performance_html import HOUR_MIN_SHARE, _hours
+
+    A = analyse(run())
+    A["hours"] = [{"hour": 10, "dials": 200, "answered": 100, "inbound": 0, "real": 40, "answer_pct": 50.0},
+                  {"hour": 11, "dials": 2, "answered": 0, "inbound": 0, "real": 0, "answer_pct": 0.0},      # 1% of dials
+                  {"hour": 12, "dials": 100, "answered": 30, "inbound": 0, "real": 10, "answer_pct": 30.0}]
+    assert 100 * 2 / 302 < HOUR_MIN_SHARE
+    out = _hours(A)
+    assert "least often at 12:00–13:00 (30.0%)" in out and "11:00–12:00 (0.0%)" not in out
+
+
+def test_hour_table_is_split_so_it_never_runs_off_the_page():
+    from analytics.team_performance_html import HOURS_PER_TABLE, _hours
+
+    A = analyse(run())
+    A["hours"] = [{"hour": h, "dials": 10, "answered": 5, "inbound": 0, "real": 1, "answer_pct": 50.0} for h in range(24)]
+    assert _hours(A).count("<table class='hours") == 24 // HOURS_PER_TABLE
+
+
+def test_page_one_reads_well_on_a_day_without_enrolments():
+    r = run()
+    r["enrollments"] = []
+    html, nums = report_html(analyse(r), None, "Validated")
+    assert "No ranked team had a credited enrolment" in html and "No lead enrolled from 5 Oct to 8 Oct." in html
+    assert "No enrolment was credited to a caller by 8 Oct 23:59 IST." in html and "1 in –" not in html

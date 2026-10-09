@@ -20,11 +20,13 @@ Fetched data goes to `data/` and outputs to `exports/`. Both hold lead details a
 python -m analytics.team_performance 2026-10-05 --fetch
 ```
 
-Fetches the day, checks the data, and writes `team_calling_report_{DATE}.pdf` (2 pages) plus a plan
-tracker PDF. Page 1 gives the verdict, the teams ranked by conversion, the callers to recognise and
-three actions. Page 2 holds the full scorecard and the method.
+Fetches the day, checks the data, and writes `team_calling_report_{DATE}.pdf` plus a plan tracker PDF.
+Page 1 is a one-page summary: the day from calls to enrolments, what happened, the teams ranked by
+conversion, the callers to recognise and what to do next. The pages after it explain every figure in plain
+language with charts (teams, weak spots of the day, a card per team, callers, what converting calls had in common, Zipteams
+scores, calls by hour, calls to review), then the method, every validation check and each caller's figures.
 
-- The rules are in [docs/report/report_parameters.md](report/report_parameters.md) (Parameters v1.2).
+- The rules are in [docs/report/report_parameters.md](report/report_parameters.md) (Parameters v1.4).
   A call is a LeadSquared call activity started that day in IST. An enrolment is a lead's first-ever
   "Course Enrolled" within the day plus 3 days, credited to the caller with the most talk time.
 - The validation gate blocks the PDF if any data check fails (duplicates, calls outside the day,

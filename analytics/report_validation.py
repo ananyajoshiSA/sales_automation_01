@@ -48,7 +48,7 @@ def data_checks(run: dict, A: dict) -> list[dict]:
                       f"{tot['outside_window_excluded']} fetched calls started on another day and were excluded; "
                       f"{bad} calls had a start time that couldn't be read; "
                       f"{tot.get('late_edits_recovered', 0)} calls edited after the day were recovered "
-                      f"(edit margin {tot.get('edit_margin_days', 0)} days)"))
+                      f"(edit margin {tot.get('edit_margin_days', 0)} day{'' if tot.get('edit_margin_days', 0) == 1 else 's'})"))
 
     nu = T.get("Not a user", {})
     nu_calls = nu.get("dials", 0) + nu.get("inbound", 0)
@@ -85,7 +85,8 @@ def data_checks(run: dict, A: dict) -> list[dict]:
         "Zipteams attributed + dropped = total": tot["zip_attr"] + tot["zip_dropped"] == tot["zip_total"],
     }
     failed = [k for k, ok in recon.items() if not ok]
-    out.append(_check("Totals reconcile across teams and callers", not failed, "; ".join(failed) or f"{len(recon)} identities hold"))
+    out.append(_check("Totals reconcile across teams and callers", not failed,
+                      "; ".join(failed) or f"team and caller totals add up to the day's totals ({len(recon)} of {len(recon)} sums match)"))
 
     zp = 100 * tot["zip_dropped"] / tot["zip_total"] if tot["zip_total"] else 100
     out.append(_check("Zipteams included, under 5% of notes dropped", tot["zip_total"] > 0 and zp < ZIP_DROPPED_MAX_PCT,
@@ -116,8 +117,14 @@ def spot_check(A: dict, history) -> dict:
 
 def verdict_numbers_check(verdict_numbers: list[str], scorecard_cells: set[str]) -> dict:
     missing = [n for n in verdict_numbers if n not in scorecard_cells]
-    return _check("Every number in the verdict appears in the scorecard", not missing,
+    return _check("Every team figure quoted on page 1 appears in the team tables", not missing,
                   f"missing: {', '.join(missing)}" if missing else f"{len(verdict_numbers)} numbers matched")
+
+
+def sections_check(missing: list[str], total: int) -> dict:
+    """P62: every section of the report is there, in order."""
+    return _check("Every report section is present, in order", not missing,
+                  f"missing or out of order: {', '.join(missing)}" if missing else f"{total} sections in order")
 
 
 def write_log(checks: list[dict], path: str) -> None:
@@ -129,7 +136,7 @@ def write_log(checks: list[dict], path: str) -> None:
 
 
 def summary_line(n_checks: int, log_path: str) -> str:
-    """Printed in the Method section; a report is only written when every check passed."""
+    """Printed in section 11; a report is only written when every check passed."""
     return f"Validated: all {n_checks} checks passed before this report was built (log: {log_path.replace('.json', '.txt')})"
 
 
@@ -148,4 +155,5 @@ def integrity_check(I: dict) -> dict:
         problems.append("lead details in the summary")
     return {"check": "Call-integrity counts reconcile, no lead details", "ok": not problems,
             "detail": "; ".join(problems) or f"{I['flagged_calls']} of {I['long_calls']} long calls flagged; "
-                      f"{I.get('transcripts_matched', 0)} of {I.get('sampled', 0)} sampled calls matched a transcript"}
+                      + (f"{I.get('transcripts_matched', 0)} of {I['sampled']} sampled calls matched a transcript"
+                         if I.get("sampled") else "no transcripts were read for this check")}

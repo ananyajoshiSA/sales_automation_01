@@ -5,8 +5,8 @@
 fetched for an IST day, how transcript times are read, and a few loose ends that make the next mistake
 easy. Three fixes below close all of them.
 
-**Status (9 Oct 2026): all three fixes are implemented on editor_ananya** and the report rules are at
-Parameters v1.3. `iter_activities_started` (LeadSquared client) does fix 1, `match_to_calls` (transcripts
+**Status (9 Oct 2026): all three fixes are implemented on editor_ananya** and the report rules moved to
+Parameters v1.3 (v1.4, also 9 Oct, changed only the report's layout). `iter_activities_started` (LeadSquared client) does fix 1, `match_to_calls` (transcripts
 client) does fix 2, and `integrations/timeutil.py` plus `tests/test_timeutil.py` do fix 3.
 Live check on 6 minutes of 5 Oct calls (19:00–19:06 IST): the old query found 219 of the 254 calls that
 started then, and the new one found all 254 (35 had been edited after the window). The 10 transcripts

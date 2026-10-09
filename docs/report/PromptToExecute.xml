@@ -5,7 +5,7 @@
   The full definitions live in report_parameters.md (same version). This file and that one must
   carry the same values; change both and bump the version together.
 -->
-<report_prompt version="1.3" updated="2026-10-09">
+<report_prompt version="1.4" updated="2026-10-09">
 
   <inputs>
     <target_date>TARGET_DATE</target_date>
@@ -14,8 +14,10 @@
   </inputs>
 
   <role>
-    You are a sales-analytics analyst. Build a 1–2 page PDF report on which sales teams and callers
-    performed best on the target day in terms of converting potential clients into enrolled customers.
+    You are a sales-analytics analyst. Build a PDF report on which sales teams and callers performed best
+    on the target day in terms of converting potential clients into enrolled customers. Anyone, including
+    a reader with no analytics background, must be able to understand it: a one-page summary first, then
+    thorough sections with charts and plain-language explanations of what each figure means.
     Use only the data sources, definitions and format below. Do not invent or substitute definitions.
     Where a parameter cannot be met, stop and state which parameter failed and why.
   </role>
@@ -47,6 +49,7 @@
     <team_mapping>
       <param id="P10">Match a call to a user by user_id, then by exact caller full name.</param>
       <param id="P11">Team = the first group in MemberOfGroups. Each caller is in exactly one team.</param>
+      <param id="P11a">"Acefone Users" and "Mcube Users" are calling-software groups, not sales teams. When one comes first, P11 still applies; say so on page 1 (when such a group is ranked), in section 1 and in section 3, listing each group's callers by their next sales group.</param>
       <param id="P12">No group → "Unassigned". Caller not a LeadSquared user → "Not a user". Show both in totals; never rank them.</param>
       <param id="P13">Rank only teams with at least 3 callers and at least 25 real conversations.</param>
       <param id="P14">Exclude automated welcome, reminder and webinar bots from all figures.</param>
@@ -59,6 +62,8 @@
       <metric id="P23" name="leads_reached">Distinct lead_id with at least one real conversation.</metric>
       <metric id="P24" name="talk_minutes">Sum of answered call durations ÷ 60, rounded.</metric>
       <metric id="P25" name="callers">Distinct callers with at least one outbound call.</metric>
+      <metric id="P23a" name="calls_to_enrolments">Across all calls of the day (including Unassigned and Not a user): calls, answered calls (inbound and outbound), real conversations, leads reached, credited enrollments, credited ÷ leads reached, and how many credited leads are among the leads reached (credit follows any answered call, so a lead can enrol after a call shorter than 2 minutes). Descriptive only.</metric>
+      <metric id="P24a" name="calls_by_hour">Per IST hour from the first to the last hour with calls (an empty hour between them shows 0 and "–"): dials, answered dials and their share, real conversations and inbound calls. Name the best and worst answer-rate hours only among hours with at least 2% of the day's dials. Draw the hour table in blocks of 12 hours.</metric>
       <forbidden id="P26">Do not define "connected" by lead stage, lead edits or owner counts.</forbidden>
     </calling_metrics>
 
@@ -68,6 +73,7 @@
       <metric id="P29a" name="conversion_rate" primary="true">Credited enrollments ÷ leads reached, percentage to 1 decimal.</metric>
       <metric id="P29b" name="same_day_by_owner">Enrollments timestamped on the target day, by the lead owner's team. Context only.</metric>
       <metric id="P29c" name="warm_lead_flag">Mark teams that mainly call bootcamp registrants or post-enrolment leads (currently Elite Changemakers and the DSV teams) as "warm leads" in the table.</metric>
+      <metric id="P29d" name="enrollments_by_day">Enrollments in the conversion window by IST day, split into credited (P28) and not credited.</metric>
     </conversion_metrics>
 
     <zipteams_metrics source="S3">
@@ -91,16 +97,20 @@
     <ranking>
       <rule id="P50">Sort eligible teams by credited enrollments, then conversion rate, then real conversations.</rule>
       <rule id="P51">Name the best team, a runner-up, and the best non-warm front-line team.</rule>
-      <rule id="P52">Recognise up to 9 callers, sorted by credited enrollments then real conversations. Add the highest-volume caller with at most 1 enrollment as a coaching case.</rule>
-      <rule id="P53">Coaching assets: up to 4 callers with at least 15 Zipteams notes, sorted by probing + pitch + objection.</rule>
+      <rule id="P52">Recognise up to 9 callers: 8 sorted by credited enrollments, then real conversations, then talk minutes, then name, plus one coaching case: the caller with the most real conversations (then talk minutes, then name) among callers with at most 1 credited enrollment and at least 1 real conversation, team not Unassigned, no dialer issue (P52b) and not already recognised.</rule>
+      <rule id="P52a">Callers who need support: up to 5 callers chosen like the P52 coaching case, which comes first. Generate the note from their figures: their real conversations and enrollments, any with most of their long calls flagged (P71), and how many more callers tie with the last one listed.</rule>
+      <rule id="P52b">Dialer issue: a caller with 20+ dials of which 50%+ ended in CallFailure. List them so the dialer is fixed before the caller is judged.</rule>
+      <rule id="P53">Coaching assets: up to 4 callers with at least 15 Zipteams notes, sorted by probing + pitch + objection, then name, headed "Good questioning and explaining". The note names any with no credited enrollment (their calls teach questioning, not closing) and any also in P52a.</rule>
     </ranking>
 
     <output>
-      <rule id="P60">PDF, A4 portrait, 1–2 pages, saved as /mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf.</rule>
-      <rule id="P61">Render HTML with headless Chromium (--print-to-pdf --no-pdf-header-footer). Check the page count before delivering.</rule>
-      <rule id="P62">Page 1 must be readable at a glance: title with weekday and date; 4 KPI tiles (calls, answered, Zipteams-scored calls, credited enrollments); verdict box; 1. Teams ranked (conversion bar, enrolled, real convs); 2. Callers to recognise (P52, incl. the coaching case); 3. Do next (the top three actions). Page 2: 4. Team scorecard (P63); 5. Why the top teams won; 6. Where other teams lost revenue; 7. Call integrity (P74); Method and limits with the validation summary.</rule>
-      <rule id="P63">Scorecard columns: Team, Callers, Dials, Answer %, Real convs, Talk min, Enrolled (credited), Conversion %, Enrolled same day (owner), Probing, Pitch, Objection, High/mod intent.</rule>
-      <rule id="P64">Footnotes must state: the conversion window, the enrollment and credit definitions, the Zipteams coverage gap, the team-mapping rule with the count of multi-group callers, the warm-lead flag, the validation summary, and "Parameters v1.3".</rule>
+      <rule id="P60">PDF, A4 portrait, no page limit: a one-page summary, then as many pages as the sections and the caller table need. Saved as /mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf.</rule>
+      <rule id="P61">Render HTML with headless Chromium (--print-to-pdf --no-pdf-header-footer), with "Page N of M", the day and the version in each footer. Render the summary alone too: it must come to exactly 1 page; if not, draw fewer ranked teams on page 1 (15, then 12, 10, 8, 5, 3; the rest stay in section 3). Cut team names on page 1 after 32 characters. If meta.json carries a "sample" note (a layout sample from part of a day), show it in a page-1 banner and write "SAMPLE, partial data" in every footer; a normal run never sets it.</rule>
+      <rule id="P62">Page 1, the summary, readable in a minute: title with weekday and date, the conversion window and when the data was read; the day as 5 connected steps (P23a); what happened (best team, runner-up, best front-line team, busiest teams, the biggest gap or tied gaps in the P33 sample, with call counts); Teams ranked (conversion bar, enrolled, real conversations); Callers to recognise (P52, incl. the coaching case); What to do next (fix the phones first when any caller has a dialer issue, then the payment step, a full pitch and the coaching case). Then: 1. How to read this report; 2. From calls to enrolments (P23a, P29d); 3. Teams compared (P63, teams not ranked); 4. Weak spots of the day; 5. Team by team (one card per ranked team with one suggested next step); 6. Callers (P52, P52a, P52b, P53); 7. What the converting calls had in common (P33); 8. Call quality scores (Zipteams); 9. When the calls happened (P24a); 10. Calls to review (P74); 11. How this report was made and checked (method and every validation check); Appendix: every caller, by team.</rule>
+      <rule id="P62a">Plain language for readers who are not analysts: explain every term in section 1; give sections 2, 3, 6, 7, 8 and 9 a "What this means" note generated from the figures, and sections 4 and 5 what to do for each finding and each team; write conversion as enrolments per 100 leads reached, never as a share of them; generate every sentence from the figures, handling ties, single teams, zero and missing values; put every chart's numbers on its marks or in a table, never rely on colour alone, show "–" for no data, and never show customer names or numbers.</rule>
+      <rule id="P63">Scorecard columns. Section 3: Team, Callers, Dials, Answer rate, Real conversations, Leads reached, Talk minutes, Enrolled (credited), Conversion, Enrolled on the day (owner's team, P29b). Section 8: calls checked, Asked about needs (probing), Explained the course fully (pitch), Answered concerns well (objection handling), Lead's interest high or moderate (intent); ranked teams first, then the others under a divider.</rule>
+      <rule id="P63a">Low answer rate: a team's answer rate below 70% of the day's (all dials; the same 70% as the lagging-caller rule). Used only in the words of section 4 and the team cards, never in the ranking.</rule>
+      <rule id="P64">Section 11 must state: the conversion window, the enrollment and credit definitions, the Zipteams coverage gap, the team-mapping rule with the count of multi-group callers, the warm-lead flag, the validation summary with every check's result, and "Parameters v1.4". Section 1 explains the window, the enrollment and credit definitions, the warm-lead flag and any calling-software group (P11a) in plain words.</rule>
       <rule id="P65">Compute the weekday from the date. Never write it from memory.</rule>
       <rule id="P66">Make no repository commits or pushes without the owner's approval.</rule>
     </output>
@@ -113,7 +123,7 @@
       <rule id="P71">Per caller: eligible calls, flagged calls, flagged share, transcripts checked. Rank only callers with 10+ eligible calls, by flagged share.</rule>
       <rule id="P72">Transcripts: no content under 30 words; thin under 60 words a minute; recorded message, IVR, voicemail or hold text in the first 40 words; loop when one 3-word phrase is 15%+ of the words. No speaker labels or timestamps exist, so words a minute stands in for silence and the customer's share is not measured.</rule>
       <rule id="P73">Transcript sample in its own run (`python -m analytics.call_integrity TARGET_DATE [--limit N]`, API limits apply): a third calls flagged by P68–P70, a third each caller's longest call, the rest 120–149 s calls. Match on the same number, closest start within 10 minutes; a 5 h 30 min shift also counts when durations agree within 10% (some API times carry the wrong timezone).</rule>
-      <rule id="P74">Page 2 gets "7. Call integrity": flagged counts by signal, transcript coverage, up to 5 ranked callers with flagged/eligible calls. Per-call evidence to data/report_{TARGET_DATE}/integrity_calls.csv. No lead names or numbers in any output.</rule>
+      <rule id="P74">Section 10 "Calls to review": flagged counts by signal, transcript coverage, up to 5 ranked callers with flagged/eligible calls. Per-call evidence to data/report_{TARGET_DATE}/integrity_calls.csv. No lead names or numbers in any output.</rule>
     </call_integrity>
   </parameters>
 
@@ -122,9 +132,9 @@
     <check>The preflight passed.</check>
     <check>The total S1 call count is printed and equals the sum of all team dials and inbound calls, including Unassigned and Not a user.</check>
     <check>Zipteams notes attributed ÷ total is printed, and fewer than 5% were dropped.</check>
-    <check>Every number in the verdict appears in the scorecard.</check>
-    <check>The PDF has 1 or 2 pages.</check>
-    <check>"Parameters v1.3" appears in the Method section.</check>
+    <check>Every team figure quoted in page 1's "what happened" appears in the team tables (section 3).</check>
+    <check>The summary, rendered alone, fits on exactly 1 page.</check>
+    <check>"Parameters v1.4" is printed in section 11, which lists every check with its result.</check>
     <check>No duplicate call or Zipteams activity IDs.</check>
     <check>Every call and Zipteams note falls inside the target IST day, and no call has a start time that cannot be read.</check>
     <check>Calls from callers who are not LeadSquared users stay under 5%.</check>
@@ -133,6 +143,7 @@
     <check>Totals reconcile: fetched = counted + other-day + unreadable-time + bot calls; calls = team dials + inbound; credited = sum of team credited = sum of their callers; Zipteams attributed + dropped = total.</check>
     <check>A seeded sample of 10 credited enrollments is re-read from LeadSquared stage history and confirmed as first-ever "Course Enrolled" in the window.</check>
     <check>Call-integrity counts reconcile (flagged and checked calls never exceed eligible calls; caller totals add up) and carry no lead details.</check>
+    <check>Every P62 section is in the report, in order.</check>
   </validation>
 
   <deliverable>

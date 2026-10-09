@@ -1,6 +1,6 @@
 # Fixed parameters for the daily team calling report
 
-Version 1.3, 9 Oct 2026. v1.3 fixes the day window and transcript times (S1, S3, S6, P2, P32, P40, checks 8 and 12; see [docs/timezone_issues.md](../timezone_issues.md)): calls are read up to 3 days past the day so later-edited calls are kept, each transcript takes its time from its LeadSquared call, each Zipteams analysis is kept on the call it analysed, including a call that ends after midnight, and windows are read one page at a time because LeadSquared's paging skips a few rows. Definitions are unchanged, but v1.3 counts can be slightly higher than v1.2 for the same day, so compare reports only within a version. v1.2 adds the call-integrity section (11, P67–P74), its page-2 block (P62) and validation check 14. v1.1 changed only the layout (P62/P64) and added the blocking validation gate (section 10). Every definition and number rule from v1.0 is unchanged, so v1.0–v1.2 figures for teams and callers are comparable with each other. Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
+Version 1.4, 9 Oct 2026. v1.4 changes the layout and no team or caller figure: the 1–2 page limit is gone (P60). The PDF opens with a one-page summary anyone can read, then explains every figure in plain language with charts, a "What this means" note under the main charts and tables, and a table of every caller (P62, P62a). It adds descriptive views built from the existing figures (P23a, P24a, P29d, P52a, P52b, P63a), names the calling-software groups that P11 can pick as a team (P11a), replaces validation check 5 (the summary must fit on page 1), rewords checks 4 and 6 for the new sections and adds check 15 (every section present). The P52 coaching case now skips callers with a dialer issue or already recognised, and every caller list breaks ties by talk minutes, then name. Every v1.3 team and caller figure is computed the same way, so v1.4 and v1.3 figures for the same day are comparable. v1.3 fixes the day window and transcript times (S1, S3, S6, P2, P32, P40, checks 8 and 12; see [docs/timezone_issues.md](../timezone_issues.md)): calls are read up to 3 days past the day so later-edited calls are kept, each transcript takes its time from its LeadSquared call, each Zipteams analysis is kept on the call it analysed, including a call that ends after midnight, and windows are read one page at a time because LeadSquared's paging skips a few rows. Definitions are unchanged, but v1.3 counts can be slightly higher than v1.2 for the same day, so compare reports only within a version. v1.2 adds the call-integrity section (11, P67–P74), its page-2 block (P62) and validation check 14. v1.1 changed only the layout (P62/P64) and added the blocking validation gate (section 10). Every definition and number rule from v1.0 is unchanged, so v1.0–v1.2 figures for teams and callers are comparable with each other. Every run of the report must use these definitions unchanged. If any parameter is changed, bump the version and print it on the report, so two reports can only be compared when they share a version.
 
 The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in its `<parameters>` block. Change both files together.
 
@@ -32,6 +32,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 |---|---|---|
 | P10 | Caller identity | Match a call to a user by `user_id` first, then by exact caller full name. |
 | P11 | Team of a caller | The **first** group in the user's `MemberOfGroups` (same as `analytics/dnp_report.team_of_user`). Each caller counts in exactly one team. |
+| P11a | Calling-software groups | "Acefone Users" and "Mcube Users" are groups for the calling software, not sales teams. When LeadSquared lists one first, P11 still puts the caller there; the report says so on page 1 (when such a group is ranked), in section 1 and in section 3, which lists each group's callers by their next sales group. |
 | P12 | Unassigned | Callers with no group go to "Unassigned". Calls whose caller is not a LeadSquared user go to "Not a user" (IVR, bots). Both are shown in totals but **never ranked**. |
 | P13 | Ranking eligibility | A team is ranked only if it has **≥ 3 callers** and **≥ 25 real conversations** (P22). Smaller teams appear in an appendix line only. |
 | P14 | Bots | Automated welcome, reminder or webinar agents are excluded from every caller and team figure. |
@@ -46,6 +47,8 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 | P23 | Leads reached | Distinct `lead_id` with at least one real conversation. |
 | P24 | Talk minutes | Sum of `duration` of all answered calls ÷ 60, rounded. |
 | P25 | Callers | Distinct callers with at least one outbound call. |
+| P23a | Calls to enrolments | Across all calls of the day (including Unassigned and Not a user): calls, answered calls (inbound and outbound), real conversations, leads reached, credited enrollments, credited ÷ leads reached, and how many credited leads are among the leads reached (credit follows any answered call, P28, so a lead can enrol after a call shorter than 2 minutes). Descriptive only. |
+| P24a | Calls by hour | Per IST hour, from the first to the last hour with calls (an empty hour between them shows 0 and "–"): dials, answered dials and their share, real conversations and inbound calls. The best and worst answer-rate hours are named only among hours with at least 2% of the day's dials. The hour table is drawn in blocks of 12 hours. |
 | P26 | Not allowed | "Connected" defined by lead stage, lead edits or owner counts. These measure CRM activity, not calling. |
 
 ## 5. Conversion metrics (from S4)
@@ -57,6 +60,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 | P29a | Conversion rate | Credited enrollments ÷ leads reached (P23), as a percentage with 1 decimal. **This is the primary ranking metric.** |
 | P29b | Same-day enrollments by owner | Enrollments with timestamp on the target day, grouped by the lead owner's team. Context column only. |
 | P29c | Warm-lead flag | Teams that mainly call bootcamp registrants or post-enrolment leads (currently Elite Changemakers and DSV teams) are marked "warm leads" in the table. They stay ranked, but the flag must be visible. |
+| P29d | Enrollments by day | Enrollments in the conversion window by IST day, split into credited (P28) and not credited. |
 
 ## 6. Zipteams quality metrics (from S3)
 
@@ -86,18 +90,22 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 |---|---|---|
 | P50 | Team ranking | Sort eligible teams (P13) by credited enrollments (P28), then by conversion rate (P29a), then by real conversations. |
 | P51 | Best team | The rank-1 team. Name a runner-up and the best non-warm front-line team separately. |
-| P52 | Caller recognition | Up to 9 callers: sorted by credited enrollments, then real conversations. Include the highest-volume caller with ≤ 1 enrollment as a coaching case. |
-| P53 | Coaching assets | Callers with ≥ 15 Zipteams notes, sorted by probing + pitch + objection. List up to 4. |
+| P52 | Caller recognition | Up to 9 callers: 8 sorted by credited enrollments, then real conversations, then talk minutes, then name, plus one coaching case: the caller with the most real conversations (then talk minutes, then name) among callers with ≤ 1 credited enrollment and ≥ 1 real conversation, team not Unassigned, no dialer issue (P52b) and not already recognised. |
+| P52a | Callers who need support | Up to 5 callers chosen like the P52 coaching case, which comes first. The note under them is generated from their figures: their real conversations and enrollments, any of them with most of their long calls flagged (P71), and how many more callers tie with the last one listed. |
+| P52b | Dialer issue | A caller with 20+ dials (a working day) of which 50%+ ended in `CallFailure` (analytics/definitions.py). Listed so the dialer is fixed before the caller is judged; never a lagging caller. |
+| P53 | Coaching assets | Callers with ≥ 15 Zipteams notes, sorted by probing + pitch + objection, then name. List up to 4, headed "Good questioning and explaining"; the note names any with no credited enrollment (their calls teach questioning, not closing) and any also in P52a. |
 
 ## 9. Output format
 
 | ID | Parameter | Fixed value |
 |---|---|---|
-| P60 | File | PDF, A4 portrait, **exactly 1–2 pages**, saved as `/mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf` |
-| P61 | Rendering | HTML rendered by headless Chromium (`--print-to-pdf --no-pdf-header-footer`), as in `scripts/build_plan_pdf.py`. Check the page count before delivering. |
-| P62 | Sections, in order | **Page 1, readable at a glance:** title with the weekday and date · 4 KPI tiles (calls, answered, Zipteams-scored calls, credited enrollments) · verdict box · 1. Teams ranked (conversion bar, enrolled, real convs) · 2. Callers to recognise (P52, incl. the coaching case) · 3. Do next (top three actions). **Page 2:** 4. Team scorecard (P63) · 5. Why the top teams won · 6. Where other teams lost revenue · 7. Call integrity (P74) · Method and limits with the validation summary |
-| P63 | Scorecard columns | Team, Callers, Dials, Answer %, Real convs, Talk min, Enrolled (credited), Conversion %, Enrolled same day (owner), Probing, Pitch, Objection, High/mod intent |
-| P64 | Required footnotes | The window (P3), the enrollment and credit definitions (P27, P28), the Zipteams coverage gap (P45), the team-mapping rule and the number of callers in more than one group (P11), the warm-lead flag (P29c), the validation summary, and the parameter version. |
+| P60 | File | PDF, A4 portrait, **no page limit**: a one-page summary, then as many pages as the explained sections and the caller table need. Saved as `/mnt/project-files/reports/team_calling_report_{TARGET_DATE}.pdf`. |
+| P61 | Rendering | HTML rendered by headless Chromium (`--print-to-pdf --no-pdf-header-footer`), as in `scripts/build_plan_pdf.py`, with "Page N of M" and the day and version in each page's footer. The summary is also rendered alone and must come to exactly 1 page; if it doesn't, page 1 draws fewer ranked teams (15, then 12, 10, 8, 5, 3; the rest stay in section 3). Page 1 cuts team names after 32 characters; section 3 has them in full. If `meta.json` carries a `sample` note (a layout sample built from part of a day), page 1 shows it in a banner and every footer reads "SAMPLE, partial data"; a normal run never sets it. |
+| P62 | Sections, in order | **Page 1, the summary, readable in a minute:** title with the weekday and date, the conversion window and when the data was read · the day as 5 connected steps (P23a: calls, answered, real conversations, leads reached, enrolled) · "what happened" (best team, runner-up, best front-line team, busiest teams, the biggest gap or tied gaps in the P33 sample, with call counts) · Teams ranked (conversion bar, enrolled, real conversations) · Callers to recognise (P52, incl. the coaching case) · What to do next (fix the phones first when any caller has a dialer issue, then the payment step, a full pitch and the coaching case). **Then:** 1. How to read this report (every term in plain words, contents) · 2. From calls to enrolments (P23a, P29d) · 3. Teams compared (P63, teams not ranked) · 4. Weak spots of the day (what happened, what to do) · 5. Team by team (a card per ranked team: figures, sentences against all teams, one suggested next step) · 6. Callers (recognise, need support P52a, dialer issue P52b, calls to learn from P53) · 7. What the converting calls had in common (P33 chart) · 8. Call quality scores (Zipteams, P41–P45) · 9. When the calls happened (P24a charts and table) · 10. Calls to review (P74) · 11. How this report was made and checked (method and every validation check) · Appendix: every caller, by team. |
+| P62a | Plain language | Written for people who are not analysts: every term is explained in section 1; sections 2, 3, 6, 7, 8 and 9 carry a "What this means" note generated from the figures, and sections 4 and 5 say what to do for each finding and each team; conversion is written as enrolments per 100 leads reached, never as a share of them; every sentence is generated from the figures and handles ties, single teams, zero and missing values; every chart's numbers are also on its marks or in a table, colour is never the only signal (labels, legends), "–" means no data, and the PDF never shows customer names or numbers. |
+| P63 | Scorecard columns | Section 3: Team, Callers, Dials, Answer rate, Real conversations, Leads reached, Talk minutes, Enrolled (credited), Conversion, Enrolled on the day (owner's team, P29b). Section 8: calls checked, Asked about needs (probing), Explained the course fully (pitch), Answered concerns well (objection handling), Lead's interest high or moderate (intent); ranked teams first, then the others under a divider. |
+| P63a | Low answer rate | A team's answer rate is called low when it is below 70% of the day's answer rate (all dials; the same 70% as CLAUDE.md's lagging caller). Used only in the words of section 4 and the team cards, never in the ranking. |
+| P64 | Required footnotes | Section 11 states the window (P3), the enrollment and credit definitions (P27, P28), the Zipteams coverage gap (P45), the team-mapping rule and the number of callers in more than one group (P11), the warm-lead flag (P29c), the validation summary with every check's result, and the parameter version. Section 1 explains the window, the enrollment and credit definitions, the warm-lead flag and any calling-software group (P11a) in plain words. |
 | P65 | Weekday | Compute it from the date; never write it from memory. |
 | P66 | Repo changes | None during a run. Data goes to the git-ignored `data/`. Nothing is committed or pushed without the owner's approval. The run itself is one command: `python -m analytics.team_performance {TARGET_DATE}`. |
 
@@ -106,9 +114,9 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 1. `python -m integrations.leadsquared check` passed and the three env vars were set.
 2. The S1 call count is printed and equals the sum of team dials and inbound calls, including Unassigned and Not a user.
 3. Zipteams notes attributed / total is printed, and dropped notes are < 5%.
-4. Every number in the verdict appears in the scorecard.
-5. The PDF has 1 or 2 pages.
-6. The parameter version is printed in the Method section.
+4. Every team figure quoted in page 1's "what happened" appears in the team tables (section 3).
+5. The summary, rendered alone, fits on exactly 1 page (P61).
+6. The parameter version ("Parameters v1.4") is printed in section 11, How this report was made and checked, which lists every check with its result.
 7. No duplicate call or Zipteams activity IDs.
 8. Every call and Zipteams note falls inside the target IST day, and no call has a start time that can't be read.
 9. Calls from callers who are not LeadSquared users stay under 5%.
@@ -117,6 +125,7 @@ The prompt [PromptToExecute.xml](PromptToExecute.xml) carries the same values in
 12. Totals reconcile: fetched = counted + other-day + unreadable-time + bot calls; calls = team dials + inbound; credited = sum of team credited = sum of their callers; Zipteams attributed + dropped = total.
 13. A seeded sample of 10 credited enrollments is re-read from LeadSquared stage history and confirmed as first-ever "Course Enrolled" in the window.
 14. Call-integrity counts reconcile (flagged and checked calls never exceed eligible calls; caller totals add up) and carry no lead details.
+15. Every P62 section is in the report, in order.
 
 ## 11. Call integrity (v1.2; every flag means "needs review", never proof)
 
@@ -131,4 +140,4 @@ Eligible calls: answered calls of 2+ minutes (P20) by LeadSquared users. Thresho
 | P71 | Ranking | Per caller: eligible calls, flagged calls, flagged share, and transcripts checked. Only callers with 10+ eligible calls are ranked, by flagged share. |
 | P72 | Transcript signals | No content: under 30 words. Thin: under 60 words a minute of LeadSquared duration, about 40% of the 5 Oct median. Recorded message: IVR, voicemail, switched-off or hold text in the first 40 words. Loop: one 3-word phrase making up 15%+ of the words. The transcript has no speaker labels or timestamps, so the customer's share of the talk and silences can't be measured; words a minute stands in for silence. |
 | P73 | Transcript sample | Within the API limits (90 numbers, 9 requests a run, and its own run: `python -m analytics.call_integrity TARGET_DATE [--limit N]`). The sample is one third calls already flagged by P68–P70, one third each caller's longest call, and the rest 120–149 s calls. A transcript matches the LeadSquared call on the same number that started closest to it, within 10 minutes. Some API start times are off by exactly 5 h 30 min (wrong timezone label), so that shift also counts when the two durations agree within 10%. |
-| P74 | Output | The report's page 2 gets a "7. Call integrity" block: flagged counts by signal, transcript coverage, and up to 5 ranked callers with flagged/eligible calls. Per-call evidence (call ID, caller, duration, words, words a minute, flags) goes to `data/report_{TARGET_DATE}/integrity_calls.csv`. No lead names or numbers appear anywhere in the output. |
+| P74 | Output | The report's section 10 "Calls to review" shows flagged counts by signal, transcript coverage, and up to 5 ranked callers with flagged/eligible calls. Per-call evidence (call ID, caller, duration, words, words a minute, flags) goes to `data/report_{TARGET_DATE}/integrity_calls.csv`. No lead names or numbers appear anywhere in the output. |

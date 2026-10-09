@@ -1,10 +1,11 @@
-"""Daily team and caller performance report, Parameters v1.0 (reports/report_parameters.md).
+"""Daily team and caller performance report (docs/report/report_parameters.md).
 
 Which teams and callers turned potential clients into first-time enrolments on one IST day:
 team scorecard, ranking, callers to recognise, coaching cases and Zipteams quality, plus
-close-behaviour markers from a transcript sample. A separate plan tracker measures the revenue
-plan's levers (payment step, full pitch, same-day callback of missed inbound calls) per team and
-caller; it never changes the v1.0 figures.
+close-behaviour markers from a transcript sample. The PDF opens with a one-page summary and then
+explains every figure in plain language with charts (analytics/team_performance_html.py). A separate
+plan tracker measures the revenue plan's levers (payment step, full pitch, same-day callback of
+missed inbound calls) per team and caller; it never changes the report's figures.
 
     python -m analytics.team_performance 2026-10-05 [--fetch] [--no-transcripts] [--as-of "2026-10-08 13:00"] [--out reports]
 """
@@ -25,18 +26,21 @@ from collections import Counter, defaultdict
 from datetime import datetime, timedelta
 
 from analytics.call_markers import MARKERS, PAYMENT_STEP, marker_rates
-from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS
+from analytics.definitions import DIALER_FAILURE_SHARE, ENROLLED, REAL_CONVERSATION_SECS, WORKING_DAY_DIALS
 from analytics.team_report import IST, utc
 from analytics.zip_calls import match_notes, zip_analysis
 
-VERSION = "1.3"
+VERSION = "1.4"
 REAL_SECS = REAL_CONVERSATION_SECS
 LONG_NON_CONVERTED_SECS = 300
 BOT = re.compile(r"\b(system|bot|welcome|reminder|webinar|ivr)\b", re.I)
 WARM = {"Elite Changemakers", "DSV - UK (Aditya)", "DSV-Domestic-(Shivam Sharma)"}
+PHONE_GROUPS = {"Acefone Users", "Mcube Users"}  # calling-software groups LeadSquared can list first (P11a)
 UNRANKED = ("Unassigned", "Not a user")
 MIN_CALLERS, MIN_REAL = 3, 25
 RECOGNISE, ASSETS, ASSET_MIN_NOTES = 8, 4, 15  # 8 recognised + 1 coaching case = P52's "up to 9"
+SUPPORT = 5  # P52a: callers with the most real conversations and at most 1 enrolment
+LOW_ANSWER_SHARE = 0.7  # P63a: a team's answer rate is called low below 70% of the day's (CLAUDE.md's lagging share)
 SAMPLE_CONVERTED, SAMPLE_PER_TEAM, SAMPLE_TEAMS, SAMPLE_SEED = 40, 10, 5, 5
 SHORT = {"US Bookkeeping Accounting-Sana": "US Bookkeeping (Sana)", "US Bookkeeping Accounting-Deepanshi": "US Bookkeeping (Deepanshi)",
          "US Accounting -Closures - Deepanshi": "US Acc. Closures (Deepanshi)", "US accounting counselors - Sana": "US Acc. Counselors (Sana)",
@@ -150,8 +154,56 @@ def scorecard(calls: list[dict], zs: list[dict], credited: int) -> dict:
             "real": sum(c["real"] for c in calls), "reached": len(reached),
             "talk_min": round(sum(c.get("duration") or 0 for c in calls if c["ans"]) / 60),
             "credited": credited, "conv_pct": round(100 * credited / len(reached), 1) if reached else 0.0,
+            "failed_pct": round(100 * sum(c.get("status") == "CallFailure" for c in out) / len(out), 1) if out else None,
             "zip_n": len(zs), "probe": _mean(zs, "probe"), "pitch": _mean(zs, "pitch"), "obj": _mean(zs, "obj"),
             "hi_mod_pct": round(100 * sum(z["intent"] in ("HIGH", "MODERATE") for z in rated) / len(rated)) if rated else None}
+
+
+def funnel(calls: list[dict], E: list[dict]) -> dict:
+    """P23a: the day's calls to enrolments, across every team (including Unassigned and Not a user).
+    ``credited_reached`` counts the credited leads that are also leads reached: credit follows any answered
+    call, so a lead can enrol after a call shorter than 2 minutes."""
+    reached = {c["lead_id"] for c in calls if c["real"]}
+    credited = [e["lead"] for e in E if e["team"]]
+    return {"calls": len(calls), "answered": sum(c["ans"] for c in calls), "real": sum(c["real"] for c in calls),
+            "reached": len(reached), "credited": len(credited), "credited_reached": sum(l in reached for l in credited),
+            "conv_pct": round(100 * len(credited) / len(reached), 1) if reached else 0.0}
+
+
+def by_hour(calls: list[dict]) -> list[dict]:
+    """P24a: dials, answered dials, inbound calls and real conversations per IST hour, from the first to the
+    last hour with calls (an empty hour between them shows 0 and no answer rate)."""
+    H = defaultdict(Counter)
+    for c in calls:
+        h = H[c["t"].astimezone(IST).hour]
+        if c["direction"] == "outbound":
+            h["dials"] += 1
+            h["answered"] += c["ans"]
+        else:
+            h["inbound"] += 1
+        h["real"] += c["real"]
+    return [{"hour": h, "dials": H[h]["dials"], "answered": H[h]["answered"], "inbound": H[h]["inbound"], "real": H[h]["real"],
+             "answer_pct": round(100 * H[h]["answered"] / H[h]["dials"], 1) if H[h]["dials"] else None}
+            for h in range(min(H), max(H) + 1)] if H else []
+
+
+def enrol_days(E: list[dict], d0: datetime, cw_end: datetime) -> list[dict]:
+    """P29d: enrolments in the conversion window by IST day, credited to a caller or not."""
+    days, d = [], d0.astimezone(IST).date()
+    while d <= cw_end.astimezone(IST).date():
+        k = d.isoformat()
+        days.append({"day": k, "credited": sum(1 for e in E if e["day"] == k and e["team"]),
+                     "not_credited": sum(1 for e in E if e["day"] == k and not e["team"])})
+        d += timedelta(days=1)
+    return days
+
+
+def _ties(ordered: list[dict], k: int) -> int:
+    """Callers left out of a top-k list with the same enrolments and real conversations as its last entry."""
+    if len(ordered) <= k or not k:
+        return 0
+    last = (ordered[k - 1]["credited"], ordered[k - 1]["real"])
+    return sum(1 for p in ordered[k:] if (p["credited"], p["real"]) == last)
 
 
 def analyse(run: dict, as_of: datetime | None = None) -> dict:
@@ -176,22 +228,38 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
         ZP[(z["team"], z["name"])].append(z)
     teams = {t: {**scorecard(r, ZT[t], cred_t[t]), "same_day_owner": own_same[t], "warm": t in WARM} for t, r in T.items()}
     people = [{"team": k[0], "name": k[1], **scorecard(r, ZP[k], cred_p[k])} for k, r in P.items() if k[0] != "Not a user"]
+    for p in people:  # a working day of dials, half or more failed: the dialer, not the caller (CLAUDE.md)
+        p["dialer_issue"] = p["dials"] >= WORKING_DAY_DIALS and (p["failed_pct"] or 0) >= 100 * DIALER_FAILURE_SHARE
+    for t, s in teams.items():
+        s["dialer_issue_callers"] = sum(p["dialer_issue"] for p in people if p["team"] == t)
 
     elig = [t for t, s in teams.items() if t not in UNRANKED and s["callers"] >= MIN_CALLERS and s["real"] >= MIN_REAL]
     rank = sorted(elig, key=lambda t: (-teams[t]["credited"], -teams[t]["conv_pct"], -teams[t]["real"]))
     front = [t for t in rank if not teams[t]["warm"]]
-    rec = sorted([p for p in people if p["credited"] > 0], key=lambda p: (-p["credited"], -p["real"]))[:RECOGNISE]
-    cases = [p for p in people if p["credited"] <= 1 and p["team"] != "Unassigned"]
+    tie = lambda p: (-p["talk_min"], p["name"])  # noqa: E731 - P52: ties go to more talk minutes, then the name
+    ranked_people = sorted((p for p in people if p["credited"] > 0), key=lambda p: (-p["credited"], -p["real"], *tie(p)))
+    rec = ranked_people[:RECOGNISE]
+    # P52/P52a: the dialer is fixed before the caller is judged (P52b), and a recognised caller is not also coached
+    rec_ids = {id(p) for p in rec}
+    cases = sorted((p for p in people if p["credited"] <= 1 and p["team"] != "Unassigned" and p["real"]
+                    and not p["dialer_issue"] and id(p) not in rec_ids), key=lambda p: (-p["real"], *tie(p)))
+    support = cases[:SUPPORT]
+    groups = {_name(u): [g.strip() for g in u.get("MemberOfGroups") or []] for u in run["users"]}
+    phone = {t: Counter(next((g for g in groups.get(p["name"], [])[1:] if g not in PHONE_GROUPS), "no other group")
+                        for p in people if p["team"] == t and p["dials"]) for t in teams if t in PHONE_GROUPS}
     assets = sorted([p for p in people if p["zip_n"] >= ASSET_MIN_NOTES],
-                    key=lambda p: -((p["probe"] or 0) + (p["pitch"] or 0) + (p["obj"] or 0)))[:ASSETS]
+                    key=lambda p: (-((p["probe"] or 0) + (p["pitch"] or 0) + (p["obj"] or 0)), p["name"]))[:ASSETS]
     out_calls = [c for c in calls if c["direction"] == "outbound"]
     return {
         "version": VERSION, "date": meta.get("date") or d0.strftime("%Y-%m-%d"),
         "window": {"d0": d0.isoformat(), "cw_end": cw_end.isoformat(), "fetched": meta.get("fetched")},
         "teams": teams, "people": people, "rank": rank, "runner_up": rank[1] if len(rank) > 1 else None,
         "best_front_line": front[0] if front else None,
-        "rec": rec, "coach_case": max(cases, key=lambda p: p["real"]) if cases else None, "assets": assets,
-        "enrollments": E,
+        "rec": rec, "coach_case": cases[0] if cases else None, "support": support, "assets": assets,
+        "ties_left_out": {"rec": _ties(ranked_people, RECOGNISE), "support": _ties(cases, SUPPORT)},
+        "phone_groups": {t: dict(c.most_common()) for t, c in phone.items()},
+        "enrollments": E, "sample": meta.get("sample"),
+        "funnel": funnel(calls, E), "hours": by_hour(calls), "enrol_days": enrol_days(E, d0, cw_end),
         "totals": {"calls_raw": len(run["calls"]), "outside_window_excluded": outside, "unreadable_time_excluded": bad_time,
                    "late_edits_recovered": late, "edit_margin_days": meta.get("edit_margin_days", 0), "bots_excluded": bots, "calls": len(calls), "outbound": len(out_calls),
                    "inbound": len(calls) - len(out_calls), "answered_out": sum(c["ans"] for c in out_calls),
@@ -249,7 +317,8 @@ def fetch_transcripts(A: dict, out_dir: str) -> dict:
     os.makedirs(out_dir, exist_ok=True)
     json.dump(rows, open(os.path.join(out_dir, "transcripts.json"), "w"))
     return summarise_transcripts(rows, {"requests": tc.requests_made, "failed_chunks": failed, "numbers": len(nums),
-                                        "sample_conv": len(conv), "sample_non": len(non), "top5": top, "time_shifts": shifts})
+                                        "sample_conv": len(conv), "sample_non": len(non), "per_team": SAMPLE_PER_TEAM,
+                                        "top5": top, "time_shifts": shifts})
 
 
 def pick_transcripts(api_calls: list, calls: list[dict], meta: dict[str, dict]) -> tuple[list[dict], dict[str, int]]:
@@ -279,6 +348,7 @@ def summarise_transcripts(rows: list[dict], info: dict) -> dict:
     for flag, key in ((True, "converted"), (False, "not_converted")):
         g = [r for r in rows if r["converted"] == flag]
         out[key + "_n"] = len(g)
+        out[key + "_median_min"] = round(statistics.median(r["duration"] or 0 for r in g) / 60) if g else None
         for k, v in marker_rates([r["transcript"] for r in g]).items():
             out["markers"][k][key] = v
     by_team = defaultdict(list)
@@ -386,6 +456,18 @@ def render_pdf(html_path: str, pdf_path: str) -> int | None:
     return len(re.findall(rb"/Type\s*/Page[^s]", open(pdf_path, "rb").read()))
 
 
+def fit_summary(A: dict, tx: dict | None, html_path: str, pdf_path: str, render=render_pdf) -> tuple[int, int | None]:
+    """P61: page 1 rendered alone, drawing fewer ranked teams until it prints on one page (the rest stay in
+    section 3). Returns (ranked teams drawn, pages the summary took at that size)."""
+    from analytics import team_performance_html as page
+
+    for k in page.PAGE1_TEAMS:
+        open(html_path, "w", encoding="utf-8").write(page.report_html(A, tx, summary_only=True, page1_teams=k)[0])
+        if (pages := render(html_path, pdf_path)) == 1:
+            break
+    return k, pages
+
+
 def main():
     from analytics import report_validation as gate
     from analytics import team_performance_html as page
@@ -413,7 +495,7 @@ def main():
     # ---- validation gate: every check must pass before anything is rendered
     from integrations.leadsquared import LeadSquaredClient
     ls = LeadSquaredClient()
-    checks = [{"check": "LeadSquared preflight", "ok": bool(ls.get_lead_metadata()), "detail": "API reachable with the configured keys"}]
+    checks = [{"check": "LeadSquared preflight", "ok": bool(ls.get_lead_metadata()), "detail": "connected to LeadSquared"}]
     checks += gate.data_checks(run, A)
     from analytics import call_integrity
     ip = os.path.join(data, "integrity.json")  # transcript signals come from `python -m analytics.call_integrity`
@@ -431,9 +513,23 @@ def main():
             tx = fetch_transcripts(A, data)
             json.dump(tx, open(tx_path, "w"), indent=1)
     log_path = os.path.join(data, "validation.json")
-    doc, nums = page.report_html(A, tx, gate.summary_line(len(checks) + 3, log_path))  # + verdict, version, page count below
-    checks.append(gate.verdict_numbers_check(nums, page.scorecard_cells(A)))
-    checks.append({"check": f"'Parameters v{VERSION}' in the Method section", "ok": f"Parameters v{VERSION}." in doc, "detail": ""})
+    k, summary_pages = fit_summary(A, tx, os.path.join(data, "report_summary.html"), os.path.join(data, "report_summary.pdf"))
+    checks.append({"check": "The summary fits on page 1", "ok": summary_pages == 1,
+                   "detail": f"page 1 alone prints on {summary_pages} page(s), drawing {min(k, len(A['rank']))} of "
+                             f"{len(A['rank'])} ranked teams"})
+    n_checks = len(checks) + 3  # + the three checks on the finished report below
+
+    def build(printed: list[dict]) -> tuple[str, list[dict]]:
+        doc, nums = page.report_html(A, tx, gate.summary_line(n_checks, log_path), printed, page1_teams=k)
+        sec11 = doc[doc.find(f">{page.SECTIONS[13]}</h"):] if f">{page.SECTIONS[13]}</h" in doc else ""
+        return doc, [gate.verdict_numbers_check(nums, page.scorecard_cells(A)),
+                     {"check": f"'Parameters v{VERSION}' printed in section 11", "ok": f"Parameters v{VERSION}." in sec11,
+                      "detail": "the version of these rules is printed with the checks"},
+                     gate.sections_check(page.sections_present(doc), len(page.SECTIONS))]
+
+    doc, final = build([dict(c) for c in checks])
+    doc, final = build([dict(c) for c in checks + final])  # section 11 prints these three checks' own results too
+    checks += final
     t = A["totals"]
     print(f"Parameters v{VERSION} · {A['date']} · conversion window to {A['window']['cw_end']}")
     print(f"S1 calls {t['calls']:,} ({t['bots_excluded']} bot calls excluded) · credited enrolments {t['enroll_credited']} "
@@ -454,9 +550,6 @@ def main():
     open(html_path, "w", encoding="utf-8").write(doc)
     draft = os.path.join(data, "report_draft.pdf")
     pages = render_pdf(html_path, draft)
-    checks.append({"check": "PDF has 1 or 2 pages", "ok": pages in (1, 2), "detail": f"{pages} page(s)"})
-    if not checks[-1]["ok"]:
-        finish(False)
     finish(True)
     os.makedirs(a.out, exist_ok=True)
     pdf = os.path.join(a.out, a.name or f"team_calling_report_{a.date}.pdf")
@@ -474,7 +567,7 @@ def main():
     for i, team in enumerate(A["rank"], 1):
         s = A["teams"][team]
         print(f"{i:2}. {short(team)[:30]:30} credited {s['credited']:3}  conv {s['conv_pct']:5}%  real {s['real']:4}  warm={s['warm']}")
-    print(f"report: {pdf}\nplan tracker: {tr_pdf}\nvalidation log: {log_path}")
+    print(f"report: {pdf} ({pages} pages)\nplan tracker: {tr_pdf}\nvalidation log: {log_path}")
 
 
 if __name__ == "__main__":
