@@ -58,9 +58,11 @@ export CLOUDFLARE_ACCOUNT_ID=...           # Workers & Pages → Account details
 npx wrangler whoami                        # confirm the account name
 ```
 
-**2. Config.** In `wrangler.jsonc`, set `account_id` to the account ID (not a secret; it stops a
-deploy landing in another account). If the account has no `sales_dashboard` database yet, run
-`npx wrangler d1 create sales_dashboard` and put the printed ID in `database_id`. Commit both.
+**2. Config.** `wrangler.jsonc` pins `account_id` (not a secret; it stops a deploy landing in
+another account) and `name`, which must match the Worker's name in the dashboard
+(`sales-automation-01`) or Workers Builds refuses to deploy. If the account has no
+`sales_dashboard` database yet, run `npx wrangler d1 create sales_dashboard` and put the printed
+ID in `database_id`. Commit it.
 
 **3. Secrets**, piped from environment variables so they never appear on screen or in history:
 
@@ -71,7 +73,7 @@ printf '%s' "$RUN_TOKEN"              | npx wrangler secret put RUN_TOKEN   # an
 ```
 
 **4. Migrate and deploy:** `npm run deploy:prod` (applies D1 migrations, then deploys). It prints
-`https://sales-dashboard.<subdomain>.workers.dev`. If Wrangler says the account has no workers.dev
+`https://sales-automation-01.<subdomain>.workers.dev`. If Wrangler says the account has no workers.dev
 subdomain, set one first: Workers & Pages → Your subdomain.
 
 Until step 5 is done, the page loads but the API answers *"Dashboard not yet protected: finish
@@ -80,7 +82,7 @@ Cloudflare Access setup"*. That is deliberate: no data is served without Access.
 **5. Cloudflare Access (dashboard only, about 5 minutes):**
 1. Zero Trust: create the free team if asked (up to 50 users; it may ask for a card but charges
    nothing on the free plan). Note the team domain, `<team>.cloudflareaccess.com`.
-2. Workers & Pages → sales-dashboard → Settings → Domains & Routes → workers.dev → enable
+2. Workers & Pages → sales-automation-01 → Settings → Domains & Routes → workers.dev → enable
    Cloudflare Access. Edit its policy: Allow → the team leaders' emails or the company email domain.
 3. Zero Trust → Access → Applications → the app → Overview: copy the **AUD tag**.
 4. Put both in `wrangler.jsonc` vars, `ACCESS_TEAM_DOMAIN` and `ACCESS_AUD` (not secrets), commit,
@@ -96,8 +98,9 @@ About 600 rows per day of history; keep each load under the 100,000 rows/day fre
 The script also points the cron at the following midnight, so there is no overlap.
 
 **7. Auto-deploy from GitHub (optional):** Workers & Pages → the Worker → Settings → Builds →
-connect the repo, root directory `dashboard`, deploy command `npm run deploy:prod`, production
-branch `main`. The Builds token also needs D1 Edit (for the migrations). The free plan includes
+connect the repo, **root directory `dashboard`** (the repo root has no Wrangler config, so a build
+there fails with "Could not detect a directory containing static files"), build command empty,
+deploy command `npm run deploy:prod`, production branch `main`. The Builds token also needs D1 Edit (for the migrations). The free plan includes
 3,000 build minutes a month.
 
 **Check it:** `GET /` → the page; `GET /api/health` → `ok`; `GET /api/summary` without a login →
