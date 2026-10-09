@@ -3,7 +3,8 @@
 Three Zoom apps are configured; pick one by environment prefix:
 
     ZOOM_ACCOUNT_ID / ZOOM_CLIENT_ID / ZOOM_CLIENT_SECRET                      main account (default)
-    ZOOM_MKT_ACCOUNT_ID / ZOOM_MKT_CLIENT_ID / ZOOM_MKT_CLIENT_SECRET          marketing account
+    ZOOM_MKT_ACCOUNT_ID / ZOOM_MKT_CLIENT_ID / ZOOM_MKT_CLIENT_SECRET          marketing account; a free Zoom
+                                     plan, so Zoom refuses its meeting reports ("Only available for Paid")
     ZOOM_WEBINAR_ACCOUNT_ID / ZOOM_WEBINAR_CLIENT_ID / ZOOM_WEBINAR_CLIENT_SECRET
                                      webinars@ account; no report scope yet, so attendance reports fail
 

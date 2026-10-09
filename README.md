@@ -144,7 +144,8 @@ PYTHONPATH=. .venv/bin/python scripts/fetch_zoom_attendance.py main host@lawsikh
 
 Notes: Meta budgets come back in paise and insights spend in rupees; an ACTIVE Meta campaign
 may not be delivering. Zoom attendance reports need the `report:read:admin` scope, which the
-webinar app does not have yet. TimePay `/logs` returns 10 rows a page, so read counts with
+webinar app does not have yet, and a paid Zoom plan, which the marketing account is not on.
+Use the main account for attendance. TimePay `/logs` returns 10 rows a page, so read counts with
 `count_logs`. The TimePay client has no call, WhatsApp or SMS methods on purpose: those reach
 real people and need a go-ahead for each run.
 
