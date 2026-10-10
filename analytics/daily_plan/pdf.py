@@ -127,7 +127,7 @@ def html_doc(R: dict, C: dict) -> str:
                     if r.get("missed"): chips.append(f"<span class='chip bad'>Missed call {e(r['missed_last'])}</span>")
                     if r.get("callback_requested"): chips.append(f"<span class='chip warn'>{e(cut(r['callback_requested'],40))}</span>")
                     if r.get("whatsapp_only"): chips.append("<span class='chip warn'>WhatsApp only</span>")
-                    if r.get("today"): chips.append(f"<span class='chip good'>{e(cut(r["today"],60))}</span>")
+                    if r.get("today"): chips.append(f"<span class='chip good'>{e(cut(r['today'],60))}</span>")
                     H.append(f"<tr><td>{i}</td><td><b>{e(r.get('name') or 'Unnamed lead')}</b><br><span class='ph'>☎ +91-{e(r.get('phone'))}</span><div class='sub'>{e(cut(r.get('course'),70))}<br>Stage: {e(r.get('stage'))} · {r['chance']}% · Best: {e(cut(r.get('best_time'),40))}<br>Decides: {e(cut(r.get('who_decides') or '?',40))} · Pays: {e(cut(r.get('how_pay') or '?',50))}</div>{''.join(chips)}</td>"
                              f"<td>{e(cut(r.get('why'),420))}{('<br><i>Blocker: ' + e(cut(r.get('real_blocker'),120)) + '</i>') if r.get('real_blocker') else ''}</td><td>{e(cut(r.get('opening_line'),260))}</td><td>{e(cut(r.get('exact_ask'),300))}<br><span class='sub'>Prepare: {e(cut(r.get('objection'),200))}</span></td></tr>")
                 H.append("</table>")

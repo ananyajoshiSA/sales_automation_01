@@ -140,3 +140,19 @@ def test_transcript_runs_stay_within_limits_and_resume(tmp_path):
     assert made == [90, 90, 20] and pauses == [5, 5]
     transcripts.fetch(nums, str(tmp_path), pause=5, client_factory=FakeClient, sleep=pauses.append)
     assert made == [90, 90, 20]
+
+
+def test_pipeline_runs_on_python_311():
+    """Scheduled cloud sessions start on python3 = 3.11, which rejects 3.12-only f-string quoting."""
+    import pathlib
+    import shutil
+    import subprocess
+
+    import pytest
+
+    py = shutil.which("python3.11")
+    if not py:
+        pytest.skip("python3.11 not installed")
+    files = [str(p) for p in pathlib.Path("analytics/daily_plan").glob("*.py")]
+    r = subprocess.run([py, "-m", "py_compile", *files], capture_output=True, text=True)
+    assert r.returncode == 0, r.stderr
