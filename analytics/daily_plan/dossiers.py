@@ -47,10 +47,10 @@ def build(snap: Snap, day: str, lead_ids: set[str], prev_plan: dict, tx: dict, o
              f"Next follow-up field: {l.get('mx_Next_follow_up_date') or l.get('mx_Follow_up_date_and_time') or '-'} (UTC) | "
              f"Zip intent field: {l.get('mx_Zip_Intent_Type') or '-'}"]
         p = prev_plan.get(lid)
-        L.append(f"YESTERDAY'S PLAN: tier {p['tier']} on {p['owner']}'s sheet, chance {p.get('chance')}%"
+        L.append(f"PLAN FOR {day}: tier {p['tier']} on {p['owner']}'s sheet, chance {p.get('chance')}%"
                  + (" (marked Course Enrolled, payment to verify)" if p.get("verify") else "")
                  + (f", on the team leader's priority list (check by {p.get('check_by')})" if p.get("group") is not None else "")
-                 if p else "YESTERDAY'S PLAN: not on the sheet")
+                 if p else f"PLAN FOR {day}: not on the sheet")
         L.append("CALLS (IST):")
         for c in cs:
             note = (c.get("call_notes") or "").strip()

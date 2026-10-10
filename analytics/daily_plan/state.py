@@ -33,16 +33,25 @@ def to_state(date: str, by_owner: dict, priority: list[dict]) -> dict:
     return {"date": date, "version": 1, "leads": leads}
 
 
-def save(state: dict, directory: str) -> str:
+def save(state: dict, directory: str, prefix: str = "") -> str:
     os.makedirs(directory, exist_ok=True)
-    path = os.path.join(directory, f"{state['date']}.json")
+    path = os.path.join(directory, f"{prefix}{state['date']}.json")
     json.dump(state, open(path, "w"), separators=(",", ":"), sort_keys=True)
     return path
 
 
-def load(directory: str, date: str) -> dict | None:
-    path = os.path.join(directory, f"{date}.json")
+def load(directory: str, date: str, prefix: str = "") -> dict | None:
+    path = os.path.join(directory, f"{prefix}{date}.json")
     return json.load(open(path)) if os.path.exists(path) else None
+
+
+def latest_before(directory: str, date: str, prefix: str) -> dict | None:
+    """The newest saved state named ``<prefix><day>.json`` with day < ``date``."""
+    import glob
+
+    days = sorted(os.path.basename(f)[len(prefix):-5] for f in glob.glob(os.path.join(directory, f"{prefix}*.json")))
+    days = [d for d in days if d < date]
+    return load(directory, days[-1], prefix) if days else None
 
 
 def resolve(state: dict | None, lead_ids) -> dict:

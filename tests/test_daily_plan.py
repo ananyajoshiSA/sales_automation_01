@@ -174,3 +174,30 @@ def test_pipeline_runs_on_python_311():
     files = [str(p) for p in pathlib.Path("analytics/daily_plan").glob("*.py")]
     r = subprocess.run([py, "-m", "py_compile", *files], capture_output=True, text=True)
     assert r.returncode == 0, r.stderr
+
+
+def test_pipeline_horizon_candidates_and_state(tmp_path):
+    from analytics.daily_plan import pipeline
+    assert pipeline.horizon("2026-10-10") == "2026-10-31" and pipeline.horizon("2026-10-29") == "2026-11-30"
+    leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] == "L4" else l for l in LEADS]
+    cs = [call("u1", "L1", "2026-10-10 06:00:00", "Answered", 300), call("u1", "L2", "2026-10-10 06:10:00", "Answered", 40)]
+    s = snap(cs, leads=leads)
+    last_night = {"L3": {"month_chance": 20, "stage": "2"}, "L4": {"month_chance": 30, "stage": "1"}}
+    plan = {"L5": {"tier": "A", "group": 1}, "L6": {"tier": "C", "group": None}}
+    assert pipeline.candidates(s, "2026-10-10", last_night, plan) == {"L1", "L3", "L5"}  # L4 enrolled, L2 too short, L6 nurture
+    reads = [{"lead_id": "L1", "name": "Lead1", "owner": "Asha K", "include": True, "month_chance": 12, "stage_reached": "3 Fee and plan discussed",
+              "expected_window": "12–14 Oct"},
+             {"lead_id": "L3", "name": "Lead3", "owner": "Asha K", "include": True, "month_chance": 30, "stage_reached": "2 Agreed, one blocker",
+              "expected_window": "by 28 Oct"},
+             {"lead_id": "L5", "name": "Lead5", "owner": "Ravi S", "include": False, "month_chance": 0, "exclude_reason": "already enrolled"}]
+    inc = pipeline.included(reads)
+    assert [r["lead_id"] for r in inc] == ["L3", "L1"]
+    S = pipeline.summary(inc, "2026-10-10")
+    assert round(S["expected_low"], 2) == 0.42 and S["weeks"][0][0] == 1 and S["weeks"][2][0] == 1
+    st = pipeline.to_state("2026-10-10", inc)
+    assert "L3" not in json.dumps(st) and "Lead3" not in json.dumps(st)
+    state.save(st, str(tmp_path), "pipeline_")
+    assert state.latest_before(str(tmp_path), "2026-10-11", "pipeline_")["date"] == "2026-10-10"
+    assert state.latest_before(str(tmp_path), "2026-10-10", "pipeline_") is None
+    text = pipeline.brief("by {horizon_short}; {today_long}; {days_left} days", "2026-10-10", "2026-10-31")
+    assert text == "by 31 Oct; Saturday 10 Oct 2026; 21 days"

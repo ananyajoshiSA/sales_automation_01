@@ -10,6 +10,7 @@ Three scheduled Claude Code routines run Monday–Saturday (IST) in fresh cloud 
 | Morning report | 07:15 | ~09:00 | PDF + workbook: review of the previous working day first, then today's plan (team leader's priority list, checks, feedback, caller sheets) |
 | Status 1 | 13:45 | ~14:00 | Short PDF + email: first half against the plan, to-do list for 14:00–17:00 |
 | Status 2 | 16:45 | ~17:00 | Same, to-do list for 17:00–20:30 |
+| Nightly pipeline | 21:20 daily | ~22:00 | PDF + workbook: every lead with a real chance of enrolling by month end, highest chance first, with changes since last night |
 
 Code: `analytics/daily_plan/` (`python -m analytics.daily_plan --help`). Lead PII stays in `data/daily/` and
 `exports/daily/` (git-ignored). Plan state between runs lives in `plan_state/` on the working branch (`PLAN_STATE_BRANCH`, default: the checked-out
@@ -62,6 +63,27 @@ The report covers callers dialling or not, P/A leads tried and reached, every pr
 reached), missed calls not returned, callbacks due or overdue, leads enrolled today, lines
 hiding failures, and the to-do list for the next block. It needs no Claude judgement. If the morning state is missing,
 the report still shows the team numbers and says the plan was not found.
+
+## Nightly pipeline (22:00, every day)
+
+```bash
+D=$(TZ=Asia/Kolkata date +%F)
+.venv/bin/python -c "from analytics.daily_plan import state; state.checkout()"
+.venv/bin/python -m analytics.daily_plan fetch $D --days-back 3
+.venv/bin/python -m analytics.daily_plan pipeline-prepare $D      # candidates, transcripts, dossiers, brief, batches
+```
+
+Candidates are last night's pipeline (`plan_state/pipeline_<day>.json`, hashed IDs), every lead with a real conversation
+today and today's plan P/M/A/B and priority leads. Leads already enrolled are dropped. Read every batch with one subagent
+each, following `data/daily/$D/pipeline/brief.md` (made from `docs/pipeline_brief.md`), and write
+`data/daily/$D/pipeline/reads/out_<k>.jsonl`. Then:
+
+```bash
+.venv/bin/python -m analytics.daily_plan pipeline-build $D --publish-state --mail
+```
+
+The horizon is month end (the end of next month in a month's last 3 days). The report marks new leads and chance changes
+since last night. The expected range is the sum of the chances, up to 2.4x that.
 
 ## Email settings (environment variables in the cloud environment's settings)
 

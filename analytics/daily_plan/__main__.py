@@ -5,6 +5,9 @@
     #   ... Claude reads every batch -> data/daily/<date>/reads/out_*.jsonl, writes narrative.json ...
     python -m analytics.daily_plan build   2026-10-12 [--mail]   # rows, review, workbook, PDF, state
     python -m analytics.daily_plan status  2026-10-12 [--mail]   # 14:00 / 17:00 status check (fetches today)
+    python -m analytics.daily_plan fetch 2026-10-12 --days-back 3 && python -m analytics.daily_plan pipeline-prepare 2026-10-12
+    #   ... Claude reads every batch -> data/daily/<date>/pipeline/reads/out_*.jsonl ...
+    python -m analytics.daily_plan pipeline-build 2026-10-12 [--mail] [--publish-state]   # nightly pipeline to month end
 """
 
 from __future__ import annotations
@@ -15,7 +18,7 @@ import os
 import sys
 from datetime import datetime
 
-from analytics.daily_plan import content, dossiers, mailer, pdf, recalc, review, rows, state, status, transcripts, workbook
+from analytics.daily_plan import content, dossiers, mailer, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
 from analytics.daily_plan.common import LEADER, TEAM, Snap, load_snapshots, previous_working_day
 from integrations.timeutil import now_ist
 
@@ -135,6 +138,64 @@ def cmd_status(a):
                     mailer.recipients("REPORT_TO"), [stem + ".pdf"])
 
 
+def cmd_pipeline_prepare(a):
+    p = paths(a.date)
+    d = os.path.join(p["dir"], "pipeline")
+    snap = _snap(p)
+    last = state.latest_before(a.state_dir, a.date, "pipeline_")
+    last_night = state.resolve(last, snap.leads)
+    plan = state.resolve(state.load(a.state_dir, a.date), snap.leads)
+    cand = pipeline.candidates(snap, a.date, last_night, plan)
+    nums = pipeline.numbers(snap, cand)
+    tx = transcripts.fetch(nums, os.path.join(d, "tx"), pause=a.pause)
+    have, missing = transcripts.coverage(tx, nums)
+    index = dossiers.build(snap, a.date, cand, plan, tx, os.path.join(d, "dossiers"))
+    for i in index:
+        e = last_night.get(i["lead_id"])
+        if e:
+            open(os.path.join(d, "dossiers", f"{i['lead_id']}.txt"), "a").write(
+                f"\n\nLAST NIGHT'S PIPELINE ({last['date']}): chance {e['month_chance']}%, stage {e['stage']}")
+    end = pipeline.horizon(a.date)
+    open(os.path.join(d, "brief.md"), "w").write(pipeline.brief(open("docs/pipeline_brief.md").read(), a.date, end))
+    os.makedirs(os.path.join(d, "reads"), exist_ok=True)
+    n = max(1, min(8, -(-sum(i["size"] for i in index) // 220_000)))
+    files = []
+    for k, b in enumerate(dossiers.batches(index, n)):
+        f = os.path.join(d, "reads", f"batch_{k}.txt")
+        open(f, "w").write("\n".join(os.path.join(d, "dossiers", f"{x['lead_id']}.txt") for x in b))
+        files.append(f)
+    info = {"date": a.date, "horizon": end, "candidates": len(cand), "last_night": last["date"] if last else None,
+            "brief": os.path.join(d, "brief.md"), "batches": files, "with_transcript": have, "without_transcript": missing}
+    json.dump(info, open(os.path.join(d, "prepare.json"), "w"), indent=1)
+    print(json.dumps(info, indent=1))
+
+
+def cmd_pipeline_build(a):
+    p = paths(a.date)
+    d = os.path.join(p["dir"], "pipeline")
+    rws = pipeline.load(os.path.join(d, "reads"))
+    last = state.latest_before(a.state_dir, a.date, "pipeline_")
+    res = pipeline.build(rws, a.date, now_ist().strftime("%a %-d %b %H:%M"), (last or {}).get("leads", {}), p["out"], a.team)
+    inc = pipeline.included(rws)
+    print(f"pipeline -> {state.save(pipeline.to_state(a.date, inc), a.state_dir, 'pipeline_')}; {res['pdf']}")
+    S = res["summary"]
+    text = (f"{a.team}: pipeline to {res['horizon']} — {S['leads']} leads, expected {S['expected_low']:.0f}–{S['expected_high']:.0f} enrollments (estimate).\n"
+            + "\n".join(f"{i}. {r.get('name')} ({r.get('owner')}) {r['month_chance']}% · {r.get('expected_window')} · {r.get('next_step')}"
+                        for i, r in enumerate(res["top"], 1)))
+    print(text)
+    if a.publish_state:
+        state.publish(a.state_dir, f"pipeline {a.date}")
+    if a.mail:
+        mailer.send(f"{a.team}: enrollment pipeline to {res['horizon']}", "<pre style='font-family:Arial'>" + html_escape(text) + "</pre>", text,
+                    mailer.recipients("REPORT_TO"), [res["pdf"], res["xlsx"]])
+
+
+def html_escape(s: str) -> str:
+    import html
+
+    return html.escape(s)
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m analytics.daily_plan")
     ap.add_argument("--team", default=TEAM)
@@ -147,8 +208,11 @@ def main(argv=None):
     b = sub.add_parser("build"); b.add_argument("date"); b.add_argument("--mail", action="store_true"); b.add_argument("--publish-state", action="store_true")
     s = sub.add_parser("status"); s.add_argument("date"); s.add_argument("--mail", action="store_true"); s.add_argument("--no-fetch", action="store_true")
     s.add_argument("--snapshot"); s.add_argument("--enrolled")
+    pp = sub.add_parser("pipeline-prepare"); pp.add_argument("date"); pp.add_argument("--pause", type=int, default=60)
+    pb = sub.add_parser("pipeline-build"); pb.add_argument("date"); pb.add_argument("--mail", action="store_true"); pb.add_argument("--publish-state", action="store_true")
     a = ap.parse_args(argv)
-    {"fetch": cmd_fetch, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status}[a.cmd](a)
+    {"fetch": cmd_fetch, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
+     "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build}[a.cmd](a)
 
 
 if __name__ == "__main__":
