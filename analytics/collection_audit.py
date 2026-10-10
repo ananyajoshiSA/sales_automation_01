@@ -388,15 +388,16 @@ STUCK_AT = ("May have paid - check", "Payment link sent, not paid", "Promised to
             "Unreachable", "Wants to defer, refund or drop")
 MONTH_END = ("Very likely", "Likely", "Possible", "Unlikely", "Very unlikely")
 V2_TEXT = {"objection": 200, "month_end_reason": 220}
-V2_SIZE = 40
-TRANSCRIPTS_PER_LEAD = 3
-TRANSCRIPT_CHARS = 3000
+V2_SIZE = 25
+TRANSCRIPT_CHARS = 10000     # a call longer than this keeps its opening and its last part (payment talk comes late)
+LEAD_CHARS = 20000           # whole conversation for most leads (median 14,000 characters since booking, 10 Oct)
 
 INSTRUCTIONS_V2 = """
 ## Round 2: transcripts, objection, where it is stuck, month-end likelihood
 
-Each lead in this round also carries "transcripts": up to {per_lead} recent recorded calls since around the booking
-(API date, which can be 5 h 30 min off; long calls are cut in the middle, marked [...]). Read them with the dossier:
+Each lead in this round also carries "transcripts": its recorded calls since around the booking, oldest first,
+up to {lead_chars:,} characters (newest calls kept first; API date, which can be 5 h 30 min off; a call over
+{call_chars:,} characters is cut in the middle, marked [...]). Read them in full with the dossier. Read them with the dossier:
 what the lead actually said outweighs a short stage note. Add four fields to each reading:
 
 - "objection": the lead's own objection or concern in plain words (max {objection} characters), e.g. "Wants
@@ -412,7 +413,8 @@ The earlier fields stay as described above; update them where the transcripts ch
 
 
 def transcript_excerpts(calls: list[dict], booked: datetime) -> list[dict]:
-    """The most recent recorded calls since two days before booking, long ones cut in the middle."""
+    """Recorded calls since two days before booking, newest kept first up to LEAD_CHARS, returned oldest first;
+    a call over TRANSCRIPT_CHARS keeps its opening and its end."""
     keep = []
     for c in calls:
         try:
@@ -428,7 +430,16 @@ def transcript_excerpts(calls: list[dict], booked: datetime) -> list[dict]:
         keep.append({"date": at.astimezone(IST).strftime("%d %b"), "agent": c.get("agent") or "",
                      "minutes": round((c.get("duration") or 0) / 60, 1), "text": text, "_t": at})
     keep.sort(key=lambda c: c["_t"], reverse=True)
-    return [{k: v for k, v in c.items() if k != "_t"} for c in keep[:TRANSCRIPTS_PER_LEAD]]
+    out, used = [], 0
+    for c in keep:
+        if used + len(c["text"]) > LEAD_CHARS:
+            if out:
+                break
+            c["text"] = c["text"][:LEAD_CHARS]
+        out.append(c)
+        used += len(c["text"])
+    out.sort(key=lambda c: c["_t"])
+    return [{k: v for k, v in c.items() if k != "_t"} for c in out]
 
 INSTRUCTIONS = """# Reading the open collection leads
 
@@ -542,7 +553,7 @@ def write_reading_round(rows: list[dict], reading_dir: str, as_of: str,
     text = INSTRUCTIONS.format(as_of=as_of, folder=folder, blockers="; ".join(BLOCKERS), outlooks="; ".join(OUTLOOKS),
                                issues="; ".join(PROCESS_ISSUES), **READING_TEXT)
     if v2:
-        text += INSTRUCTIONS_V2.format(per_lead=TRANSCRIPTS_PER_LEAD, stuck="; ".join(STUCK_AT),
+        text += INSTRUCTIONS_V2.format(lead_chars=LEAD_CHARS, call_chars=TRANSCRIPT_CHARS, stuck="; ".join(STUCK_AT),
                                        month_end="; ".join(MONTH_END), **V2_TEXT)
     json.dump({"version": 2 if v2 else 1, "as_of": as_of}, open(os.path.join(folder, "round.json"), "w"))
     open(os.path.join(folder, "INSTRUCTIONS.md"), "w", encoding="utf-8").write(text)

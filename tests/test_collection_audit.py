@@ -116,8 +116,12 @@ def test_round_two_needs_transcript_fields_and_wins_over_round_one(tmp_path):
     calls = [{"start_api": "2026-09-20T05:00:00+00:00", "transcript": "before the booking", "duration": 600},
              {"start_api": "2026-10-03T05:00:00+00:00", "transcript": "x" * 5000, "duration": 900, "agent": "Asha"},
              {"start_api": "2026-10-05T05:00:00+00:00", "transcript": "", "duration": 30}]
+    calls[1]["transcript"] = "x" * 12000
     (ex,) = transcript_excerpts(calls, booked)
-    assert ex["date"] == "03 Oct" and ex["minutes"] == 15.0 and "[...]" in ex["text"] and len(ex["text"]) < 3100
+    assert ex["date"] == "03 Oct" and ex["minutes"] == 15.0 and "[...]" in ex["text"] and len(ex["text"]) < 10100
+    many = [{"start_api": f"2026-10-0{d}T05:00:00+00:00", "transcript": str(d) * 8000, "duration": 300} for d in range(2, 7)]
+    kept = transcript_excerpts(many, booked)
+    assert [k["date"] for k in kept] == ["05 Oct", "06 Oct"]   # newest first up to 20,000 characters, shown oldest first
     rows = [{"lead_id": "a", "flags": [], "dossier": "d"}]
     one = write_reading_round(rows, str(tmp_path), "2026-10-10 16:17")
     two = write_reading_round(rows, str(tmp_path), "2026-10-10 18:30", {"a": [ex]})
