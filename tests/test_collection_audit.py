@@ -45,16 +45,17 @@ def test_history_table_counts_open_snapshots_and_later_collections():
             # booked too recently for a 45-day horizon
             "c": [stage("2026-10-01 05:00:00", "Booking fees received")]}
     t = history_table([lead("a", "Collections done"), lead("b", "Not Interested"), lead("c", "Booking fees received")], hist, NOW)
-    assert t[("Community", "0-3 days")] == [2, 0, 1, 1]      # day 2: collected on day 8, so not within 3 days
-    assert t[("Community", "4-7 days")] == [1, 1, 1, 1]      # day 5: collected 3 days later
+    assert t[("Community", "0-3 days")] == [2, 0, 1, 1, 1]      # day 2: collected on day 8, so not within 3 days
+    assert t[("Community", "4-7 days")] == [1, 1, 1, 1, 1]      # day 5: collected 3 days later
 
 
 def test_chance_falls_back_to_a_coarser_position():
     pos = {"stage": "Loan pending", "days_open": 2, "days_since_spoke": 1}
-    table = {("Community", "0-3 days", "Loan pending", "spoke in last 2 days"): [5, 5, 5, 5],
-             ("Community", "0-3 days", "Loan pending"): [40, 4, 10, 20], ("Community", "0-3 days"): [100, 10, 30, 40]}
+    table = {("Community", "0-3 days", "Loan pending", "spoke in last 2 days"): [5, 5, 5, 5, 5],
+             ("Community", "0-3 days", "Loan pending"): [40, 4, 10, 16, 20], ("Community", "0-3 days"): [100, 10, 30, 35, 40]}
     c = chance(table, "Community", pos)
-    assert c["chance_from"] == "age and stage" and c["chance_3d"] == 0.1 and c["chance_14d"] == 0.25 and c["chance_45d"] == 0.5
+    assert c["chance_from"] == "age and stage" and c["chance_3d"] == 0.1 and c["chance_14d"] == 0.25
+    assert c["chance_21d"] == 0.4 and c["chance_45d"] == 0.5
     assert c["chance_14d_low"] < 0.25 < c["chance_14d_high"]
     lo, hi = wilson(0, 50)
     assert lo == 0 and 0 < hi < 0.06
@@ -69,7 +70,7 @@ def test_audit_and_pipeline():
                     stage("2026-09-21 05:00:00", "Collections done", "Booking fees received")],
             "old": [stage("2026-07-01 05:00:00", "Booking fees received")]}
     leads = [lead("open", "Loan pending"), lead("won", "Collections done"), lead("old", "Booking fees received")]
-    rows, pool, _ = audit(leads, hist, {"u1": "Elite Changemakers"}, frozenset({"Asha Rao"}), NOW, "2026-09-01")
+    rows, pool, _, _ = audit(leads, hist, {"u1": "Elite Changemakers"}, frozenset({"Asha Rao"}), NOW, "2026-09-01")
     assert [r["lead_id"] for r in rows] == ["open"] and len(pool) == 2
     (r,) = rows
     assert r["stage_group"] == "Loan pending" and r["days_since_spoke"] is None
@@ -77,6 +78,7 @@ def test_audit_and_pipeline():
     assert any("not called back" in f for f in r["flags"]) and any("Never dialled" in f for f in r["flags"])
     assert "LEAD CALLED IN: missed" in r["dossier"] and "utr pending" in r["dossier"]
     r.update({"chance_3d": 0.0, "chance_3d_low": 0.0, "chance_3d_high": 0.0, "chance_14d": 0.5, "chance_14d_low": 0.5, "chance_14d_high": 0.5,
+              "chance_21d": 1.0, "chance_21d_low": 1.0, "chance_21d_high": 1.0,
               "chance_45d": 1.0, "chance_45d_low": 1.0, "chance_45d_high": 1.0})
     assert simulate([r], "chance_45d") == (1.0, 1, 1)
     (p,) = pipeline(rows, pool, "kind")
@@ -105,3 +107,51 @@ def test_reading_round_check_and_merge(tmp_path):
     a = {**got["a"], "chance_14d": 0.9, "days_open": 3}
     b = {**got["b"], "chance_14d": 0.1, "days_open": 9}
     assert sorted([a, b], key=priority)[0]["lead_id"] == "b"   # payment checks come first
+
+
+def test_round_two_needs_transcript_fields_and_wins_over_round_one(tmp_path):
+    import json
+    from analytics.collection_audit import check_reading, load_readings, transcript_excerpts, write_reading_round
+    booked = utc("2026-10-01 05:00:00")
+    calls = [{"start_api": "2026-09-20T05:00:00+00:00", "transcript": "before the booking", "duration": 600},
+             {"start_api": "2026-10-03T05:00:00+00:00", "transcript": "x" * 5000, "duration": 900, "agent": "Asha"},
+             {"start_api": "2026-10-05T05:00:00+00:00", "transcript": "", "duration": 30}]
+    (ex,) = transcript_excerpts(calls, booked)
+    assert ex["date"] == "03 Oct" and ex["minutes"] == 15.0 and "[...]" in ex["text"] and len(ex["text"]) < 3100
+    rows = [{"lead_id": "a", "flags": [], "dossier": "d"}]
+    one = write_reading_round(rows, str(tmp_path), "2026-10-10 16:17")
+    two = write_reading_round(rows, str(tmp_path), "2026-10-10 18:30", {"a": [ex]})
+    assert json.loads(open(f"{two}/batch_01.jsonl").readline())["transcripts"][0]["date"] == "03 Oct"
+    base = {"lead_id": "a", "situation": "s", "blocker": "Cannot afford now", "outlook": "Long shot", "next_action": "n",
+            "what_to_say": "w", "when": "today", "process_issues": []}
+    open(f"{one}/read_01.jsonl", "w").write(json.dumps(base) + "\n")
+    open(f"{two}/read_01.jsonl", "w").write(json.dumps(base) + "\n")
+    assert "line 1: stuck_at None not in the list" in check_reading(f"{two}/read_01.jsonl", f"{two}/batch_01.jsonl")
+    assert load_readings(str(tmp_path))["a"]["version"] == 1
+    v2 = {**base, "objection": "Wants 6-month EMI", "stuck_at": "Choosing how to pay", "month_end": "Likely",
+          "month_end_reason": "Said she pays on the 25th"}
+    open(f"{two}/read_01.jsonl", "w").write(json.dumps(v2) + "\n")
+    assert check_reading(f"{two}/read_01.jsonl", f"{two}/batch_01.jsonl") == []
+    got = load_readings(str(tmp_path))["a"]
+    assert got["version"] == 2 and got["month_end"] == "Likely"
+
+
+def test_new_bookings_outlook_counts_weeks_left_in_the_month():
+    from datetime import timedelta
+    from analytics.collection_audit import month_end, new_bookings_outlook
+    now = utc("2026-10-10 10:00:00")                       # Saturday 10 Oct, 15:30 IST
+    assert month_end(now).strftime("%Y-%m-%d %H:%M") == "2026-10-31 23:59"
+
+    def v(booked, weekend, days_to_collect=None):
+        return {"kind": "Bootcamp", "team": "T", "booked": utc(booked), "weekend": weekend, "days_to_collect": days_to_collect}
+    views = [v("2026-07-06 05:00:00", "2026-07-04", 3), v("2026-07-06 05:00:00", "2026-07-04", 15),
+             v("2026-07-06 05:00:00", "2026-07-04"), v("2026-07-06 05:00:00", "2026-07-04", 30)]
+    views += [v("2026-09-28 05:00:00", "2026-09-26") for _ in range(4)] + [v("2026-10-05 05:00:00", "2026-10-03") for _ in range(2)]
+    views += [v("2026-10-10 05:00:00", "2026-10-10")]       # one booking already in this weekend
+    (o,) = new_bookings_outlook(views, now, weeks=2)
+    assert o["weekly_bookings"] == [4, 2]
+    # weekends 10, 17 and 24 Oct (31 Oct's Monday is past month end); Mondays leave 19, 12 and 5 days
+    assert [w.split(":")[0] for w in o["weeks"]] == ["10 Oct", "17 Oct", "24 Oct"]
+    # median volume 4 (sorted [2, 4] -> index 1); this weekend 4 - 1 = 3 x 50%, then 4 x 25%, 4 x 25%
+    assert o["expected"] == round(3 * 0.5 + 4 * 0.25 + 4 * 0.25, 1)
+    assert timedelta(days=45) < now - utc("2026-07-06 05:00:00") < timedelta(days=150)

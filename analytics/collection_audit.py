@@ -8,7 +8,7 @@ The audit takes every lead in the collection pool (``analytics.bootcamp_collecti
   notes that say the lead paid or the loan went through while the stage still reads open.
 * **Its chance, from history:** leads booked at least 45 days before the data was pulled are looked at as
   they stood 2, 5, 10, 17, 25 and 35 days after booking. Among those still open, the share collected in the
-  next 3, 14 and 45 days is the chance for an open lead today in the same position (bootcamp or community,
+  next 3, 14, 21 and 45 days is the chance for an open lead today in the same position (bootcamp or community,
   age, stage, how recently someone spoke to the lead). A position with fewer than 30 past examples falls
   back to a coarser one (no contact recency, then no stage); the level used is shown. Each chance has a 90%
   range (Wilson). These are measured shares of past leads, not promises.
@@ -17,7 +17,9 @@ The audit takes every lead in the collection pool (``analytics.bootcamp_collecti
   handed out in batches under ``<out_dir>/reading/<data time>/`` with INSTRUCTIONS.md. Claude reads each lead in a
   Claude Code session (no model API) and writes its situation, blocker, outlook, next step, what to say and
   handling issues to ``read_NN.jsonl``; ``check`` validates a file, and the next run merges every reading
-  that passes into the call list.
+  that passes into the call list. Given the transcripts of the open leads
+  (``scripts/fetch_collection_transcripts.py``), the round is a second reading that also sets each lead's
+  objection, where it is stuck and how likely it is to pay by month end.
 
 The pipeline adds the chances per caller, team and kind; its 90% range comes from 2,000 simulated runs that
 draw each lead's chance from its range. With the leads already collected it gives the projected collection
@@ -26,7 +28,7 @@ rate of the pool booked since ``since`` against the 75% and 80% targets.
 Writes ``open_leads.csv``, ``by_kind_team.csv``, ``by_kind_caller.csv``, ``report.json`` and
 ``collection_audit.xlsx`` (a summary sheet and a call list per team, in calling order) to ``out_dir``.
 
-    python -m analytics.collection_audit data/coll_now exports/collection_audit 2026-09-01
+    python -m analytics.collection_audit data/coll_now exports/collection_audit 2026-09-01 [transcripts.jsonl]
     python -m analytics.collection_audit check <round folder>/read_01.jsonl <round folder>/batch_01.jsonl
 """
 
@@ -41,16 +43,16 @@ import re
 import sys
 from collections import Counter, defaultdict
 from collections.abc import Mapping
-from datetime import datetime, timedelta
+from datetime import date, datetime, timedelta
 
 from analytics.bootcamp_collections import (BOOKED, COLLECTED, LOST, _call, _data, _fields,
-                                            booking_start, build, is_community)
+                                            booking_start, build, is_community, webinar_weekend)
 from analytics.definitions import REAL_CONVERSATION_SECS
 from analytics.lead_priority import strip_html
 from integrations.timeutil import IST, utc
 
 SNAPSHOT_DAYS = (2, 5, 10, 17, 25, 35)
-HORIZONS = (3, 14, 45)
+HORIZONS = (3, 14, 21, 45)   # 21: from a 10 Oct pull to the end of the month
 MIN_CELL = 30
 Z90 = 1.645
 TARGETS = (75, 80)
@@ -264,8 +266,8 @@ def _load(data_dir: str) -> tuple[dict, list[dict], dict[str, list]]:
 
 
 def audit(leads: list[dict], hist: Mapping[str, list], team_of_owner: Mapping[str, str], callers, now: datetime,
-          since: str) -> tuple[list[dict], list[dict], dict]:
-    """(open lead rows, every view in the pool since ``since``, history table)."""
+          since: str) -> tuple[list[dict], list[dict], dict, list[dict]]:
+    """(open lead rows, every view in the pool since ``since``, history table, every view)."""
     views, _ = build(leads, hist, team_of_owner, now, callers)
     pool = [v for v in views if v["booked_ist"][:10] >= since]
     table = history_table(leads, hist, now)
@@ -286,7 +288,54 @@ def audit(leads: list[dict], hist: Mapping[str, list], team_of_owner: Mapping[st
             "course_fee": lead.get("mx_Course_Fees") or "", **chance(table, v["kind"], pos),
             "flags": flags(v, acts, v["booked"], now), "dossier": dossier(lead, v, acts, v["booked"], now),
         })
-    return rows, pool, table
+    return rows, pool, table, views
+
+
+def month_end(now: datetime) -> datetime:
+    """23:59 IST on the last day of ``now``'s IST month."""
+    d = now.astimezone(IST)
+    first_next = (d.replace(day=28) + timedelta(days=4)).replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+    return first_next - timedelta(minutes=1)
+
+
+def new_bookings_outlook(views: list[dict], now: datetime, weeks: int = 5) -> list[dict]:
+    """Estimate, per kind and team, of collections from bookings still to come before month end.
+
+    Weekly volume: bookings in each of the last ``weeks`` complete webinar weeks (Saturday to Friday). Rate: share
+    of leads booked 45 to 150 days ago that were collected within the days a new booking would have left in the
+    month (from the Monday of its webinar weekend). Weeks still to come: this week's weekend onwards, if its
+    Monday falls before month end; bookings already in from this week are counted off it.
+    """
+    end = month_end(now)
+    this_week = webinar_weekend(now)
+    weekends, w = [], date.fromisoformat(this_week)
+    while datetime.combine(w + timedelta(days=2), datetime.min.time(), IST) < end:
+        weekends.append(w)
+        w += timedelta(days=7)
+    past = sorted({v["weekend"] for v in views if v["weekend"] < this_week})[-weeks:]
+    old = [v for v in views if timedelta(days=45) <= now - v["booked"] <= timedelta(days=150)]
+    out = []
+    for key in sorted({(v["kind"], v["team"]) for v in views}):
+        vol = [sum(1 for v in views if (v["kind"], v["team"]) == key and v["weekend"] == wk) for wk in past]
+        if not vol or not max(vol):
+            continue
+        base = [v for v in old if (v["kind"], v["team"]) == key]
+        seen = sum(1 for v in views if (v["kind"], v["team"]) == key and v["weekend"] == this_week)
+        exp = lo = hi = 0.0
+        detail = []
+        for wk in weekends:
+            days = (end - datetime.combine(wk + timedelta(days=2), datetime.min.time(), IST)).days
+            k = sum(1 for v in base if v["days_to_collect"] is not None and v["days_to_collect"] <= days)
+            rate = k / len(base) if base else 0.0
+            r_lo, r_hi = wilson(k, len(base))
+            left = max(0, sorted(vol)[len(vol) // 2] - (seen if wk.isoformat() == this_week else 0))
+            exp += left * rate
+            lo += max(0, min(vol) - (seen if wk.isoformat() == this_week else 0)) * r_lo
+            hi += max(0, max(vol) - (seen if wk.isoformat() == this_week else 0)) * r_hi
+            detail.append(f"{wk:%d %b}: ~{left} bookings x {100 * rate:.0f}% within {days} days")
+        out.append({"kind": key[0], "team": key[1], "weekly_bookings": vol, "expected": round(exp, 1),
+                    "range": f"{lo:.0f}-{hi:.0f}", "weeks": detail})
+    return out
 
 
 def pipeline(rows: list[dict], pool: list[dict], *keys: str) -> list[dict]:
@@ -301,16 +350,16 @@ def pipeline(rows: list[dict], pool: list[dict], *keys: str) -> list[dict]:
     for k in sorted(g_pool, key=lambda k: tuple(map(str, k))):
         p, r = g_pool[k], g_rows.get(k, [])
         n, done = len(p), sum(1 for v in p if v["outcome"] == "collected")
-        e3, lo3, hi3 = simulate(r, "chance_3d")
-        e14, lo14, hi14 = simulate(r, "chance_14d")
-        e45, lo45, hi45 = simulate(r, "chance_45d")
         row = {**dict(zip(keys, k)), "pool": n, "collected": done, "lost": sum(1 for v in p if v["outcome"] == "lost"),
-               "open": len(r), "collected_%_now": round(100 * done / n, 1),
-               "expected_next_3d": e3, "range_3d": f"{lo3}-{hi3}",
-               "expected_next_14d": e14, "range_14d": f"{lo14}-{hi14}",
-               "expected_next_45d": e45, "range_45d": f"{lo45}-{hi45}",
+               "open": len(r), "collected_%_now": round(100 * done / n, 1)}
+        for h in HORIZONS:
+            e, lo, hi = simulate(r, f"chance_{h}d")
+            row.update({f"expected_next_{h}d": e, f"range_{h}d": f"{lo}-{hi}"})
+            if h == 45:
+                lo45, hi45, e45 = lo, hi, e
+        row.update({
                "projected_%_45d": round(100 * (done + e45) / n, 1),
-               "projected_range_%_45d": f"{100 * (done + lo45) / n:.0f}-{100 * (done + hi45) / n:.0f}"}
+               "projected_range_%_45d": f"{100 * (done + lo45) / n:.0f}-{100 * (done + hi45) / n:.0f}"})
         for t in TARGETS:
             need = max(0, math.ceil(t * n / 100) - done)
             row[f"needed_for_{t}%"] = need
@@ -334,6 +383,52 @@ PROCESS_ISSUES = (
 )
 READING_TEXT = {"situation": 240, "next_action": 220, "what_to_say": 280, "when": 60}
 OUTLOOK_ORDER = {o: i for i, o in enumerate(OUTLOOKS)}
+STUCK_AT = ("May have paid - check", "Payment link sent, not paid", "Promised to pay on a date", "Loan approval or KYC",
+            "Loan or EMI documents", "Choosing how to pay", "Counselled, still deciding", "Not yet counselled",
+            "Unreachable", "Wants to defer, refund or drop")
+MONTH_END = ("Very likely", "Likely", "Possible", "Unlikely", "Very unlikely")
+V2_TEXT = {"objection": 200, "month_end_reason": 220}
+V2_SIZE = 40
+TRANSCRIPTS_PER_LEAD = 3
+TRANSCRIPT_CHARS = 3000
+
+INSTRUCTIONS_V2 = """
+## Round 2: transcripts, objection, where it is stuck, month-end likelihood
+
+Each lead in this round also carries "transcripts": up to {per_lead} recent recorded calls since around the booking
+(API date, which can be 5 h 30 min off; long calls are cut in the middle, marked [...]). Read them with the dossier:
+what the lead actually said outweighs a short stage note. Add four fields to each reading:
+
+- "objection": the lead's own objection or concern in plain words (max {objection} characters), e.g. "Wants
+  6-month EMI; card limit too low"; "none raised" if there is none.
+- "stuck_at": where the lead is stuck, exactly one of: {stuck}.
+- "month_end": how likely the lead is to pay the balance by 31 October, from everything read, exactly one of:
+  {month_end}. Judge from the lead's words and behaviour (a payment date before month end, documents done,
+  answering and engaged) versus deferrals past October, silence, refund talk.
+- "month_end_reason": one sentence on why (max {month_end_reason} characters).
+
+The earlier fields stay as described above; update them where the transcripts change the picture.
+"""
+
+
+def transcript_excerpts(calls: list[dict], booked: datetime) -> list[dict]:
+    """The most recent recorded calls since two days before booking, long ones cut in the middle."""
+    keep = []
+    for c in calls:
+        try:
+            at = datetime.fromisoformat(c["start_api"]) if c.get("start_api") else None
+        except ValueError:
+            at = None
+        text = (c.get("transcript") or "").strip()
+        if not text or not at or at < booked - timedelta(days=2):
+            continue
+        if len(text) > TRANSCRIPT_CHARS:
+            head = TRANSCRIPT_CHARS // 4
+            text = text[:head] + " [...] " + text[-(TRANSCRIPT_CHARS - head):]
+        keep.append({"date": at.astimezone(IST).strftime("%d %b"), "agent": c.get("agent") or "",
+                     "minutes": round((c.get("duration") or 0) / 60, 1), "text": text, "_t": at})
+    keep.sort(key=lambda c: c["_t"], reverse=True)
+    return [{k: v for k, v in c.items() if k != "_t"} for c in keep[:TRANSCRIPTS_PER_LEAD]]
 
 INSTRUCTIONS = """# Reading the open collection leads
 
@@ -375,8 +470,14 @@ and fix every problem it lists until it prints "ok".
 """
 
 
+def round_version(folder: str) -> int:
+    path = os.path.join(folder, "round.json")
+    return json.load(open(path)).get("version", 1) if os.path.exists(path) else 1
+
+
 def check_reading(read_path: str, batch_path: str) -> list[str]:
     """Problems with a reading file: every lead of the batch read once, every label from its list."""
+    v2 = round_version(os.path.dirname(os.path.abspath(batch_path))) >= 2
     want = [json.loads(line)["lead_id"] for line in open(batch_path, encoding="utf-8") if line.strip()]
     problems, seen = [], Counter()
     for n, line in enumerate(open(read_path, encoding="utf-8"), 1):
@@ -403,32 +504,54 @@ def check_reading(read_path: str, batch_path: str) -> list[str]:
         issues = r.get("process_issues")
         if not isinstance(issues, list) or any(i not in PROCESS_ISSUES for i in issues):
             problems.append(f"line {n}: process_issues must be a list from the list")
+        if v2:
+            for key, limit in V2_TEXT.items():
+                if not isinstance(r.get(key), str) or not r[key].strip():
+                    problems.append(f"line {n}: {key} missing")
+                elif len(r[key]) > limit:
+                    problems.append(f"line {n}: {key} longer than {limit} characters")
+            if r.get("stuck_at") not in STUCK_AT:
+                problems.append(f"line {n}: stuck_at {r.get('stuck_at')!r} not in the list")
+            if r.get("month_end") not in MONTH_END:
+                problems.append(f"line {n}: month_end {r.get('month_end')!r} not in the list")
     problems += [f"lead {lid} read {k} times" for lid, k in seen.items() if k > 1]
     problems += [f"lead {lid} not read" for lid in want if not seen[lid]]
     return problems
 
 
-def write_reading_round(rows: list[dict], reading_dir: str, as_of: str) -> str:
-    """A round folder (named for the data time) with batches of lead files and the instructions."""
-    folder = os.path.join(reading_dir, as_of.replace("-", "").replace(" ", "-").replace(":", ""))
+def write_reading_round(rows: list[dict], reading_dir: str, as_of: str,
+                        transcripts: Mapping[str, list] | None = None) -> str:
+    """A round folder (named for the data time) with batches of lead files and the instructions. With
+    ``transcripts`` (lead_id -> excerpts) it is a round-2 reading, which also sets the objection, where the lead
+    is stuck and its month-end likelihood."""
+    v2 = transcripts is not None
+    folder = os.path.join(reading_dir, as_of.replace("-", "").replace(" ", "-").replace(":", "") + ("-v2" if v2 else ""))
     os.makedirs(folder, exist_ok=True)
     for name in os.listdir(folder):
         if name.startswith("batch_"):
             os.remove(os.path.join(folder, name))
-    batches = [rows[i:i + READING_SIZE] for i in range(0, len(rows), READING_SIZE)]
+    size = V2_SIZE if v2 else READING_SIZE
+    batches = [rows[i:i + size] for i in range(0, len(rows), size)]
     for i, batch in enumerate(batches, 1):
         with open(os.path.join(folder, f"batch_{i:02d}.jsonl"), "w", encoding="utf-8") as fh:
             for r in batch:
-                fh.write(json.dumps({"lead_id": r["lead_id"], "flags": r["flags"], "dossier": r["dossier"]},
-                                    ensure_ascii=False) + "\n")
+                item = {"lead_id": r["lead_id"], "flags": r["flags"], "dossier": r["dossier"]}
+                if v2:
+                    item["transcripts"] = transcripts.get(r["lead_id"], [])
+                fh.write(json.dumps(item, ensure_ascii=False) + "\n")
     text = INSTRUCTIONS.format(as_of=as_of, folder=folder, blockers="; ".join(BLOCKERS), outlooks="; ".join(OUTLOOKS),
                                issues="; ".join(PROCESS_ISSUES), **READING_TEXT)
+    if v2:
+        text += INSTRUCTIONS_V2.format(per_lead=TRANSCRIPTS_PER_LEAD, stuck="; ".join(STUCK_AT),
+                                       month_end="; ".join(MONTH_END), **V2_TEXT)
+    json.dump({"version": 2 if v2 else 1, "as_of": as_of}, open(os.path.join(folder, "round.json"), "w"))
     open(os.path.join(folder, "INSTRUCTIONS.md"), "w", encoding="utf-8").write(text)
     return folder
 
 
 def load_readings(reading_dir: str) -> dict[str, dict]:
-    """Readings from every round's read_NN.jsonl that passes its check against its batch; a later round wins."""
+    """Readings from every round's read_NN.jsonl that passes its check against its batch; a later round wins.
+    Each reading carries its round's ``version``."""
     out = {}
     if not os.path.isdir(reading_dir):
         return out
@@ -441,10 +564,12 @@ def load_readings(reading_dir: str) -> dict[str, dict]:
         if not os.path.exists(batch) or check_reading(path, batch):
             print(f"skipped {round_name}/{name}: run the check on it", file=sys.stderr)
             continue
+        version = round_version(folder)
         for line in open(path, encoding="utf-8"):
             if line.strip():
                 r = json.loads(line)
-                out[r["lead_id"]] = r
+                if version >= out.get(r["lead_id"], {}).get("version", 0):
+                    out[r["lead_id"]] = {**r, "version": version}
     return out
 
 
@@ -532,20 +657,33 @@ def _counts(rows: list[dict], key: str) -> dict[str, dict]:
     return {k: dict(c.most_common()) for k, c in sorted(g.items())}
 
 
-def main(data_dir: str, out_dir: str, since: str) -> None:
+def load_transcripts(path: str, rows: list[dict], pool: list[dict]) -> dict[str, list]:
+    """lead_id -> transcript excerpts since its booking, from ``scripts/fetch_collection_transcripts.py``."""
+    booked = {v["lead_id"]: v["booked"] for v in pool}
+    out = {}
+    for line in open(path, encoding="utf-8"):
+        d = json.loads(line)
+        if d["lead_id"] in booked:
+            out[d["lead_id"]] = transcript_excerpts(d["calls"], booked[d["lead_id"]])
+    return {r["lead_id"]: out.get(r["lead_id"], []) for r in rows}
+
+
+def main(data_dir: str, out_dir: str, since: str, transcripts_path: str | None = None) -> None:
     meta, leads, hist = _load(data_dir)
     now = utc(meta["fetched_at_utc"])
     callers = meta.get("team_of_caller") or frozenset(meta.get("team_callers") or ())
-    rows, pool, table = audit(leads, hist, meta["team_of_owner"], callers, now, since)
+    rows, pool, table, views = audit(leads, hist, meta["team_of_owner"], callers, now, since)
     os.makedirs(out_dir, exist_ok=True)
     as_of = now.astimezone(IST).strftime("%Y-%m-%d %H:%M")
     reading_dir = os.path.join(out_dir, "reading")
     readings = load_readings(reading_dir)
     for r in rows:
-        r.update({k: v for k, v in readings.get(r["lead_id"], {}).items() if k != "lead_id"})
-    unread = [r for r in rows if r["lead_id"] not in readings]
+        r.update({k: v for k, v in readings.get(r["lead_id"], {}).items() if k not in ("lead_id", "version")})
+    need = 2 if transcripts_path else 1
+    unread = [r for r in rows if readings.get(r["lead_id"], {}).get("version", 0) < need]
     if unread:
-        folder = write_reading_round(unread, reading_dir, as_of)
+        excerpts = load_transcripts(transcripts_path, unread, pool) if transcripts_path else None
+        folder = write_reading_round(unread, reading_dir, as_of, excerpts)
         print(f"{len(unread)} open leads still to read: batches and INSTRUCTIONS.md in {folder}", file=sys.stderr)
     _write_csv(os.path.join(out_dir, "open_leads.csv"),
                [{**{k: v for k, v in r.items() if k != "dossier"}, "flags": "; ".join(r["flags"]),
@@ -554,6 +692,7 @@ def main(data_dir: str, out_dir: str, since: str) -> None:
         "data_as_of_ist": as_of, "since": since, "open_leads": len(rows), "read": len(rows) - len(unread),
         "by_kind": pipeline(rows, pool, "kind"), "by_kind_team": pipeline(rows, pool, "kind", "team"),
         "by_kind_caller": pipeline(rows, pool, "kind", "team", "caller"),
+        "month_end_ist": month_end(now).strftime("%Y-%m-%d %H:%M"), "new_bookings": new_bookings_outlook(views, now),
         "flags": dict(Counter(f.split(" (")[0].split(" for ")[0] for r in rows for f in r["flags"]).most_common()),
         "outlook": _counts(rows, "outlook"), "blocker": _counts(rows, "blocker"),
         "process_issues": dict(Counter(i for r in rows for i in r.get("process_issues") or []).most_common()),
@@ -573,4 +712,4 @@ if __name__ == "__main__":
         found = check_reading(sys.argv[2], sys.argv[3])
         print("\n".join(found) or "ok")
         sys.exit(1 if found else 0)
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])
