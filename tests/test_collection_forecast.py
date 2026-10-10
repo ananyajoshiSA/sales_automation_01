@@ -28,3 +28,11 @@ def test_html_has_forecast_targets_and_every_lead():
     assert "for Mayur Sachdeva" in page and "Very likely to pay by 31 Oct · 1 leads" in page
     assert "Unlikely to pay by 31 Oct · 1 leads" in page and "Wants 6-month EMI" in page
     assert "6 of 10" in page and "10 Oct: ~9 bookings" in page and "Ravi Das" in page
+
+
+def test_target_range_runs_from_the_lower_to_the_higher_view_and_patterns_show():
+    assert cf.target_range({"expected": 21.6, "reading": 15}) == "15–22"
+    assert cf.target_range({"expected": 4.2, "reading": 4}) == "4"
+    page = cf.build_html("Elite Changemakers", [row("a")], {"by_kind_team": []}, "2026-10-10 18:30", 0,
+                         [{"title": "Loan files stall.", "text": "Review them daily."}])
+    assert "What the calls show" in page and "Loan files stall." in page

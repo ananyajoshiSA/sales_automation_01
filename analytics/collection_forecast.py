@@ -14,7 +14,9 @@ The forecast puts two views side by side and never blends them:
 
 New bookings still to come this month are estimated apart (``report.json`` "new_bookings").
 
-    python -m analytics.collection_forecast exports/collection_audit data/coll_eve/contacts.json exports/collection_forecast
+``patterns.json`` (optional) is a list of {"title", "text"}: what the readers saw across the calls, shown as is.
+
+    python -m analytics.collection_forecast exports/collection_audit data/coll_eve/contacts.json exports/collection_forecast [patterns.json]
 """
 
 from __future__ import annotations
@@ -67,6 +69,12 @@ def forecast(rows: list[dict]) -> dict:
             "reading": bands["Very likely"] + bands["Likely"]}
 
 
+def target_range(f: dict) -> str:
+    """From the lower to the higher of the two views."""
+    a, b = sorted((round(f["expected"]), f["reading"]))
+    return f"{a}–{b}" if a != b else str(a)
+
+
 def _band_row(label: str, f: dict, pool: dict | None) -> str:
     b = f["bands"]
     cells = "".join(f"<td>{b[m]}</td>" for m in MONTH_END)
@@ -101,7 +109,15 @@ def lead_table(rows: list[dict]) -> str:
     return "".join(out)
 
 
-def build_html(team: str, rows: list[dict], report: dict, as_of: str, gone: int) -> str:
+def patterns_html(patterns: list[dict] | None) -> str:
+    if not patterns:
+        return ""
+    items = "".join(f"<li><b>{esc(p['title'])}</b> {esc(p['text'])}</li>" for p in patterns)
+    return (f'<h3>What the calls show</h3><p>Seen while reading every lead\'s calls and notes across both collection teams. '
+            f'These are patterns, not counts.</p><ul>{items}</ul>')
+
+
+def build_html(team: str, rows: list[dict], report: dict, as_of: str, gone: int, patterns: list[dict] | None = None) -> str:
     title, leader = TEAM_TITLE.get(team, team), TEAM_LEADERS.get(team, "the team leader")
     pools = {x["kind"]: x for x in report["by_kind_team"] if x["team"] == team}
     kinds = [k for k in ("Bootcamp", "Community") if any(r["kind"] == k for r in rows)]
@@ -126,7 +142,7 @@ def build_html(team: str, rows: list[dict], report: dict, as_of: str, gone: int)
         caller_rows.append(f"<tr><td><b>{esc(c)}</b></td><td>{f['open']}</td>"
                            + "".join(f"<td>{f['bands'][m]}</td>" for m in MONTH_END)
                            + f"<td>{f['expected']:.1f}</td><td>{f['reading']}</td>"
-                           f"<td><b>{round(f['expected'])}–{max(round(f['expected']), f['reading'])}</b></td></tr>")
+                           f"<td><b>{target_range(f)}</b></td></tr>")
     mean_by_band = {m: [r[HORIZON] for r in rows if r["month_end"] == m] for m in MONTH_END}
     consistency = ", ".join(f"{m.lower()} {100 * sum(v) / len(v):.0f}%" for m, v in mean_by_band.items() if v)
     new_rows = "".join(
@@ -138,9 +154,11 @@ def build_html(team: str, rows: list[dict], report: dict, as_of: str, gone: int)
         nb = new.get(k, {}).get("expected", 0.0)
         if not p:
             continue
+        a, b = sorted((round(f["expected"]), f["reading"]))
         targets.append(f"<tr><td><b>{esc(k)}</b></td><td>{p['collected']} of {p['pool']}</td>"
-                       f"<td>{f['low']}</td><td><b>{f['expected']:.0f}</b></td><td><b>{f['reading']}</b></td>"
-                       f"<td>{nb:.0f}</td></tr>")
+                       f"<td>{f['expected']:.0f} ({f['low']}–{f['high']})</td><td>{f['reading']}</td>"
+                       f"<td><b>{target_range(f)}</b> ({100 * (p['collected'] + a) / p['pool']:.0f}–"
+                       f"{100 * (p['collected'] + b) / p['pool']:.0f}% of the pool)</td><td>{nb:.0f} ({esc(new.get(k, {}).get('range', '–'))})</td></tr>")
     return f"""<!doctype html><html><head><meta charset="utf-8"><title>{esc(title)} – pending collections and month-end forecast</title>
 <style>{CSS}{EXTRA_CSS}{FORECAST_CSS}</style></head><body>
 <div class="cover">
@@ -178,13 +196,16 @@ judgements, not a probability.</p>
 <th>Reading: very likely + likely</th><th>Collected so far</th><th>Projected % at past rates</th><th>% if all likely pay</th></tr></thead>
 <tbody>{''.join(_band_row(k, f_kind[k], pools.get(k)) for k in kinds)}</tbody></table>
 <h3>For setting targets</h3>
-<table><thead><tr><th></th><th>Collected so far (pool since 1 Sep)</th><th>Floor: past rates, low end</th>
-<th>Expected: past rates</th><th>Stretch: every likely lead pays</th><th>Plus new bookings by 31 Oct (estimate)</th></tr></thead>
+<table><thead><tr><th></th><th>Collected so far (pool since 1 Sep)</th><th>Past rates: expected by 31 Oct</th>
+<th>Reading: very likely + likely</th><th>Target range for pending leads</th><th>Plus new bookings by 31 Oct (estimate)</th></tr></thead>
 <tbody>{''.join(targets)}</tbody></table>
-<div class="warnbox"><p><b>How to read this.</b> A target at the past-rate figure is what normally happens with the team working
-as it has. The stretch figure needs every lead judged very likely or likely to close; it is reachable only if the plan
-is worked (calls returned, loan files chased daily, dated next steps). A fair target sits between the two. New bookings
-add to both; they are estimated from September's weekly bookings and how fast past bookings paid.</p></div>
+<div class="warnbox"><p><b>How to read this.</b> The target range for pending leads runs from the lower to the higher of the two
+views. Where the reading is below past rates, the leads' own words are weaker than their stage suggests (deferrals, no way to
+pay, refund talk), so aim near the lower figure. Where the reading is above, the conversations show more buying intent than
+history credits, and the higher figure is reachable if the plan is worked: calls returned, loan files chased daily, every call
+ending with a dated next step. New bookings are separate and, for bootcamp, much larger: estimated from the last five weeks'
+bookings and how fast past bookings paid, with a wide range because weekly bookings swing a lot. Most of the month's
+collections will come from them, so their first week matters most.</p></div>
 <p class="note">Check on the two views: the average past-rate chance of the leads in each reading band is {esc(consistency)}.</p>
 {rupees}
 <h3>New bookings still to come this month (estimate)</h3>
@@ -194,11 +215,11 @@ add to both; they are estimated from September's weekly bookings and how fast pa
 <section><h2>2. Where leads are stuck and what they object to</h2>
 <div class="two"><div><h3>Where it is stuck</h3><table><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{stuck[k]}</td></tr>" for k in STUCK_AT if stuck[k])}</tbody></table></div>
 <div><h3>Main blocker</h3><table><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in blockers)}</tbody></table></div></div>
-<p>Each lead's own objection, in plain words, is in the list in section 4.</p></section>
+<p>Each lead's own objection, in plain words, is in the list in section 4.</p>{patterns_html(patterns)}</section>
 
 <section><h2>3. Caller-wise forecast</h2>
 <table><thead><tr><th>Caller</th><th>Open</th>{''.join(f"<th>{esc(m)}</th>" for m in MONTH_END)}<th>Past rates: expected by 31 Oct</th>
-<th>Reading: very likely + likely</th><th>Target range (expected to stretch)</th></tr></thead><tbody>{''.join(caller_rows)}</tbody></table>
+<th>Reading: very likely + likely</th><th>Target range (lower to higher view)</th></tr></thead><tbody>{''.join(caller_rows)}</tbody></table>
 <p class="note">Callers with few leads have wide ranges; judge them on the leads, not the number.</p></section>
 
 <section><h2>4. Every pending lead, most to least likely</h2>
@@ -209,7 +230,8 @@ then by past-rate chance.</p>
 </body></html>"""
 
 
-def main(audit_dir: str, contacts_path: str, out_dir: str) -> None:
+def main(audit_dir: str, contacts_path: str, out_dir: str, patterns_path: str | None = None) -> None:
+    patterns = json.load(open(patterns_path)) if patterns_path else None
     report = json.load(open(os.path.join(audit_dir, "report.json")))
     contacts = json.load(open(contacts_path))["leads"]
     rows, gone = load_rows(audit_dir, contacts)
@@ -220,7 +242,7 @@ def main(audit_dir: str, contacts_path: str, out_dir: str) -> None:
             continue
         slug = "Elite" if team.startswith("Elite") else "Puja_Malik"
         page = os.path.join(out_dir, f"{slug}_pending_collections.html")
-        open(page, "w", encoding="utf-8").write(build_html(team, team_rows, report, report["data_as_of_ist"], sum(gone.values())))
+        open(page, "w", encoding="utf-8").write(build_html(team, team_rows, report, report["data_as_of_ist"], sum(gone.values()), patterns))
         pdf = page.replace(".html", ".pdf")
         made = render_pdf(page, pdf)
         f = forecast(team_rows)
@@ -231,4 +253,4 @@ def main(audit_dir: str, contacts_path: str, out_dir: str) -> None:
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])
