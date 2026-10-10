@@ -45,16 +45,16 @@ def test_history_table_counts_open_snapshots_and_later_collections():
             # booked too recently for a 45-day horizon
             "c": [stage("2026-10-01 05:00:00", "Booking fees received")]}
     t = history_table([lead("a", "Collections done"), lead("b", "Not Interested"), lead("c", "Booking fees received")], hist, NOW)
-    assert t[("Community", "0-3 days")] == [2, 1, 1]
-    assert t[("Community", "4-7 days")] == [1, 1, 1]
+    assert t[("Community", "0-3 days")] == [2, 0, 1, 1]      # day 2: collected on day 8, so not within 3 days
+    assert t[("Community", "4-7 days")] == [1, 1, 1, 1]      # day 5: collected 3 days later
 
 
 def test_chance_falls_back_to_a_coarser_position():
     pos = {"stage": "Loan pending", "days_open": 2, "days_since_spoke": 1}
-    table = {("Community", "0-3 days", "Loan pending", "spoke in last 2 days"): [5, 5, 5],
-             ("Community", "0-3 days", "Loan pending"): [40, 10, 20], ("Community", "0-3 days"): [100, 30, 40]}
+    table = {("Community", "0-3 days", "Loan pending", "spoke in last 2 days"): [5, 5, 5, 5],
+             ("Community", "0-3 days", "Loan pending"): [40, 4, 10, 20], ("Community", "0-3 days"): [100, 10, 30, 40]}
     c = chance(table, "Community", pos)
-    assert c["chance_from"] == "age and stage" and c["chance_14d"] == 0.25 and c["chance_45d"] == 0.5
+    assert c["chance_from"] == "age and stage" and c["chance_3d"] == 0.1 and c["chance_14d"] == 0.25 and c["chance_45d"] == 0.5
     assert c["chance_14d_low"] < 0.25 < c["chance_14d_high"]
     lo, hi = wilson(0, 50)
     assert lo == 0 and 0 < hi < 0.06
@@ -76,7 +76,7 @@ def test_audit_and_pipeline():
     assert any("paid or loan done" in f for f in r["flags"])
     assert any("not called back" in f for f in r["flags"]) and any("Never dialled" in f for f in r["flags"])
     assert "LEAD CALLED IN: missed" in r["dossier"] and "utr pending" in r["dossier"]
-    r.update({"chance_14d": 0.5, "chance_14d_low": 0.5, "chance_14d_high": 0.5,
+    r.update({"chance_3d": 0.0, "chance_3d_low": 0.0, "chance_3d_high": 0.0, "chance_14d": 0.5, "chance_14d_low": 0.5, "chance_14d_high": 0.5,
               "chance_45d": 1.0, "chance_45d_low": 1.0, "chance_45d_high": 1.0})
     assert simulate([r], "chance_45d") == (1.0, 1, 1)
     (p,) = pipeline(rows, pool, "kind")

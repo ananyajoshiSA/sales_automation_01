@@ -158,3 +158,10 @@ def test_lead_credited_to_settled_caller_and_calls_stop_at_outcome():
     assert (v["caller"], v["team"], v["owner"]) == ("Ravi Das", "Elite Changemakers", "Asha Rao")
     assert v["dials"] == 1 and v["outcome"] == "lost"
     assert v["reason"] == "No time / personal or health reasons" and "refund" in v["reason_text"]
+
+
+def test_lead_never_assigned_to_a_collection_caller_goes_to_the_team_that_worked_it():
+    hist = {"w": [stage(BOOK, "Booking fees received"), call("2026-10-01 06:00:00", by="Ravi Das"),
+                  call("2026-10-01 07:00:00", by="Ravi Das")]}
+    (v,), _ = build([lead("w", "Booking fees received", owner="x")], hist, {}, NOW, {"Ravi Das": "Elite Changemakers"})
+    assert (v["caller"], v["team"]) == ("Ravi Das", "Elite Changemakers")

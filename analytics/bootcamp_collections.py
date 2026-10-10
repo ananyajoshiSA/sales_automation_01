@@ -243,6 +243,8 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime,
         team = team_callers[handler]
     handover_dial = next((c["t"] for c in dials if handover and c["by"] in team_callers and c["t"] >= handover), None)
     worked_by = Counter(c["by"] for c in dials if c["by"] in team_callers)
+    if not handler and worked_by and isinstance(team_callers, dict):
+        team = team_callers[worked_by.most_common(1)[0][0]]
     first_ans = answered[0]["t"] if answered else None
     forms = [a for a in acts if a.get("EventCode") == 103]
     cbs = callbacks(forms, [c["t"] for c in dials], booked, end, now)

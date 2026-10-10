@@ -8,7 +8,7 @@ The audit takes every lead in the collection pool (``analytics.bootcamp_collecti
   notes that say the lead paid or the loan went through while the stage still reads open.
 * **Its chance, from history:** leads booked at least 45 days before the data was pulled are looked at as
   they stood 2, 5, 10, 17, 25 and 35 days after booking. Among those still open, the share collected in the
-  next 14 and 45 days is the chance for an open lead today in the same position (bootcamp or community,
+  next 3, 14 and 45 days is the chance for an open lead today in the same position (bootcamp or community,
   age, stage, how recently someone spoke to the lead). A position with fewer than 30 past examples falls
   back to a coarser one (no contact recency, then no stage); the level used is shown. Each chance has a 90%
   range (Wilson). These are measured shares of past leads, not promises.
@@ -50,7 +50,7 @@ from analytics.lead_priority import strip_html
 from integrations.timeutil import IST, utc
 
 SNAPSHOT_DAYS = (2, 5, 10, 17, 25, 35)
-HORIZONS = (14, 45)
+HORIZONS = (3, 14, 45)
 MIN_CELL = 30
 Z90 = 1.645
 TARGETS = (75, 80)
@@ -105,8 +105,8 @@ def cell_keys(kind: str, pos: dict) -> list[tuple]:
 
 
 def history_table(leads: list[dict], hist: Mapping[str, list], now: datetime) -> dict[tuple, list[int]]:
-    """For every position key: [snapshots, collected within 14 days, collected within 45 days]."""
-    table: dict[tuple, list[int]] = defaultdict(lambda: [0, 0, 0])
+    """For every position key: [snapshots, collected within each of HORIZONS days]."""
+    table: dict[tuple, list[int]] = defaultdict(lambda: [0] * (1 + len(HORIZONS)))
     for lead in leads:
         acts = hist.get(lead["ProspectID"])
         if not acts:
@@ -129,8 +129,8 @@ def history_table(leads: list[dict], hist: Mapping[str, list], now: datetime) ->
             for key in cell_keys(kind, pos):
                 row = table[key]
                 row[0] += 1
-                row[1] += hits[0]
-                row[2] += hits[1]
+                for i, hit in enumerate(hits, 1):
+                    row[i] += hit
     return dict(table)
 
 
@@ -145,15 +145,16 @@ def wilson(k: int, n: int) -> tuple[float, float]:
 
 
 def chance(table: Mapping[tuple, list[int]], kind: str, pos: dict) -> dict:
-    """The lead's chance of being collected within 14 and 45 days, from the finest position with enough history."""
+    """The lead's chance of being collected within each horizon, from the finest position with enough history."""
     keys = cell_keys(kind, pos)
     level = next((i for i, k in enumerate(keys) if table.get(k, [0])[0] >= MIN_CELL), len(keys) - 1)
-    n, k14, k45 = table.get(keys[level], [0, 0, 0])
-    lo14, hi14 = wilson(k14, n)
-    lo45, hi45 = wilson(k45, n)
-    return {"chance_14d": round(k14 / n, 3) if n else None, "chance_14d_low": round(lo14, 3), "chance_14d_high": round(hi14, 3),
-            "chance_45d": round(k45 / n, 3) if n else None, "chance_45d_low": round(lo45, 3), "chance_45d_high": round(hi45, 3),
-            "chance_from": ("age, stage and contact", "age and stage", "age only")[level], "chance_examples": n}
+    n, *hits = table.get(keys[level], [0] * (1 + len(HORIZONS)))
+    out = {}
+    for h, k in zip(HORIZONS, hits):
+        lo, hi = wilson(k, n)
+        out.update({f"chance_{h}d": round(k / n, 3) if n else None, f"chance_{h}d_low": round(lo, 3),
+                    f"chance_{h}d_high": round(hi, 3)})
+    return {**out, "chance_from": ("age, stage and contact", "age and stage", "age only")[level], "chance_examples": n}
 
 
 def simulate(rows: list[dict], key: str, runs: int = 2000, seed: int = 7) -> tuple[float, int, int]:
@@ -300,10 +301,12 @@ def pipeline(rows: list[dict], pool: list[dict], *keys: str) -> list[dict]:
     for k in sorted(g_pool, key=lambda k: tuple(map(str, k))):
         p, r = g_pool[k], g_rows.get(k, [])
         n, done = len(p), sum(1 for v in p if v["outcome"] == "collected")
+        e3, lo3, hi3 = simulate(r, "chance_3d")
         e14, lo14, hi14 = simulate(r, "chance_14d")
         e45, lo45, hi45 = simulate(r, "chance_45d")
         row = {**dict(zip(keys, k)), "pool": n, "collected": done, "lost": sum(1 for v in p if v["outcome"] == "lost"),
                "open": len(r), "collected_%_now": round(100 * done / n, 1),
+               "expected_next_3d": e3, "range_3d": f"{lo3}-{hi3}",
                "expected_next_14d": e14, "range_14d": f"{lo14}-{hi14}",
                "expected_next_45d": e45, "range_45d": f"{lo45}-{hi45}",
                "projected_%_45d": round(100 * (done + e45) / n, 1),
@@ -554,8 +557,9 @@ def main(data_dir: str, out_dir: str, since: str) -> None:
         "flags": dict(Counter(f.split(" (")[0].split(" for ")[0] for r in rows for f in r["flags"]).most_common()),
         "outlook": _counts(rows, "outlook"), "blocker": _counts(rows, "blocker"),
         "process_issues": dict(Counter(i for r in rows for i in r.get("process_issues") or []).most_common()),
-        "history": [{"key": " / ".join(k), "snapshots": v[0], "collected_14d_%": round(100 * v[1] / v[0], 1),
-                     "collected_45d_%": round(100 * v[2] / v[0], 1)} for k, v in sorted(table.items()) if len(k) == 3],
+        "history": [{"key": " / ".join(k), "snapshots": v[0],
+                     **{f"collected_{h}d_%": round(100 * x / v[0], 1) for h, x in zip(HORIZONS, v[1:])}}
+                    for k, v in sorted(table.items()) if len(k) == 3],
     }
     json.dump(report, open(os.path.join(out_dir, "report.json"), "w"), indent=1, default=str)
     for name in ("by_kind_team", "by_kind_caller"):

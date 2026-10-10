@@ -20,7 +20,8 @@ from integrations.leadsquared import LeadSquaredClient
 from integrations.timeutil import now_utc
 from scripts.fetch_lead_histories import main as fetch_histories
 
-COLUMNS = ["ProspectID", "OwnerId", "OwnerIdName", "ProspectStage", "CreatedOn", "mx_Bootcamp_collections",
+COLUMNS = ["ProspectID", "FirstName", "LastName", "Phone", "OwnerId", "OwnerIdName", "ProspectStage", "CreatedOn",
+           "mx_Bootcamp_collections",
            "mx_Enquired_Course", "mx_Course_Fees", "mx_Bootcamp_attended", "mx_Next_follow_up_date"]
 
 
