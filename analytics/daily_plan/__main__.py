@@ -80,7 +80,7 @@ def cmd_build(a):
     if info:
         C["data_note"] = (f"Data: LeadSquared pulled {R['built_at']} IST. Salesa transcripts: {info.get('transcript_numbers')} numbers searched "
                           f"(≤10 numbers per request, ≤9 requests per run); {info.get('with_transcript')} had a transcript, {info.get('without_transcript')} did not. "
-                          "Zipteams notes cross-checked, never used alone. Payments are not in the LeadSquared API, so every payment needs a UTR. Chances are estimates.")
+                          "Zipteams notes cross-checked, never used alone. An enrollment is a lead in Course Enrolled or one who said on a call that they paid. Chances are estimates.")
     for k, v in (("rows", R), ("facts", F), ("content", C)):
         json.dump(v, open(p[k], "w"), indent=1, default=str)
     os.makedirs(p["out"], exist_ok=True)

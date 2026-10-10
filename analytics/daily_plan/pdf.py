@@ -123,7 +123,6 @@ def html_doc(R: dict, C: dict) -> str:
                 H.append("<table><tr><th style='width:3%'>#</th><th style='width:23%'>Lead</th><th style='width:28%'>Why</th><th style='width:20%'>Opening line</th><th style='width:26%'>Exact ask · prepare for</th></tr>")
                 for i, r in enumerate(tr, 1):
                     chips = []
-                    if r.get("verify"): chips.append("<span class='chip bad'>Marked enrolled – verify payment</span>")
                     if r.get("missed"): chips.append(f"<span class='chip bad'>Missed call {e(r['missed_last'])}</span>")
                     if r.get("callback_requested"): chips.append(f"<span class='chip warn'>{e(cut(r['callback_requested'],40))}</span>")
                     if r.get("whatsapp_only"): chips.append("<span class='chip warn'>WhatsApp only</span>")

@@ -10,9 +10,10 @@ from datetime import timedelta
 
 from analytics.daily_plan.common import CLOSED, DEAD, REAL_SECS, Snap, ist, p10
 
-TIERS = "MPABFRC"
+TIERS = "MABFRC"
+PAID = {"paid_new", "enrolled_no_proof"}  # enrolled_no_proof: older reads, before stage = enrolled
 EXCLUDE = {"already_student", "dnc", "support", "21day", "irrelevant", "not_interested"}
-CARRY_CHANCE = {"A": 20, "B": 8, "F": 4, "R": 3, "C": 2, "M": 3, "P": 0}
+CARRY_CHANCE = {"A": 20, "B": 8, "F": 4, "R": 3, "C": 2, "M": 3}
 
 
 def load_reads(directory: str) -> dict:
@@ -45,33 +46,22 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
     now = snap.fetched
     first_enr = {l["ProspectID"]: l.get("first_enrolled") for l in enrolled}
     team = set(snap.callers)
-    rows, dropped, paid, stage_fix = {}, [], [], []
+    rows, dropped, enrolled_leads = {}, [], []
     for lid, r in reads.items():
         l = snap.leads.get(lid, {})
         owner = l.get("OwnerIdName") or r.get("owner")
         stage = l.get("ProspectStage") or ""
         st = r.get("status", "")
-        if st == "paid_new":
-            paid.append({**r, "owner": owner, "stage": stage, "first_enrolled": first_enr.get(lid)})
-            if owner in team and r.get("exact_ask") and "no sales ask" not in r["exact_ask"].lower():
-                rows[lid] = {**r, "owner": owner, "lead_id": lid, "stage": stage, "tier": "P", "chance": 0, "source": "paid",
-                             "why": "PAID (counted): " + (r.get("payment_evidence") or "") + " " + (r.get("why") or "")}
-            continue
-        if st == "enrolled_no_proof" and int(r.get("chance") or 0) < 5:
-            stage_fix.append({**r, "owner": owner, "stage": stage})
+        # Enrolled = Course Enrolled in LeadSquared, or the lead said on a call that they paid. Never back on a sheet.
+        if stage in CLOSED or st in PAID:
+            enrolled_leads.append({**r, "owner": owner, "stage": stage, "first_enrolled": first_enr.get(lid)})
             continue
         if st in EXCLUDE or r.get("tier") == "D":
             dropped.append({**r, "owner": owner, "stage": stage})
             continue
         if owner not in team:
             continue
-        row = {**r, "owner": owner, "lead_id": lid, "stage": stage, "source": "re-read"}
-        if st == "enrolled_no_proof" or stage in CLOSED:
-            row["tier"] = "A"
-            row["verify"] = True
-            row["exact_ask"] = ("Check with accounts first. Paid: onboarding call + UTR in Payment proof. Not paid: send the link and stay on "
-                                "the line; stage back to Follow Up For Closure until it shows. " + (r.get("exact_ask") or ""))
-        rows[lid] = row
+        rows[lid] = {**r, "owner": owner, "lead_id": lid, "stage": stage, "source": "re-read"}
     yesterday = max((c["t"] for c in snap.calls if c["t"].strftime("%Y-%m-%d") < today), default=now).strftime("%Y-%m-%d")
     for lid, p in prev_plan.items():  # yesterday's sheet leads that were not re-read (mostly F/R/C)
         if lid in rows or lid in reads or lid not in snap.leads:
@@ -80,6 +70,8 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         owner = l.get("OwnerIdName")
         stage = l.get("ProspectStage") or ""
         if owner not in team or stage in CLOSED + DEAD:
+            continue
+        if p["tier"] == "P" or p.get("verify"):
             continue
         tier = p["tier"] if p["tier"] in TIERS else "C"
         dials = [c for c in snap.by_lead.get(lid, []) if c["direction"] == "outbound" and c["t"].strftime("%Y-%m-%d") == yesterday]
@@ -119,7 +111,7 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
                   and not any(d["t"] > c["t"] and (d["direction"] == "outbound" or d["status"] == "Answered") for d in cs)]
         r["missed"] = len(missed)
         r["missed_last"] = missed[-1]["t"].strftime("%a %H:%M") if missed else ""
-        if missed and r["tier"] not in ("A", "P"):
+        if missed and r["tier"] != "A":
             r["tier_orig"], r["tier"] = r["tier"], "M"
         real = [c for c in cs if c["status"] == "Answered" and c["duration"] >= REAL_SECS]
         r["last_conv"] = real[-1]["t"].strftime("%d %b %H:%M") if real else ""
@@ -139,6 +131,6 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         if r["tier"] in TIERS:
             by_owner[r["owner"]].append(r)
     for o in by_owner:
-        by_owner[o].sort(key=lambda r: (TIERS.index(r["tier"]) if not r.get("verify") else 1.5, -r["chance"]))
-    return {"built_at": now.strftime("%Y-%m-%d %H:%M"), "today": today, "by_owner": dict(by_owner), "paid": paid,
-            "dropped": dropped, "stage_fix": stage_fix, "reads": len(reads)}
+        by_owner[o].sort(key=lambda r: (TIERS.index(r["tier"]), -r["chance"]))
+    return {"built_at": now.strftime("%Y-%m-%d %H:%M"), "today": today, "by_owner": dict(by_owner), "paid": enrolled_leads,
+            "dropped": dropped, "reads": len(reads)}

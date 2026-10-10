@@ -6,7 +6,7 @@ from __future__ import annotations
 import re
 from collections import Counter, defaultdict
 
-from analytics.daily_plan.common import Snap, ist
+from analytics.daily_plan.common import CLOSED, Snap, ist
 from analytics.daily_plan.stats import day_stats
 
 
@@ -48,8 +48,14 @@ def enrollments(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list
                 by, comment = d.get("CreatedBy") or "", d.get("Comment") or ""
         r = reads.get(l["ProspectID"], {})
         out.append({"lead_id": l["ProspectID"], "name": ((l.get("FirstName") or "") + " " + (l.get("LastName") or "")).strip() or "Unnamed",
-                    "owner": l.get("OwnerIdName"), "at": t.strftime("%H:%M"), "by": by, "comment": comment,
-                    "status": r.get("status") or "not re-read", "evidence": r.get("payment_evidence") or r.get("friday_summary") or ""})
+                    "owner": l.get("OwnerIdName"), "at": t.strftime("%H:%M"), "by": by, "comment": comment, "how": "Course Enrolled",
+                    "evidence": r.get("payment_evidence") or comment or ""})
+    seen = {e["lead_id"] for e in out}
+    for lid, r in reads.items():  # said on a call that they paid, stage not moved yet: still an enrollment
+        l = snap.leads.get(lid) or {}
+        if r.get("status") == "paid_new" and lid not in seen and l.get("ProspectStage") not in CLOSED and l.get("OwnerIdName") in snap.callers:
+            out.append({"lead_id": lid, "name": r.get("name") or snap.lead_name(lid), "owner": l.get("OwnerIdName"), "at": "", "by": "", "comment": "",
+                        "how": "paid on the call (move to Course Enrolled)", "evidence": r.get("payment_evidence") or ""})
     return out
 
 
@@ -62,7 +68,7 @@ def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict) -> lis
         o = [c for c in cs if c["direction"] == "outbound"]
         best = max((c["duration"] for c in cs if c["status"] == "Answered"), default=0)
         r = reads.get(lid, {})
-        if r.get("status") == "paid_new":
+        if r.get("status") == "paid_new" or (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED:
             result = "Won"
         elif not o and not cs:
             result = "Not called"
@@ -80,7 +86,8 @@ def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict) -> lis
 
 def missed(snap: Snap, day: str, stats: dict, prev_plan: dict, reads: dict) -> dict:
     team = stats["team"]
-    not_dialled = [(snap.lead_name(lid), prev_plan[lid]["owner"]) for lid in team["a_not_tried"]]
+    not_dialled = [(snap.lead_name(lid), prev_plan[lid]["owner"]) for lid in team["a_not_tried"]
+                   if (snap.leads.get(lid) or {}).get("ProspectStage") not in CLOSED]
     long_no_ask = []
     for r in reads.values():
         if r.get("tier") not in ("A", "B"):
@@ -96,14 +103,26 @@ def missed(snap: Snap, day: str, stats: dict, prev_plan: dict, reads: dict) -> d
         if re.search(r"call-?back.{0,40}(never|not made|missed|late)|promised.{0,40}(never|not)|ring-?back.{0,20}missed", txt, re.I):
             broken.append({"name": r.get("name"), "owner": r.get("owner"), "what": (r.get("friday_summary") or "")[:200]})
     unreturned = {n: v["missed_unreturned"] for n, v in stats["callers"].items() if v["missed_unreturned"]}
-    no_proof = [{"name": r.get("name"), "owner": r.get("owner"), "evidence": (r.get("payment_evidence") or "")[:200]}
-                for r in reads.values() if r.get("status") == "enrolled_no_proof"]
     hidden_lines = {n: v["zero_sec_pct"] for n, v in stats["callers"].items() if v["dials"] and v["zero_sec_pct"] >= 50}
     return {"not_dialled": not_dialled, "long_no_ask": long_no_ask, "broken_callbacks": broken, "unreturned": unreturned,
-            "no_proof": no_proof, "lines": hidden_lines}
+            "lines": hidden_lines}
+
+
+def active_plan(snap: Snap, day: str, plan: dict) -> dict:
+    """The plan without leads that were already enrolled: legacy P/verify rows, and leads in Course Enrolled not called that day."""
+    out = {}
+    for lid, e in plan.items():
+        if e.get("tier") == "P" or e.get("verify"):
+            continue
+        called = any(c["t"].strftime("%Y-%m-%d") == day for c in snap.by_lead.get(lid, []))
+        if (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and not called:
+            continue
+        out[lid] = e
+    return out
 
 
 def facts(snap: Snap, day: str, before: str | None, prev_plan: dict, reads: dict, enrolled: list[dict]) -> dict:
+    prev_plan = active_plan(snap, day, prev_plan)
     stats = day_stats(snap, day, prev_plan)
     stats_before = day_stats(snap, before, None) if before else None
     return {"day": day, "before": before, "stats": stats, "stats_before": stats_before, "quality": quality(reads),

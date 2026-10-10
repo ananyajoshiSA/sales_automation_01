@@ -1,4 +1,4 @@
-"""Workbook: team leader sheet, Team summary, How to use, one sheet per caller. Formulas count an enrollment only with a UTR."""
+"""Workbook: team leader sheet, Team summary, How to use, one sheet per caller. A row counts as Enrolled when its Outcome or Payment status says paid."""
 
 from __future__ import annotations
 
@@ -41,7 +41,7 @@ def write(R: dict, C: dict, out: str) -> str:
     ws.merge_cells("A2:P2"); ws.row_dimensions[2].height = 75
     r = 4; title(ws, r, "1. Your priority leads — where today's enrollments come from. The caller calls; you own the outcome."); r += 1
     PH = ["#", "Caller", "Lead", "Phone", "Course", "Est. chance (3 days)", "Why this lead", "What the caller must do", f"{LN}'s role",
-          "Check by", "Who decides", "How they can pay", "Called by check time? (Y/N)", "Outcome", "Payment proof (UTR)", f"{LN}'s notes"]
+          "Check by", "Who decides", "How they can pay", "Called by check time? (Y/N)", "Outcome", "Payment note", f"{LN}'s notes"]
     hdr(ws, r, PH, [4, 15, 22, 15, 26, 10, 50, 46, 44, 9, 16, 22, 11, 20, 16, 30]); r += 1
     dvo = DataValidation(type="list", formula1='"' + ",".join(OUTCOMES) + '"', allow_blank=True); ws.add_data_validation(dvo)
     dvy = DataValidation(type="list", formula1='"Y,N"', allow_blank=True); ws.add_data_validation(dvy)
@@ -80,9 +80,9 @@ def write(R: dict, C: dict, out: str) -> str:
             ("Today so far", 22), ("Last real conversation", 13), ("Stage", 16), ("Attempts required", 9),
             ("Attempt 1 time", 9), ("Attempt 1 outcome", 18), ("Attempt 2 time", 9), ("Attempt 2 outcome", 18), ("Attempt 3 time", 9),
             ("Attempt 3 outcome", 18), ("Attempt 4 time", 9), ("Attempt 4 outcome", 18), ("WhatsApp sent (Y/N)", 9), ("Next step date/time", 15),
-            ("Outcome", 20), ("Payment status", 14), ("Payment proof (UTR / txn ID)", 18), ("Attempts done", 9), ("Status", 15), ("Notes", 30), ("Lead ID", 36)]
+            ("Outcome", 20), ("Payment status", 14), ("Payment note (optional)", 18), ("Attempts done", 9), ("Status", 15), ("Notes", 30), ("Lead ID", 36)]
     COL = {n: i + 1 for i, (n, _) in enumerate(COLS)}
-    INPUTS = [n for n, _ in COLS if n.startswith("Attempt ") and "required" not in n] + ["WhatsApp sent (Y/N)", "Next step date/time", "Outcome", "Payment status", "Payment proof (UTR / txn ID)", "Notes"]
+    INPUTS = [n for n, _ in COLS if n.startswith("Attempt ") and "required" not in n] + ["WhatsApp sent (Y/N)", "Next step date/time", "Outcome", "Payment status", "Payment note (optional)", "Notes"]
     order = C["owner_order"]; ranges = {}
     def caller_sheet(owner, rows):
         ws = wb.create_sheet(owner[:31]); fb = next((f for f in C["feedback"] if f["caller"] == owner), None)
@@ -99,10 +99,10 @@ def write(R: dict, C: dict, out: str) -> str:
         first, last = top + 2, top + 1 + max(len(rows), 1)
         sc = L(COL["Status"]); ws.cell(row=top, column=1, value="Attempts logged").font = Font(name=F, bold=True, size=10)
         ws.cell(row=top, column=3, value=f"=SUM({L(COL['Attempts done'])}{first}:{L(COL['Attempts done'])}{last})")
-        ws.cell(row=top, column=4, value="Enrolled (with proof)").font = Font(name=F, bold=True, size=10)
+        ws.cell(row=top, column=4, value="Enrolled").font = Font(name=F, bold=True, size=10)
         ws.cell(row=top, column=5, value=f'=COUNTIF({sc}{first}:{sc}{last},"Enrolled")')
-        ws.cell(row=top, column=6, value="Paid? add proof").font = Font(name=F, bold=True, size=10)
-        ws.cell(row=top, column=7, value=f'=COUNTIF({sc}{first}:{sc}{last},"Paid? add proof")')
+        ws.cell(row=top, column=6, value="Payment link sent").font = Font(name=F, bold=True, size=10)
+        ws.cell(row=top, column=7, value=f'=COUNTIF({L(COL["Outcome"])}{first}:{L(COL["Outcome"])}{last},"Payment link sent")')
         ws.cell(row=top, column=8, value="Expected enrollments (sum of chances, estimate)").font = Font(name=F, bold=True, size=10)
         ws.cell(row=top, column=9, value=f"=SUM({L(COL['Est. chance (3 days)'])}{first}:{L(COL['Est. chance (3 days)'])}{last})").number_format = "0.0"
         hdr(ws, top + 1, [n for n, _ in COLS], [w for _, w in COLS]); ws.row_dimensions[top + 1].height = 42
@@ -113,7 +113,7 @@ def write(R: dict, C: dict, out: str) -> str:
         g = lambda n, rr: f"{L(COL[n])}{rr}"
         for i, r in enumerate(rows):
             rr = first + i; tier = r["tier"]
-            vals = {"#": i + 1, "Tier": ("A · VERIFY payment (marked enrolled)" if r.get("verify") else TL[tier]), "When to call": SLOT[tier],
+            vals = {"#": i + 1, "Tier": TL[tier], "When to call": SLOT[tier],
                     "Lead": r.get("name") or "Unnamed lead", "Phone": ("+91-" + r["phone"]) if r.get("phone") else "", "Course (confirmed)": r.get("course", ""),
                     "Est. chance (3 days)": r["chance"] / 100, "Missed call not returned": (f"Yes ({r['missed_last']})" if r.get("missed") else ""),
                     "Why this lead": r.get("why", ""), "Opening line": r.get("opening_line", ""), "Exact ask": r.get("exact_ask", ""),
@@ -129,7 +129,7 @@ def write(R: dict, C: dict, out: str) -> str:
             enr = f'OR({g("Outcome", rr)}="Paid – new enrollment",' + ",".join(f'{g(f"Attempt {k} outcome", rr)}="Paid – new enrollment"' for k in range(1, 5)) + f',{g("Payment status", rr)}="Paid")'
             stu = f'OR({g("Outcome", rr)}="Already a student",' + ",".join(f'{g(f"Attempt {k} outcome", rr)}="Already a student"' for k in range(1, 5)) + ")"
             ws.cell(row=rr, column=COL["Status"], value=(
-                f'=IF({stu},"Already a student",IF({enr},IF(LEN(TRIM({g("Payment proof (UTR / txn ID)", rr)}))>0,"Enrolled","Paid? add proof"),'
+                f'=IF({stu},"Already a student",IF({enr},"Enrolled",'
                 f'IF({g("Attempts done", rr)}>={g("Attempts required", rr)},"Done",IF({g("Attempts done", rr)}=0,"Not started","In progress"))))'))
             for n in ("Attempts done", "Status"): put(ws, rr, COL[n], ws.cell(row=rr, column=COL[n]).value, bold=True)
             for n in INPUTS: x = ws.cell(row=rr, column=COL[n]); x.fill = INP; x.border = BD; x.font = Font(name=F, size=9)
@@ -137,7 +137,7 @@ def write(R: dict, C: dict, out: str) -> str:
             dvo.add(g("Outcome", rr)); dvp.add(g("Payment status", rr)); dvy.add(g("WhatsApp sent (Y/N)", rr))
             ws.row_dimensions[rr].height = 96 if tier in "MAB" else 48
         rng = f"{sc}{first}:{sc}{last}"
-        for text, col in (("Enrolled", "B7E1C1"), ("Paid? add proof", "FFD966"), ("Already a student", "D9D2E9"), ("Not started", "F8D7D3"), ("Done", "E2E2E2")):
+        for text, col in (("Enrolled", "B7E1C1"), ("Already a student", "D9D2E9"), ("Not started", "F8D7D3"), ("Done", "E2E2E2")):
             ws.conditional_formatting.add(rng, FormulaRule(formula=[f'{sc}{first}="{text}"'], fill=PatternFill("solid", fgColor=col)))
         ws.freeze_panes = ws.cell(row=first, column=COL["Phone"]); ws.auto_filter.ref = f"A{top+1}:{L(len(COLS))}{last}"
         ranges[owner] = (ws.title, first, last)
@@ -145,7 +145,7 @@ def write(R: dict, C: dict, out: str) -> str:
     summ = wb.create_sheet("Team summary", 1); guide = wb.create_sheet("How to use", 2)
     for o in order: caller_sheet(o, R["by_owner"].get(o, []))
     summ["A1"] = f"Team summary — {C['day_label']} (updates as callers fill their sheets)"; summ["A1"].font = Font(name=F, bold=True, size=14)
-    H = ["Caller", "Leads", "M", "P", "A", "B", "F", "R", "C", "Attempts logged", "Not started (3+ attempts due)", "Enrolled (with proof)", "Paid? add proof", "Already a student", "Expected enrollments (estimate)", "Target"]
+    H = ["Caller", "Leads", "M", "P", "A", "B", "F", "R", "C", "Attempts logged", "Not started (3+ attempts due)", "Enrolled", "Payment link sent", "Already a student", "Expected enrollments (estimate)", "Target"]
     hdr(summ, 3, H, [20, 8, 6, 6, 6, 6, 6, 6, 6, 11, 12, 12, 12, 12, 14, 8])
     for i, o in enumerate(order):
         rr = 4 + i; sh, f, l = ranges[o]; q = f"'{sh}'!"
@@ -156,7 +156,7 @@ def write(R: dict, C: dict, out: str) -> str:
         put(summ, rr, 10, f"=SUM({T('Attempts done')})", size=10)
         put(summ, rr, 11, f'=COUNTIFS({T("Status")},"Not started",{T("Attempts required")},">=3")', size=10)
         put(summ, rr, 12, f'=COUNTIF({T("Status")},"Enrolled")', size=10, bold=True)
-        put(summ, rr, 13, f'=COUNTIF({T("Status")},"Paid? add proof")', size=10)
+        put(summ, rr, 13, f'=COUNTIF({T("Outcome")},"Payment link sent")', size=10)
         put(summ, rr, 14, f'=COUNTIF({T("Status")},"Already a student")', size=10)
         put(summ, rr, 15, f"=SUM({T('Est. chance (3 days)')})", size=10).number_format = "0.0"
         put(summ, rr, 16, C["targets"].get(o, 4), size=10)
@@ -166,7 +166,7 @@ def write(R: dict, C: dict, out: str) -> str:
         if j == 16: continue
         c = put(summ, tr, j, f"=SUM({L(j)}4:{L(j)}{tr-1})", bold=True, size=10)
         if j == 15: c.number_format = "0.0"
-    summ.cell(row=tr + 2, column=1, value="Enrolled counts only rows with Outcome 'Paid – new enrollment' (or Payment status 'Paid') AND a UTR/transaction ID in Payment proof. 'Already a student' is never counted. Expected enrollments are judgement-based estimates, not targets.").font = Font(name=F, italic=True, size=9)
+    summ.cell(row=tr + 2, column=1, value="Enrolled counts rows with Outcome 'Paid – new enrollment' or Payment status 'Paid' (the lead saying they paid is enough). Leads already enrolled are never on the sheets. 'Already a student' is never counted. Expected enrollments are judgement-based estimates, not targets.").font = Font(name=F, italic=True, size=9)
     guide["A1"] = "How to use this workbook"; guide["A1"].font = Font(name=F, bold=True, size=14); guide.column_dimensions["A"].width = 130
     for k, ln in enumerate(C["how_to"], 3):
         x = guide.cell(row=k, column=1, value=ln); x.font = Font(name=F, size=10, bold=ln.endswith(":")); x.alignment = Alignment(wrap_text=True)

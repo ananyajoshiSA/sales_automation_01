@@ -14,7 +14,7 @@ from analytics.daily_plan.common import LEADER, TEAM
 SLOTS = {"P": "10:00–11:30, balance first", "M": "10:00–10:30; new missed calls within 15 min",
          "A": "10:30–11:30, redial in 10–15 min, retry 15:00 & 19:00", "B": "11:30–13:00, retry 15:30",
          "F": "14:00–15:00, retry 17:30", "R": "16:00–17:00, WhatsApp first", "C": "17:00–18:30, WhatsApp first"}
-GROUPS = ["1 · Money already moving — collect or verify today", "2 · Can close today (Tier A)",
+GROUPS = ["1 · Payment promised for today — close on the call", "2 · Can close today (Tier A)",
           "3 · Callback booked for today — make sure it happens on time", "4 · Hot follow-ups (10%+) — the ask must be made",
           "5 · Leads who rang us — return first", "6 · Asked for a later day — do not call today, keep the date"]
 DAYS = ["mon", "tue", "wed", "thu", "fri", "sat", "sun"]
@@ -25,20 +25,20 @@ AB_RULES = [
     "Say the fee in the first minute if asked. Send the payment link while they are on the line: UPI, debit card, no-card EMI, NBFC loan, or the Rs 3,000 seat block. Stay on until it goes through, or fix the exact time today.",
     "No income figures, guarantees or 'listed company' claims. Use the fee sheet and batch dates on screen.",
     "Respect 'call on <day>' and 'WhatsApp only'. Send the WhatsApp and keep the date the lead gave.",
-    "Paid on the call? Outcome 'Paid – new enrollment' and the UTR in Payment proof. Course Enrolled in LeadSquared only after that.",
+    "Paid on the call? Outcome 'Paid – new enrollment' (a note of what they paid is enough) and move the lead to Course Enrolled.",
     "Write a note (who decides, blocker, next step, time) before the next dial.",
 ]
 HOURS = [
     ["09:30", "Log in; test your line with one call.", "Payment links, EMI sheets and seat-block links ready."],
     ["09:45", "Huddle: read out your 3 rules and your P/M/A names.", "Attendance; reassign absentees' P/A leads; check lines."],
-    ["10:00–10:30", "Return every missed call (M). P balances first.", "Accounts: UTRs for the 'verify' leads."],
+    ["10:00–10:30", "Return every missed call (M).", "Line up payment links for the leads who promised to pay today."],
     ["10:30–11:30", "Tier A only. Link sent on the call. No answer → WhatsApp + redial in 10–15 min.", "Sit on the biggest A calls; approve EMI/discount asks live."],
     ["11:30–13:00", "Tier B. Ask for the Rs 3,000 seat block or EMI application on the call.", "11:30: every A dialled twice? 12:00: payments check."],
     ["13:00–14:00", "Lunch in two shifts; missed calls always covered.", "13:00: share of dials on the sheet."],
     ["14:00–15:00", "F: new leads, one program, fixed callback.", "14:00 status report arrives: act on its to-do list."],
     ["15:00–16:00", "Round 2 on every unreached A and B.", "Links sent on every A/B conversation?"],
     ["16:00–18:30", "R and C (WhatsApp first). Old leads only if every A/B row has an outcome.", "17:00 status report; 18:00 stage hygiene."],
-    ["18:30–20:30", "Evening round: unreached A/B and booked callbacks.", "19:30 day close; post the count with names and UTRs."],
+    ["18:30–20:30", "Evening round: unreached A/B and booked callbacks.", "19:30 day close; post the count with names."],
 ]
 
 
@@ -67,9 +67,9 @@ def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict
         for r in rs:
             cb = r.get("callback_requested") or ""
             later = bool(later_rx.search(cb)) and not today_rx.search(cb)
-            if later and r["tier"] != "P" and not r.get("verify"):
+            if later:
                 g = 5 if r["tier"] in "AB" and r["chance"] >= 10 else None
-            elif r["tier"] == "P" or r.get("verify"):
+            elif r["tier"] == "A" and re.search(r"pay|link|emi|block|token|today", (r.get("exact_ask") or "") + " " + cb, re.I) and r["chance"] >= 30:
                 g = 0
             elif r["tier"] == "A":
                 g = 1
@@ -84,19 +84,17 @@ def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict
             if g is None:
                 continue
             first = o.split()[0]
-            role = {0: "Accounts check first: UTR or not. Paid → onboarding + UTR in Payment proof. Not paid → link sent on the call and stage back to Follow Up For Closure.",
+            role = {0: f"Payment promised today: make sure {first} sends the link while the lead is on the line and stays on until it goes through.",
                     1: f"Make sure {first} calls in the 10:30 A block and sends the link while the lead is on the line; no answer → redial within 15 min, again at 15:00 and 19:00.",
                     2: f"Callback agreed for today ({_cut(cb, 60)}). Make sure it is made on time, with the fee and the Rs 3,000 block link.",
                     3: "Check the ask is made on the call: fee, Rs 3,000 block link sent live, and a dated pay time. 'Thinking' → fix the date and who decides.",
                     4: "Return the call first; find why they rang and answer it on the call; if it's the fee or batch, send the link.",
                     5: f"Asked to be called {_cut(cb, 50)}. Do not call today; put the date in the calendar and make sure it happens."}[g]
-            if r["tier"] == "P":
-                role = "Already paid a booking. Make sure the balance link goes out on the call today and the UTR is entered."
             default = {0: "12:00", 1: "11:30", 2: "19:00", 3: "15:30", 4: "10:30", 5: "later"}[g]
             ck = _hhmm(cb) or default if g in (2, 5) else default
             ov = overrides.get(r["lead_id"], {})
             out.append({"group": ov.get("group", g), "lead_id": r["lead_id"], "owner": o, "name": r.get("name") or "Unnamed lead",
-                        "phone": r.get("phone"), "course": r.get("course", ""), "chance": 100 if r["tier"] == "P" else r["chance"],
+                        "phone": r.get("phone"), "course": r.get("course", ""), "chance": r["chance"],
                         "why": (r.get("why") or "")[:420], "ask": r.get("exact_ask", ""), "role": ov.get("role", role),
                         "check_by": ov.get("check_by", ck), "who_decides": r.get("who_decides", ""), "how_pay": r.get("how_pay", "")})
     return sorted(out, key=lambda f: (f["group"], -f["chance"]))
@@ -143,8 +141,7 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     ask = sum(x.get("full_ask_made", 0) for x in q.values())
     link = sum(x.get("link_sent_on_call", 0) for x in q.values())
     enr = facts["enrollments"]
-    confirmed = [e for e in enr if e["status"] == "paid_new"] or [{"name": r.get("name"), "owner": r["owner"]} for r in rows["paid"]]
-    no_proof = [e for e in enr if e["status"] != "paid_new"]
+    confirmed = enr
     sb = facts.get("stats_before") or {}
     TB = sb.get("team", {}) if sb else {}
     M = facts["missed"]
@@ -166,12 +163,11 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
          + f". Before 16:00, {T['before16'] - T['before16_on_sheet']} of {T['before16']} dials went to leads not on the sheet."],
         ["15:00 Second round on unreached A", _yn(T["a_unreached"] and T["a_retry_15"] >= len(T["a_unreached"]) * 0.8, T["a_retry_15"] > 0),
          f"Of {len(T['a_unreached'])} A leads not reached, {T['a_retry_15']} {'was' if T['a_retry_15'] == 1 else 'were'} retried 15:00–16:00 and {T['a_retry_evening']} after 18:30."],
-        ["Course Enrolled only after payment", _yn(not no_proof, False), f"{len(no_proof)} of {len(enr)} leads moved to Course Enrolled have no payment seen on the calls."],
         ["Every A/B call ends with the link sent on the call", _yn(conv and link >= conv * 0.6, link >= conv * 0.2), f"Link sent on the call {link} times in {conv} real conversations read."],
         ["Tier B coverage", _yn(T["b_total"] and T["b_tried"] >= T["b_total"] * 0.9, T["b_tried"] >= T["b_total"] * 0.5), f"{T['b_tried']} of {T['b_total']} B leads dialled, {T['b_reached']} reached."],
     ] if facts.get("has_plan") else [["Plan adherence", "—", "No saved plan for the previous day, so adherence could not be measured."]]
     scorecard = [
-        ["Enrollments (payment seen on our call)", "—", f"{len(confirmed)} confirmed" + (f", {len(no_proof)} more marked Course Enrolled to verify" if no_proof else ""), ""],
+        ["Enrollments (Course Enrolled or paid on the call)", "—", str(len(confirmed)), ", ".join(f"{e['name']} ({e['owner'].split()[0]})" for e in confirmed[:8])],
         ["Callers who dialled", f"{TB.get('callers_dialling', '—')} of {TB.get('callers', '—')}" if TB else "—", f"{T['callers_dialling']} of {T['callers']}",
          ", ".join(T["absent"]) + (" absent" if T["absent"] else "")],
         ["Dials", f"{TB['dials']:,}" if TB else "—", f"{T['dials']:,}", ""],
@@ -197,12 +193,10 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     if M["unreturned"]:
         missed_list.append(("Leads who rang us and were not called back", f"{T['inbound_missed']} of {T['inbound']} inbound calls missed. Unreturned by owner: "
                             + ", ".join(f"{k} {v}" for k, v in sorted(M["unreturned"].items(), key=lambda kv: -kv[1])) + "."))
-    if M["no_proof"]:
-        missed_list.append(("Stages that hide the truth", "Marked Course Enrolled with no payment on the calls: " + "; ".join(f"{x['name']} ({x['owner']})" for x in M["no_proof"][:10]) + "."))
     if lines:
         missed_list.append(("Lines", "Callers whose non-answers mostly log as 0 seconds: " + ", ".join(lines) + ". Move them to a line that shows failures."))
     missed_list += [tuple(x) for x in N.get("missed_extra", [])]
-    verify = [p for p in pri if p["group"] == 0]
+    promised = [p for p in pri if p["group"] == 0]
     cbs = [p for p in pri if p["group"] == 2]
     checks = [
         ["09:30", "Payment links, EMI sheets and the Rs 3,000 seat-block link ready for every program on the P/A lists.", "Get missing links from ops before 10:00."],
@@ -210,39 +204,38 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
          + (f" Lines hiding failures: {', '.join(lines)}." if lines else ""), "Absent → their P/A leads go to the callers present, with a note. Bad line → telephony now."],
         ["10:00", f"Missed calls returned first ({sum(1 for rs in S.values() for r in rs if r.get('missed'))} leads in the M rows).", "Unreturned at 10:30 → reassign."],
         ["11:30", "Every Tier A lead dialled at least twice (2nd dial within 15 min of the first).", "Filter each sheet: Tier = A, attempts blank → ask why, now."],
-        ["12:00", "Accounts: UTR or not for " + (", ".join(p["name"] for p in verify[:10]) or "the verify leads") + ".",
-         "Paid → UTR in Payment proof. Not paid → stage back to Follow Up For Closure; next call slot."],
+        ["12:00", "Payments promised for today done? " + (", ".join(p["name"] for p in promised[:10]) or "Group 1 leads") + ".",
+         "Not paid → you join the next call; fix the exact time today."],
         ["13:00", "Share of dials on the sheet (yesterday: " + ", ".join(f"{n.split()[0]} {st['callers'][n]['on_sheet_pct']}%" for n in callers if st["callers"][n]["dials"]) + ").",
          "Below 60% → stop old-lead dialling until 16:00."],
         ["14:00", "Status report arrives by email: first-half numbers and the second-half to-do list.", "Act on its to-do list at once."],
         ["15:00", "Second A/B round started; payment link sent on every A/B conversation.", "Check Notes: 'link sent' on every A/B answered call."],
         ["17:00", "Status report 2: who is behind, what is left for the evening.", "Reassign untouched P/A leads."],
-        ["18:00", "Stage hygiene: no Not Interested under 2 min of talk; no Course Enrolled before the payment shows."
-         + (f" Fix: {', '.join(x.get('name') or '' for x in rows['stage_fix'])}." if rows["stage_fix"] else ""), "Reopen wrong ones and note why."],
+        ["18:00", "Stage hygiene: no Not Interested under 2 min of talk; every lead who paid moved to Course Enrolled.", "Reopen wrong ones and note why."],
         ["19:00", "Evening callbacks: " + (", ".join(f"{p['name']} {p['check_by']}" for p in cbs[:8]) or "booked callbacks") + ".", "Unreached → WhatsApp + one more dial by 20:00."],
-        ["19:30", "Day close: count only rows with Status 'Enrolled' (UTR entered). 'Paid? add proof' rows get the proof or are not counted.", "Post the count with names and UTRs."],
+        ["19:30", "Day close: count rows with Status 'Enrolled' and leads moved to Course Enrolled today.", "Post the count with names."],
     ]
     dropped = rows["dropped"]
     cnt = lambda *s: sum(1 for x in dropped if x.get("status") in s)  # noqa: E731
     C = {
         "day_label": d.strftime("%a %-d %b %Y"), "team": team, "leader": leader,
         "shivangi_title": f"{leader} (TL) — {d.strftime('%A %-d %b %Y')}: your leads, your checks, your feedback",
-        "shivangi_intro": N.get("intro") or (f"{pl}: {len(confirmed)} confirmed enrollment(s)" + (f"; {len(no_proof)} more marked Course Enrolled need a UTR" if no_proof else "")
+        "shivangi_intro": N.get("intro") or (f"{pl}: {len(confirmed)} enrollment(s)"
                                              + f". {len(pri)} leads below are where today's enrollments can come from. Chances are estimates."),
         "priority": pri, "priority_groups": GROUPS, "checks": checks, "feedback": feedback,
         "changes": N.get("changes") or ["Return every missed call within 15 minutes.", "Tier A only from 10:30 to 11:30; redial within 10–15 minutes; retry at 15:00 and 19:00.",
                                         "Every A/B conversation ends with the payment link sent while the lead is on the line.",
-                                        "Course Enrolled only after the payment shows, with the UTR in Payment proof.",
+                                        "Move every lead who paid to Course Enrolled the same day.",
                                         "Old/recycled leads only after 16:00 and only when every A/B row has an outcome."],
         "slots": SLOTS, "owner_order": sorted(S, key=lambda o: (-sum(1 for r in S[o] if r["tier"] in "PMAB"), o)),
         "caller_note": "Work top to bottom: P (collect balance) and M (missed calls) first, then A, then B. Yellow cells are yours to fill after every attempt. "
-                       "Status shows 'Enrolled' only when Outcome is 'Paid – new enrollment' (or Payment status 'Paid') AND a UTR is in Payment proof.",
+                       "Status shows 'Enrolled' when Outcome is 'Paid – new enrollment' or Payment status is 'Paid'. Leads already enrolled are never on this sheet.",
         "targets": {},
         "how_to": ["Who this is for:", f"{leader} uses the first sheet all day. Each caller uses their own sheet. Team summary updates by itself.",
                    "Order of work:", "P = paid booking, collect the balance. M = the lead called us and nobody called back. A = can close today. B = hot follow-up. "
                    "F = new lead, first real conversation. R = closure-stage lead gone quiet (WhatsApp first). C = nurture (WhatsApp first).",
                    "After every attempt:", "Fill the attempt time and outcome. After the call: Next step date/time, Payment status, Notes (who decides, blocker, next step, time).",
-                   "Counting enrollments:", "Choose Outcome 'Paid – new enrollment' and type the UTR / transaction ID in Payment proof. Without a UTR the Status shows 'Paid? add proof' and it is not counted. Existing students: 'Already a student', send to support, don't change the stage.",
+                   "Counting enrollments:", "Choose Outcome 'Paid – new enrollment' when the lead says they have paid (a note of what they paid is enough), then move the lead to Course Enrolled. Leads already enrolled never appear on the sheets. Existing students: 'Already a student', send to support, don't change the stage.",
                    "Chances:", "'Est. chance (3 days)' is a judgement-based estimate from the lead's calls and transcripts, not a target.",
                    "Data:", f"LeadSquared pulled {rows['built_at']} IST; {rows['reads']} leads re-read from {pl}'s calls, Zipteams notes and Salesa transcripts."],
         "pdf_title": f"Elite call plan {d.strftime('%a %-d %b')}", "cover_kicker": f"{team} · for {leader}, team leader",
@@ -253,13 +246,13 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
         "priority_intro": ("This is every lead where an enrollment could come today, in groups: money already moving, Tier A, callbacks booked for today, hot follow-ups, "
                            "leads who rang us, and leads who asked for a later day. The caller makes the call; <b>you own the outcome</b>."),
         "huddle": "09:45 huddle (5 minutes): each caller reads out their 3 rules and their P/M/A names with the time they'll call. Then: 'Every A/B call ends with the link sent while the lead is on the line.'",
-        "tiles": [[str(len(confirmed)), f"enrollments confirmed on {pl}" + (f" ({len(no_proof)} more to verify)" if no_proof else "")],
+        "tiles": [[str(len(confirmed)), f"enrollments on {pl} (Course Enrolled or paid on the call)"],
                   [f"{T['callers_dialling']} of {T['callers']}", f"callers who dialled on {pl}"],
                   [str(len(pri)), "leads on your priority list today"],
                   [str(sum(1 for rs in S.values() for r in rs if r["tier"] in "PA")), "P + A leads across the team"],
                   [f"{ask} of {conv}", f"real conversations on {pl} with the full ask"],
                   [f"{T['inbound_missed']} of {T['inbound']}", f"calls from leads missed on {pl}"]],
-        "data_note": N.get("data_note") or f"Data: LeadSquared pulled {rows['built_at']} IST. Chances are estimates. Payments are not in the LeadSquared API, so every payment needs a UTR from accounts.",
+        "data_note": N.get("data_note") or f"Data: LeadSquared pulled {rows['built_at']} IST. Chances are estimates. An enrollment is a lead in Course Enrolled or one who said on a call that they paid.",
         "lessons": {"worked": N.get("lessons", {}).get("worked", []), "count": N.get("enrollment_summary", ""),
                     "didnt": N.get("lessons", {}).get("didnt", []), "plan_wrong": N.get("lessons", {}).get("plan_wrong", [])},
         "numbers_table": [
@@ -283,7 +276,7 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
                    "prev_priority": [[f"{x['name']} ({x['owner'].split()[0] if x['owner'] else '?'})", _cut(x["what"], 200), x["result"]] for x in facts["priority_outcomes"]],
                    "missed": missed_list, "talking": N.get("talking") or [f"Attendance: {', '.join(T['absent']) or 'everyone'} — who covers their A leads?",
                                                                            f"The ask: {ask} of {conv} conversations had price + link + date. Make 'link sent on the call' a checked rule.",
-                                                                           "Stage discipline: Course Enrolled only after the UTR.",
+                                                                           "Stage discipline: every lead who paid moved to Course Enrolled the same day.",
                                                                            "Callbacks: every promised time on a phone alarm; checked at 19:00."]},
     }
     return C

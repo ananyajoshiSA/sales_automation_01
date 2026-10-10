@@ -1,7 +1,7 @@
 # Daily plan pipeline: 09:00 report and 14:00 / 17:00 status checks
 
 **Lever:** calling the right leads first, returning leads' calls, and the ask on every conversation. It is seen in
-enrollments with a UTR on the team leader's day-close count.
+enrollments on the team leader's day-close count.
 
 Three scheduled Claude Code routines run Monday–Saturday (IST) in fresh cloud sessions on this repository:
 
@@ -33,7 +33,7 @@ D=$(TZ=Asia/Kolkata date +%F)
 2. **Write the narrative** in `data/daily/$D/narrative.json`, after reading `data/daily/$D/facts.json`. To get that file
    first, run `build` once without the narrative; it writes `facts.json` and `content.json`. Keys:
    - `headline` (one paragraph; `<b>` allowed): the previous day's result in plain words, with the numbers
-   - `enrollment_summary`: who paid, with the evidence, who is only *marked* Course Enrolled, and the range
+   - `enrollment_summary`: who enrolled (Course Enrolled, or said on a call that they paid), with what each paid
    - `intro`: two or three lines for the team leader's sheet
    - `feedback`: `{caller: {good, fix, rules: [3 short rules], one_line}}`, from that caller's numbers and conversations
    - `lessons`: `{worked: [...], didnt: [...], plan_wrong: [...]}` (`<b>` allowed); `plan_wrong` compares the
@@ -42,7 +42,7 @@ D=$(TZ=Asia/Kolkata date +%F)
    - `changes`: today's dialling rules, each tied to a number from the previous day
    - optional: `missed_extra: [[title, text]]` and `priority_overrides: {lead_id: {role, check_by, group}}`
 
-   Follow GOAL.md and CLAUDE.md: never invent numbers, label estimates, and count an enrollment only with payment evidence.
+   Follow GOAL.md and CLAUDE.md: never invent numbers and label estimates. Course Enrolled, or a lead saying on a call that they paid, is an enrollment.
 3. **Build, check and send:**
    ```bash
    .venv/bin/python -m analytics.daily_plan build $D --publish-state --mail
@@ -59,7 +59,7 @@ D=$(TZ=Asia/Kolkata date +%F)
 ```
 
 The report covers callers dialling or not, P/A leads tried and reached, every priority lead's status (untouched, tried,
-reached), missed calls not returned, callbacks due or overdue, leads marked Course Enrolled today (UTR to check), lines
+reached), missed calls not returned, callbacks due or overdue, leads enrolled today, lines
 hiding failures, and the to-do list for the next block. It needs no Claude judgement. If the morning state is missing,
 the report still shows the team numbers and says the plan was not found.
 
@@ -73,4 +73,5 @@ details. Never put these in the repo or in chat.
 
 - WhatsApp delivery needs a WhatsApp Business provider account and approved templates; it is a live-system write, so
   it needs the owner's go-ahead.
-- Payments are not in the LeadSquared API; enrollments still need a UTR from accounts (GOAL.md G1).
+- Payments are not in the LeadSquared API (GOAL.md G1). An enrollment is a lead in Course Enrolled, or a lead who said on a
+  call that they paid; no screenshot or UTR is needed. Enrolled leads never appear on the sheets or the status to-do list.

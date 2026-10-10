@@ -6,7 +6,7 @@ from __future__ import annotations
 import html
 from datetime import datetime
 
-from analytics.daily_plan.common import Snap, ist
+from analytics.daily_plan.common import CLOSED, Snap, ist
 from analytics.daily_plan.stats import day_stats
 
 GROUP_SHORT = ["Money moving", "Tier A", "Callback today", "Hot B", "Rang us", "Later day"]
@@ -36,6 +36,9 @@ def lead_status(snap: Snap, lid: str, date: str) -> tuple[str, str]:
 def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) -> dict:
     """``plan`` is the resolved state {lead_id: entry} for today."""
     now = snap.fetched
+    # enrolled leads are done: never on the to-do list (legacy P/verify rows, or Course Enrolled before today's calls)
+    plan = {lid: e for lid, e in plan.items() if not (e.get("tier") == "P" or e.get("verify")
+                                                       or (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED)}
     st = day_stats(snap, date, plan)
     T = st["team"]
     pri = []
@@ -85,7 +88,7 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     if later:
         todo.append("Callbacks booked later today: " + "; ".join(f"{p['name']} {p['check_by']} ({p['owner'].split()[0]})" for p in later[:10]) + ".")
     if enr_today:
-        todo.append("Marked Course Enrolled today — check the UTR with accounts before counting: "
+        todo.append(f"Enrolled today ({len(enr_today)}): "
                     + "; ".join(f"{e['name']} ({e['owner'].split()[0]}, by {e['by'] or '?'})" for e in enr_today) + ".")
     if lines:
         todo.append(f"Lines: most non-answers log as 0 seconds for {', '.join(lines)} — switch them to the +91 8065 pool.")
@@ -105,7 +108,7 @@ def html_doc(S: dict, team: str) -> str:
          f"<p class='small'>LeadSquared calls to {e(T['last_call'] or '—')} IST. Plan: today's priority list and sheets. Times are IST.</p>",
          f"<div class='box'><b>So far:</b> {T['dials']:,} dials · {T['answer_pct']}% answered · {T['real']} real conversations · {T['talk_min']} min talk · "
          f"{T['callers_dialling']} of {T['callers']} callers dialling · P/A leads tried {T['a_tried']} of {T['a_total']} · "
-         f"{T['inbound_missed']} of {T['inbound']} calls from leads missed · {len(S['enrolled_today'])} marked Course Enrolled today (UTR to check).</div>",
+         f"{T['inbound_missed']} of {T['inbound']} calls from leads missed · {len(S['enrolled_today'])} enrolled today.</div>",
          f"<h2>To do in the next block ({e(S['block'])})</h2><ol>" + "".join(f"<li>{e(x)}</li>" for x in S["todo"]) + "</ol>",
          "<h2>Callers so far</h2><table><tr><th>Caller</th><th>Dials</th><th>Ans.</th><th>Real conv.</th><th>Talk min</th><th>First dial</th>"
          "<th>On sheet</th><th>P/A tried</th><th>P/A reached</th><th>Missed calls not returned</th></tr>"]
@@ -121,7 +124,7 @@ def html_doc(S: dict, team: str) -> str:
                  f"<td>{e(p['phone'])}</td><td>{e(p['owner'])}</td><td>{e(p['check_by'])}</td><td class='{cls}'>{e(p['detail'])}</td></tr>")
     H.append("</table>")
     if S["enrolled_today"]:
-        H.append("<h2>Marked Course Enrolled today (not counted until the UTR is seen)</h2><table><tr><th>Lead</th><th>Owner</th><th>At</th><th>By</th><th>Note</th></tr>"
+        H.append("<h2>Enrolled today</h2><table><tr><th>Lead</th><th>Owner</th><th>At</th><th>By</th><th>Note</th></tr>"
                  + "".join(f"<tr><td>{e(x['name'])}</td><td>{e(x['owner'])}</td><td>{e(x['at'])}</td><td>{e(x['by'])}</td><td>{e(x['comment'])}</td></tr>" for x in S["enrolled_today"])
                  + "</table>")
     H.append("</body></html>")

@@ -46,23 +46,21 @@ def test_previous_working_day_skips_a_quiet_sunday():
     assert previous_working_day(s, "2026-10-12") == "2026-10-10"
 
 
-def test_rows_paid_verify_stage_fix_excluded_and_missed_call():
-    reads = {"L1": {"lead_id": "L1", "name": "Lead1", "status": "paid_new", "tier": "A", "chance": 60, "exact_ask": "Send the balance link",
-                    "payment_evidence": "Rs 3,000 paid on the call"},
-             "L2": {"lead_id": "L2", "name": "Lead2", "status": "enrolled_no_proof", "tier": "A", "chance": 2},
+def test_enrolled_or_paid_leads_never_go_back_on_a_sheet():
+    reads = {"L1": {"lead_id": "L1", "name": "Lead1", "status": "paid_new", "tier": "D", "chance": 0, "payment_evidence": "Rs 3,000 paid on the call"},
              "L3": {"lead_id": "L3", "name": "Lead3", "status": "21day", "tier": "D", "chance": 0},
-             "L4": {"lead_id": "L4", "name": "Lead4", "status": "active", "tier": "B", "chance": 12}}
-    leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] == "L5" else l for l in LEADS]
-    reads["L5"] = {"lead_id": "L5", "name": "Lead5", "status": "active", "tier": "B", "chance": 10}
+             "L4": {"lead_id": "L4", "name": "Lead4", "status": "active", "tier": "B", "chance": 12},
+             "L5": {"lead_id": "L5", "name": "Lead5", "status": "active", "tier": "A", "chance": 40}}
+    leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] in ("L5", "L6") else l for l in LEADS]
     cs = [call("u0", "L4", "2026-10-09 10:00:00", "Missed", 0, "inbound")]
-    prev = {"L7": {"owner": "Asha K", "tier": "C", "chance": 3}}
+    prev = {"L7": {"owner": "Asha K", "tier": "C", "chance": 3}, "L6": {"owner": "Ravi S", "tier": "A", "chance": 30},
+            "L8": {"owner": "Ravi S", "tier": "P", "chance": 0}}
     R = rows.build_rows(snap(cs, leads=leads), "2026-10-10", reads, prev, [])
     flat = {r["lead_id"]: r for rs in R["by_owner"].values() for r in rs}
-    assert flat["L1"]["tier"] == "P" and flat["L1"]["chance"] == 0 and [p["name"] for p in R["paid"]] == ["Lead1"]
-    assert [x["lead_id"] for x in R["stage_fix"]] == ["L2"] and "L2" not in flat
+    assert not {"L1", "L5", "L6", "L8"} & set(flat)                       # paid on a call, Course Enrolled, or an old paid row
+    assert sorted(p["lead_id"] for p in R["paid"]) == ["L1", "L5"]
     assert "L3" not in flat and R["dropped"][0]["status"] == "21day"
     assert flat["L4"]["tier"] == "M" and flat["L4"]["missed"] == 1
-    assert flat["L5"]["verify"] and flat["L5"]["tier"] == "A"
     assert flat["L7"]["source"] == "carried" and flat["L7"]["tier"] == "C"
 
 
@@ -71,13 +69,13 @@ def test_priority_groups_respect_the_day_the_lead_asked_for():
         {"lead_id": "a", "name": "A", "tier": "A", "chance": 30, "callback_requested": ""},
         {"lead_id": "b", "name": "B", "tier": "B", "chance": 8, "callback_requested": "Sat 10 Oct 18:00"},
         {"lead_id": "c", "name": "C", "tier": "B", "chance": 12, "callback_requested": "Monday evening"},
-        {"lead_id": "d", "name": "D", "tier": "P", "chance": 0, "callback_requested": ""},
+        {"lead_id": "d", "name": "D", "tier": "A", "chance": 40, "callback_requested": "", "exact_ask": "Send the payment link today"},
         {"lead_id": "e", "name": "E", "tier": "C", "chance": 2, "callback_requested": ""}]}}
     g = {p["lead_id"]: (p["group"], p["check_by"]) for p in content.priority(R, "2026-10-10")}
     assert g == {"d": (0, "12:00"), "a": (1, "11:30"), "b": (2, "18:00"), "c": (5, "later")}
 
 
-def test_workbook_counts_an_enrollment_only_with_a_utr(tmp_path):
+def test_workbook_counts_paid_without_asking_for_proof(tmp_path):
     R = {"by_owner": {"Asha K": [{"lead_id": "L1", "name": "Lead1", "tier": "A", "chance": 30, "phone": "9000000001"}]}}
     C = {"leader": "Tara L", "review": {"day_label": "Fri 9 Oct"}, "slots": content.SLOTS, "shivangi_title": "t", "shivangi_intro": "i",
          "priority": [], "priority_groups": content.GROUPS, "checks": [], "feedback": [], "changes": [], "caller_note": "n",
@@ -86,15 +84,17 @@ def test_workbook_counts_an_enrollment_only_with_a_utr(tmp_path):
     from openpyxl import load_workbook
     ws = load_workbook(out)["Asha K"]
     formulas = [c.value for row in ws.iter_rows() for c in row if isinstance(c.value, str) and c.value.startswith("=IF(")]
-    assert formulas and all('"Paid? add proof"' in f and "LEN(TRIM(" in f and '"Already a student"' in f for f in formulas)
+    assert formulas and all('"Enrolled"' in f and "proof" not in f and '"Already a student"' in f for f in formulas)
 
 
 def test_status_lists_untouched_tried_and_unreturned():
     plan = {"L1": {"owner": "Asha K", "tier": "A", "group": 1, "check_by": "11:30"},
             "L3": {"owner": "Asha K", "tier": "A", "group": 1, "check_by": "11:30"},
-            "L5": {"owner": "Asha K", "tier": "B", "group": 2, "check_by": "18:00"}}
+            "L5": {"owner": "Asha K", "tier": "B", "group": 2, "check_by": "18:00"},
+            "L7": {"owner": "Asha K", "tier": "A", "group": 1, "check_by": "11:30"}}
     cs = [call("u1", "L3", "2026-10-10 05:00:00"), call("u0", "L2", "2026-10-10 06:00:00", "Missed", 0, "inbound")]
-    S = status.build(snap(cs), "2026-10-10", plan, [], "Tara L")
+    leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] == "L7" else l for l in LEADS]
+    S = status.build(snap(cs, leads=leads), "2026-10-10", plan, [], "Tara L")
     by = {p["lead_id"]: p["status"] for p in S["priority"]}
     assert by == {"L1": "untouched", "L3": "tried", "L5": "untouched"}
     text = " ".join(S["todo"])
