@@ -38,7 +38,10 @@ def main(first_month: str, last_month: str, out_dir: str) -> None:
                 leads.append(l)
     members = [(u, t) for t in TEAMS for u in c.get_users_in_group(t)]
     team_of_owner = {u["ID"]: t for u, t in members}
-    team_callers = sorted({f"{u.get('FirstName') or ''} {u.get('LastName') or ''}".strip() for u, _ in members})
+    team_of_caller: dict[str, str] = {}
+    for u, t in members:
+        team_of_caller.setdefault(f"{u.get('FirstName') or ''} {u.get('LastName') or ''}".strip(), t)
+    team_callers = sorted(team_of_caller)
     print(f"{len(tags)} collection tags, {len(leads)} tagged leads", file=sys.stderr)
     json.dump(leads, open(os.path.join(out_dir, "tagged_leads.json"), "w"))
     ids = os.path.join(out_dir, "ids.json")
@@ -46,7 +49,7 @@ def main(first_month: str, last_month: str, out_dir: str) -> None:
     fetch_histories(ids, os.path.join(out_dir, "hist.jsonl"))
     json.dump({"fetched_at_utc": now_utc().strftime("%Y-%m-%d %H:%M:%S"), "bootcamps": tags,
                "months": [first_month, last_month], "team_of_owner": team_of_owner,
-               "team_callers": team_callers},
+               "team_callers": team_callers, "team_of_caller": team_of_caller},
               open(os.path.join(out_dir, "meta.json"), "w"), indent=1)
 
 

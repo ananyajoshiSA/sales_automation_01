@@ -133,3 +133,28 @@ def test_community_lead_from_its_latest_booking():
     assert (v["dials_first_48h"], v["max_dials_one_day"], v["first_talk_min"]) == (6, 6, 1.5)   # the answered call is 49 h after booking
     s = summarise(views)
     assert s["collected_%"] == 100.0 and s["dialled_5plus_in_a_day_%"] == 100.0 and s["first_talk_under_2min_%"] == 100.0
+
+
+def test_inbound_rings_on_several_phones_count_as_one_call():
+    hist = {"r": [stage(BOOK, "Booking fees received"),
+                  call("2026-10-02 06:00:00", out=False, status="Missed", dur=0, by="A"),
+                  call("2026-10-02 06:00:40", out=False, status="Answered", dur=60, by="B"),
+                  call("2026-10-02 09:00:00", out=False, status="Missed", dur=0, by="A"),
+                  call("2026-10-02 09:01:00", out=False, status="Missed", dur=0, by="B")]}
+    (v,), _ = build([lead("r", "Booking fees received")], hist, {"u1": "Elite Changemakers"}, NOW)
+    assert (v["inbound_answered"], v["inbound_missed"], v["inbound_unreturned_days"]) == (1, 1, 1)
+
+
+def test_lead_credited_to_settled_caller_and_calls_stop_at_outcome():
+    def owner(t, who):
+        return {"EventCode": 3001, "CreatedOn": t, "Data": [{"Key": "CurrentOwner", "Value": who}]}
+    hist = {"m": [owner(BOOK, "Lead Allocator"), stage(BOOK, "Booking fees received"),
+                  owner("2026-10-01 08:00:00", "Ravi Das"), call("2026-10-01 09:00:00", by="Ravi Das"),
+                  stage("2026-10-01 10:00:00", "Call Back Later", "Booking fees received", "asking for refund due to time constraints and personal reasons"),
+                  stage("2026-10-03 05:00:00", "Not Interested", "Call Back Later", "drop"),
+                  owner("2026-10-05 05:00:00", "Someone Else"), call("2026-10-05 06:00:00", by="Someone Else")]}
+    callers = {"Lead Allocator": "Team Puja Malik (DSV+Women AI)", "Ravi Das": "Elite Changemakers"}
+    (v,), _ = build([lead("m", "Not Interested", owner="x")], hist, {}, NOW, callers)
+    assert (v["caller"], v["team"], v["owner"]) == ("Ravi Das", "Elite Changemakers", "Asha Rao")
+    assert v["dials"] == 1 and v["outcome"] == "lost"
+    assert v["reason"] == "No time / personal or health reasons" and "refund" in v["reason_text"]

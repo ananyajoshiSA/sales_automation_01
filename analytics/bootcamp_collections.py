@@ -29,6 +29,7 @@ import os
 import re
 import sys
 from collections import Counter, defaultdict
+from collections.abc import Mapping
 from datetime import datetime, timedelta
 
 from analytics.definitions import ENROLLED, REAL_CONVERSATION_SECS, speed_bucket
@@ -46,6 +47,8 @@ NOT_A_SCHEDULE = timedelta(minutes=15)   # a callback set for "now" is a form de
 STALLED_DAYS = 7
 EPISODE_GAP = timedelta(days=21)
 FIRST_DAYS = timedelta(hours=48)
+RING_GROUP = timedelta(minutes=2)
+SETTLE = timedelta(hours=24)        # allocation often passes through a team leader before it settles   # one inbound call rings several phones and logs a row on each
 BOT = re.compile(r"\b(system|bot|welcome|reminder|webinar|ivr)\b", re.I)
 SYSTEM_COMMENT = re.compile(r'^\s*\{"ActionType"')
 
@@ -156,6 +159,18 @@ def _note_text(a: dict) -> str:
     return (_fields(a).get("ActivityEvent_Note") or _data(a).get("NotableEventDescription") or "").strip()
 
 
+def inbound_calls(calls: list[dict]) -> list[dict]:
+    """Inbound rows grouped into calls: rows within 2 minutes are one call, answered if any phone answered."""
+    out: list[dict] = []
+    for c in (c for c in calls if not c["out"]):
+        if out and c["t"] - out[-1]["last"] <= RING_GROUP:
+            out[-1]["answered"] = out[-1]["answered"] or c["answered"]
+            out[-1]["last"] = c["t"]
+        else:
+            out.append({"t": c["t"], "last": c["t"], "answered": c["answered"]})
+    return out
+
+
 def callbacks(forms: list[dict], dials: list[datetime], start: datetime, end: datetime | None, now: datetime) -> list[dict]:
     """Each callback scheduled after ``start`` that fell due before the lead closed (``end``) and 2 h before now.
 
@@ -177,11 +192,16 @@ def callbacks(forms: list[dict], dials: list[datetime], start: datetime, end: da
     return out
 
 
-def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_callers: frozenset = frozenset()) -> dict | None:
+def lead_view(lead: dict, acts: list[dict], team: str, now: datetime,
+              team_callers: frozenset | Mapping[str, str] = frozenset()) -> dict | None:
     """One collection lead traced from booking to outcome; None if it never reached "Booking fees received".
 
     ``team_callers`` are the collection teams' callers by name: their first dial and the lead's hand-over to
-    them are measured apart from dials by anyone (often the bootcamp seller who took the booking fee).
+    them are measured apart from dials by anyone (often the bootcamp seller who took the booking fee). When it
+    maps each caller to their team, the lead is credited to the caller it settled with (the last collection
+    caller it was assigned to within 24 h of booking) and that caller's team, not to whoever owns it now:
+    leads are often moved on after the work is done. Calls are counted up to the outcome, so onboarding
+    calls after payment are left out.
     """
     acts = sorted((a for a in acts if utc(a.get("CreatedOn"))), key=lambda a: a["CreatedOn"])
     stages = [(utc(a["CreatedOn"]), _data(a)) for a in acts if a.get("EventCode") == 3002]
@@ -191,19 +211,6 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
     tag = lead.get("mx_Bootcamp_collections") or ""
     community = is_community(tag)
     course, camp_day = ("Community", "") if community else parse_tag(tag)
-    calls = [c for c in (_call(a) for a in acts if a.get("EventCode") in (21, 22))
-             if c["t"] and c["t"] >= booked and not BOT.search(c["by"])]
-    dials = [c for c in calls if c["out"]]
-    answered = [c for c in calls if c["answered"]]
-    real = [c for c in answered if c["dur"] >= REAL_CONVERSATION_SECS]
-    first_dial = dials[0]["t"] if dials else None
-    team_dial = next((c["t"] for c in dials if c["by"] in team_callers), None)
-    per_day = Counter(ist_day(c["t"]) for c in dials)
-    handed = [t for t, d in ((utc(a["CreatedOn"]), _data(a)) for a in acts if a.get("EventCode") == 3001)
-              if (d.get("CurrentOwner") or "").strip() in team_callers]
-    handover = booked if any(t <= booked for t in handed) else next((t for t in handed if t > booked), None)
-    handover_dial = next((c["t"] for c in dials if handover and c["by"] in team_callers and c["t"] >= handover), None)
-    first_ans = answered[0]["t"] if answered else None
     after = [(t, d) for t, d in stages if t >= booked]
     collected = next((t for t, d in after if d.get("CurrentStage") in COLLECTED), None)
     enrolled_before = any(d.get("CurrentStage") == ENROLLED for t, d in stages if t < booked)
@@ -218,9 +225,29 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
         end = next((t for t, d in reversed(after) if d.get("CurrentStage") == stage), None) or now
     else:
         outcome, end = "open", None
+    calls = [c for c in (_call(a) for a in acts if a.get("EventCode") in (21, 22))
+             if c["t"] and c["t"] >= booked and (not end or c["t"] <= end) and not BOT.search(c["by"])]
+    dials = [c for c in calls if c["out"]]
+    answered = [c for c in calls if c["answered"]]
+    real = [c for c in answered if c["dur"] >= REAL_CONVERSATION_SECS]
+    first_dial = dials[0]["t"] if dials else None
+    team_dial = next((c["t"] for c in dials if c["by"] in team_callers), None)
+    per_day = Counter(ist_day(c["t"]) for c in dials)
+    owners = [(utc(a["CreatedOn"]), (_data(a).get("CurrentOwner") or "").strip()) for a in acts if a.get("EventCode") == 3001]
+    handed = [(t, o) for t, o in owners if o in team_callers]
+    handover = booked if any(t <= booked for t, _ in handed) else next((t for t, _ in handed if t > booked), None)
+    settled = [o for t, o in owners if t <= booked + SETTLE]
+    handler = (settled[-1] if settled and settled[-1] in team_callers
+               else next((o for t, o in handed if t > booked), ""))
+    if handler and isinstance(team_callers, dict):
+        team = team_callers[handler]
+    handover_dial = next((c["t"] for c in dials if handover and c["by"] in team_callers and c["t"] >= handover), None)
+    worked_by = Counter(c["by"] for c in dials if c["by"] in team_callers)
+    first_ans = answered[0]["t"] if answered else None
     forms = [a for a in acts if a.get("EventCode") == 103]
     cbs = callbacks(forms, [c["t"] for c in dials], booked, end, now)
-    missed_in = [c for c in calls if not c["out"] and not c["answered"]]
+    inbound = inbound_calls(calls)
+    missed_in = [c for c in inbound if not c["answered"]]
     unreturned = len({ist_day(m["t"]) for m in missed_in
                       if not any(d["t"] > m["t"] and ist_day(d["t"]) == ist_day(m["t"]) for d in dials)})
     due = utc(lead.get("mx_Next_follow_up_date"))
@@ -228,9 +255,9 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
                    and not any(d["t"] >= due - CALLBACK_WINDOW for d in dials))
     reason = text = ""
     if outcome in ("lost", "deferred"):
-        comment = next((d.get("Comment") or "" for t, d in reversed(after) if d.get("CurrentStage") == stage), "")
+        comments = [(d.get("Comment") or "").strip() for t, d in after if t <= end]
         notes = [_note_text(a) for a in forms if utc(a["CreatedOn"]) >= booked and utc(a["CreatedOn"]) <= end]
-        text = " | ".join(x for x in ([""] if SYSTEM_COMMENT.match(comment) else [comment]) + notes[-2:] if x)
+        text = " | ".join(x for x in reversed(comments + notes[-2:]) if x and not SYSTEM_COMMENT.match(x))
         reason = "Deferred to a later batch" if outcome == "deferred" and loss_reason(text) == "No reason recorded" \
             else loss_reason(text)
     last_dial = dials[-1]["t"] if dials else None
@@ -238,6 +265,7 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
     team_mins = (team_dial - booked).total_seconds() / 60 if team_dial else None
     return {
         "lead_id": lead["ProspectID"], "kind": "Community" if community else "Bootcamp", "team": team,
+        "caller": handler or (worked_by.most_common(1)[0][0] if worked_by else "(no collection caller)"),
         "owner": lead.get("OwnerIdName") or "", "tag": tag, "course": course_family(course), "bootcamp_day": camp_day,
         "weekend": webinar_weekend(booked), "booked_ist": booked.astimezone(IST).strftime("%Y-%m-%d %H:%M"),
         "booked_day": booked.astimezone(IST).strftime("%a"), "booked": booked,
@@ -261,7 +289,7 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
         "days_to_loss": round((end - booked).total_seconds() / 86400, 1) if outcome in ("lost", "deferred") else None,
         "callbacks_due": len(cbs), "callbacks_missed": sum(1 for c in cbs if not c["kept"]),
         "callbacks_missed_whole_day": sum(1 for c in cbs if not c["same_day"]),
-        "inbound_missed": len(missed_in), "inbound_answered": sum(1 for c in calls if not c["out"] and c["answered"]),
+        "inbound_missed": len(missed_in), "inbound_answered": sum(1 for c in inbound if c["answered"]),
         "inbound_unreturned_days": unreturned, "followup_overdue": overdue,
         "days_since_last_dial": round((now - last_dial).total_seconds() / 86400, 1) if last_dial else None,
         "days_since_booking": round((now - booked).total_seconds() / 86400, 1),
@@ -339,7 +367,8 @@ def group(views: list[dict], *keys: str, min_leads: int = 1) -> list[dict]:
 
 
 def build(leads: list[dict], hist: dict[str, list], team_of_owner: dict[str, str], now: datetime,
-          team_callers: frozenset = frozenset(), months: tuple[str, str] | None = None) -> tuple[list[dict], dict]:
+          team_callers: frozenset | Mapping[str, str] = frozenset(),
+          months: tuple[str, str] | None = None) -> tuple[list[dict], dict]:
     """Lead views for every tagged lead with history, plus a reconciliation of what was left out.
 
     ``months`` (first, last as ``YYYY-MM``) keeps leads whose booking falls in those IST months: community
@@ -390,7 +419,8 @@ def main(data_dir: str, out_dir: str) -> None:
             hist[d["lead_id"]] = d["activities"]
     now = utc(meta["fetched_at_utc"])
     months = tuple(meta["months"]) if meta.get("months") else None
-    views, recon = build(leads, hist, team_of_owner, now, frozenset(meta.get("team_callers") or ()), months)
+    callers = meta.get("team_of_caller") or frozenset(meta.get("team_callers") or ())
+    views, recon = build(leads, hist, team_of_owner, now, callers, months)
     recon["by_kind"] = dict(Counter(v["kind"] for v in views))
     os.makedirs(out_dir, exist_ok=True)
     report = {
@@ -402,7 +432,7 @@ def main(data_dir: str, out_dir: str) -> None:
         "by_kind_booked_day": group(views, "kind", "booked_day"),
         "by_team_course": group([v for v in views if v["kind"] == "Bootcamp"], "team", "course"),
         "by_team_bootcamp": group([v for v in views if v["kind"] == "Bootcamp"], "team", "course", "bootcamp_day"),
-        "by_caller": group(views, "kind", "team", "owner"),
+        "by_caller": group(views, "kind", "team", "caller"),
         "speed": _counts(views, "speed"),
         "loss_reasons": _counts([v for v in views if v["reason"]], "reason"),
     }
