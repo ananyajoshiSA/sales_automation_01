@@ -149,6 +149,41 @@ def load_chances(path: str | None) -> dict:
     return {t: v["use_%"] for t, v in json.load(open(path))["tiers"].items() if v.get("use_%") is not None}
 
 
+def plan_date_default() -> str:
+    return (datetime.now(timezone.utc).astimezone(IST) + timedelta(days=1)).strftime("%Y-%m-%d")
+
+
+def run_team(team: str, out_dir: str = "exports/plans", plan_date: str | None = None, days: int = 15,
+             snapshot: str | None = None, chances_path: str | None = "exports/tier_chances.json", leaders=(),
+             target: int = 4, tier_b_cap: int | None = None) -> str:
+    """Fetch (or load) one team's snapshot, build its plan and write the workbook; returns the path."""
+    plan_date = plan_date or plan_date_default()
+    day = datetime.strptime(plan_date, "%Y-%m-%d")
+    if snapshot:
+        snap = json.load(open(snapshot))
+    else:
+        from scripts.fetch_team_data import main as fetch
+
+        path = f"data/plan_{slug(team)}_{plan_date}.json"  # lead PII: data/ only
+        os.makedirs("data", exist_ok=True)
+        fetch(team, (day - timedelta(days=days)).strftime("%Y-%m-%d"), (day - timedelta(days=1)).strftime("%Y-%m-%d"), path)
+        snap = json.load(open(path))
+    os.makedirs(out_dir, exist_ok=True)
+    stem = f"call_plan_{slug(team)}_"
+    earlier = sorted(p for p in glob.glob(os.path.join(out_dir, stem + "*.xlsx")) if p < os.path.join(out_dir, stem + plan_date))[-3:]
+    measured = load_chances(chances_path)
+    plan = build_plan(snap, plan_date, days, measured, leaders, target, tier_b_cap, read_carry(earlier))
+    out = os.path.join(out_dir, f"{stem}{plan_date}.xlsx")
+    by_owner = write_workbook(plan, out)
+    print(f"{plan['team']} plan for {plan['date_label']}: {out}"
+          f"{' (carried unpaid links from ' + ', '.join(map(os.path.basename, earlier)) + ')' if earlier else ''}")
+    print("chances: " + ", ".join(f"{t} {v}%" for t, v in plan["chances"].items())
+          + ("" if measured else " (estimates; no measured tier outcomes yet)"))
+    for o, rs in by_owner.items():
+        print(f"{o:24} {len(rs):3} leads " + " ".join(f"{t}{sum(r['tier'] == t for r in rs)}" for t in TIERS))
+    return out
+
+
 def main():
     ap = argparse.ArgumentParser()
     ap.add_argument("team", help="LeadSquared group name, e.g. 'Team Elite Calling'")
@@ -161,29 +196,7 @@ def main():
     ap.add_argument("--target", type=int, default=4)
     ap.add_argument("--tier-b-cap", type=int)
     a = ap.parse_args()
-    plan_date = a.date or (datetime.now(timezone.utc).astimezone(IST) + timedelta(days=1)).strftime("%Y-%m-%d")
-    day = datetime.strptime(plan_date, "%Y-%m-%d")
-    if a.snapshot:
-        snap = json.load(open(a.snapshot))
-    else:
-        from scripts.fetch_team_data import main as fetch
-
-        path = f"data/plan_{slug(a.team)}_{plan_date}.json"  # lead PII: data/ only
-        os.makedirs("data", exist_ok=True)
-        fetch(a.team, (day - timedelta(days=a.days)).strftime("%Y-%m-%d"), (day - timedelta(days=1)).strftime("%Y-%m-%d"), path)
-        snap = json.load(open(path))
-    os.makedirs(a.out, exist_ok=True)
-    stem = f"call_plan_{slug(a.team)}_"
-    earlier = sorted(p for p in glob.glob(os.path.join(a.out, stem + "*.xlsx")) if p < os.path.join(a.out, stem + plan_date))[-3:]
-    plan = build_plan(snap, plan_date, a.days, load_chances(a.chances), a.leader, a.target, a.tier_b_cap, read_carry(earlier))
-    out = os.path.join(a.out, f"{stem}{plan_date}.xlsx")
-    by_owner = write_workbook(plan, out)
-    print(f"{plan['team']} plan for {plan['date_label']}: {out}"
-          f"{' (carried unpaid links from ' + ', '.join(map(os.path.basename, earlier)) + ')' if earlier else ''}")
-    print("chances: " + ", ".join(f"{t} {v}%" for t, v in plan["chances"].items())
-          + ("" if load_chances(a.chances) else " (estimates; no measured tier outcomes yet)"))
-    for o, rs in by_owner.items():
-        print(f"{o:24} {len(rs):3} leads " + " ".join(f"{t}{sum(r['tier'] == t for r in rs)}" for t in TIERS))
+    run_team(a.team, a.out, a.date, a.days, a.snapshot, a.chances, a.leader, a.target, a.tier_b_cap)
 
 
 if __name__ == "__main__":

@@ -52,6 +52,14 @@ scores, calls by hour, calls to review), then the method, every validation check
 
 ## Nightly call plan for any team
 
+Every team at once (teams are found from LeadSquared's user groups, nothing hardcoded; one failing team does not stop the rest):
+
+```bash
+python -m analytics.nightly_all [--only "Team Elite Calling"] [--list]
+```
+
+One team:
+
 ```bash
 python -m analytics.nightly_plan "Team Elite Calling" --leader "Shivangi Sahu" [--tier-b-cap 12]
 ```
