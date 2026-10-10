@@ -20,7 +20,7 @@ from openpyxl.styles import Alignment, Border, Font, PatternFill, Side
 from openpyxl.utils import get_column_letter as L
 
 from analytics.daily_plan import state
-from analytics.daily_plan.common import CLOSED, REAL_SECS, Snap
+from analytics.daily_plan.common import CLOSED, REAL_SECS, Snap, ist
 from analytics.daily_plan.pdf import render
 
 OVER_FORECAST = 2.4  # Fri 9 Oct: about 19 forecast, 8 enrolled on the agreed rule; the high end of the range applies it
@@ -37,8 +37,55 @@ def horizon(today: str) -> str:
     return end.strftime("%Y-%m-%d")
 
 
-def candidates(snap: Snap, today: str, last_night: dict, plan: dict) -> set[str]:
+def fresh(snap: Snap, today: str) -> dict[str, dict]:
+    """Leads allocated to a caller today (assigned or created today): {lead_id: {"owner", "new"}}; new = created in the last 7 days."""
+    t0 = datetime.strptime(today, "%Y-%m-%d")
+    out = {}
+    for lid, l in snap.leads.items():
+        if l.get("OwnerIdName") not in snap.callers:
+            continue
+        assigned, created = ist(l.get("mx_Assigned_On")), ist(l.get("CreatedOn"))
+        if any(x and x.strftime("%Y-%m-%d") == today for x in (assigned, created)):
+            out[lid] = {"owner": l["OwnerIdName"], "new": bool(created and created.replace(tzinfo=None) >= t0 - timedelta(days=7))}
+    return out
+
+
+def fresh_outcomes(snap: Snap, today: str, allocated: dict, reads: list[dict]) -> dict:
+    """Per caller: allocated (new / reassigned), dialled, reached, real conversation, follow-up fixed, into the pipeline; plus the leads
+    that produced a follow-up or pipeline. A follow-up counts when the reader saw a dated next step agreed, or LeadSquared holds a
+    future follow-up date for a lead reached today."""
+    by_id = {r["lead_id"]: r for r in reads}
+    inc = {r["lead_id"] for r in included(reads)}
+    per = defaultdict(lambda: {"allocated": 0, "new": 0, "reassigned": 0, "dialled": 0, "reached": 0, "real": 0, "followup": 0, "pipeline": 0})
+    good = []
+    for lid, f in allocated.items():
+        c = per[f["owner"]]
+        c["allocated"] += 1
+        c["new" if f["new"] else "reassigned"] += 1
+        cs = [x for x in snap.by_lead.get(lid, []) if x["t"].strftime("%Y-%m-%d") == today]
+        reached = [x for x in cs if x["status"] == "Answered"]
+        c["dialled"] += any(x["direction"] == "outbound" for x in cs)
+        c["reached"] += bool(reached)
+        c["real"] += any(x["duration"] >= REAL_SECS for x in reached)
+        r = by_id.get(lid, {})
+        fu_date = ist((snap.leads.get(lid) or {}).get("mx_Next_follow_up_date") or (snap.leads.get(lid) or {}).get("mx_Follow_up_date_and_time"))
+        followup = bool(r.get("followup_agreed")) or bool(reached and fu_date and fu_date > snap.fetched)
+        c["followup"] += followup
+        c["pipeline"] += lid in inc
+        if followup or lid in inc:
+            good.append({"lead_id": lid, "name": r.get("name") or snap.lead_name(lid), "owner": f["owner"], "new": f["new"],
+                         "pipeline": lid in inc, "chance": int(r.get("month_chance") or 0) if lid in inc else None,
+                         "stage": (r.get("stage_reached") or "")[2:] if lid in inc else "",
+                         "followup": r.get("followup_when") or (fu_date.strftime("%a %-d %b %H:%M") if fu_date and followup else ""),
+                         "summary": r.get("summary") or "", "next_step": r.get("next_step") or ""})
+    good.sort(key=lambda g: (not g["pipeline"], -(g["chance"] or 0)))
+    return {"callers": dict(per), "good": good}
+
+
+def candidates(snap: Snap, today: str, last_night: dict, plan: dict, allocated: dict | None = None) -> set[str]:
     sel = set(last_night)
+    sel |= {lid for lid in (allocated or {}) if any(c["status"] == "Answered" and c["duration"] >= 60 and c["t"].strftime("%Y-%m-%d") == today
+                                                     for c in snap.by_lead.get(lid, []))}
     sel |= {c["lead_id"] for c in snap.day(today) if c.get("user_id") in snap.users and c["status"] == "Answered" and c["duration"] >= REAL_SECS}
     sel |= {lid for lid, e in plan.items() if e.get("tier") in ("P", "M", "A", "B") or e.get("group") is not None}
     keep = set()
@@ -147,7 +194,34 @@ tr { page-break-inside: avoid; } .ph { font-family: monospace; font-weight: bold
 .up { color:#1F7A4D; font-weight:bold; } .down { color:#B03A2E; font-weight:bold; }"""
 
 
-def html_doc(rows: list[dict], today: str, end: str, built: str, last_night: dict, team: str) -> str:
+def fresh_html(F: dict, day_label: str) -> str:
+    e = html.escape
+    T = {k: sum(v[k] for v in F["callers"].values()) for k in ("allocated", "new", "reassigned", "dialled", "reached", "real", "followup", "pipeline")}
+    H = [f"<h2>Fresh leads allocated {e(day_label)}: follow-ups and pipeline created</h2>",
+         f"<p>{T['allocated']} leads were allocated ({T['new']} new, {T['reassigned']} older leads reassigned). {T['dialled']} were dialled, {T['reached']} reached, "
+         f"{T['real']} had a real conversation (2 min+). <b>{T['followup']} got a dated follow-up and {T['pipeline']} entered the pipeline.</b></p>",
+         "<table><tr><th>Caller</th><th>Allocated</th><th>New</th><th>Reassigned</th><th>Dialled</th><th>Reached</th><th>Real conversation</th>"
+         "<th>Follow-up fixed</th><th>Into pipeline</th></tr>"]
+    for n, v in sorted(F["callers"].items(), key=lambda kv: (-kv[1]["pipeline"], -kv[1]["followup"], -kv[1]["allocated"])):
+        H.append(f"<tr><td><b>{e(n)}</b></td><td>{v['allocated']}</td><td>{v['new']}</td><td>{v['reassigned']}</td><td>{v['dialled']}</td>"
+                 f"<td>{v['reached']}</td><td>{v['real']}</td><td>{v['followup']}</td><td><b>{v['pipeline']}</b></td></tr>")
+    H.append(f"<tr><td><b>Team</b></td>" + "".join(f"<td><b>{T[k]}</b></td>" for k in ("allocated", "new", "reassigned", "dialled", "reached", "real", "followup", "pipeline")) + "</tr></table>")
+    if F["good"]:
+        H.append("<table style='margin-top:6px'><tr><th style='width:16%'>Fresh lead · caller</th><th style='width:14%'>Result</th><th style='width:12%'>Follow-up</th>"
+                 "<th style='width:33%'>Where it stands</th><th style='width:25%'>Next step</th></tr>")
+        for g in F["good"]:
+            res = f"In pipeline · {g['chance']}% · {g['stage']}" if g["pipeline"] else "Follow-up fixed"
+            H.append(f"<tr><td><b>{e(g['name'])}</b><div class='sub'>{e(g['owner'])} · {'new lead' if g['new'] else 'reassigned'}</div></td><td>{e(res)}</td>"
+                     f"<td>{e(g['followup'])}</td><td>{e(g['summary'])}</td><td>{e(g['next_step'])}</td></tr>")
+        H.append("</table>")
+    else:
+        H.append("<p class='small'>No fresh lead produced a dated follow-up or a pipeline entry today.</p>")
+    H.append("<p class='small'>Allocated = assigned to the caller today in LeadSquared (or created today). A follow-up counts when the call shows a dated next step "
+             "agreed, or LeadSquared holds a future follow-up date for a lead reached today.</p>")
+    return "\n".join(H)
+
+
+def html_doc(rows: list[dict], today: str, end: str, built: str, last_night: dict, team: str, fresh_data: dict | None = None) -> str:
     e = html.escape
     inc = included(rows)
     S = summary(inc, today)
@@ -176,6 +250,7 @@ def html_doc(rows: list[dict], today: str, end: str, built: str, last_night: dic
          f"per-lead chances; the high end multiplies it by {OVER_FORECAST} (on Fri 9 Oct the plan forecast about 19 and 8 enrolled, so per-lead chances may run low). "
          "Only leads whose conversation reached fee, payment or a decision are here; new leads who enroll fast add to it. Leads already enrolled (Course Enrolled, or said on a "
          "call they paid, including part-payers with a balance) are left out; Rs 10 bootcamp registrations are judged as prospects.</p>",
+         (fresh_html(fresh_data, datetime.strptime(today, "%Y-%m-%d").strftime("%a %-d %b")) if fresh_data is not None else ""),
          f"<h2 style='page-break-before:always'>The pipeline, highest chance first</h2><table><tr><th style='width:3%'>#</th><th style='width:15%'>Lead · caller</th>"
          "<th style='width:13%'>Course · fee</th><th style='width:9%'>Stage · chance · when</th><th style='width:24%'>Where it stands</th>"
          "<th style='width:17%'>Possible blocks</th><th style='width:19%'>Next step</th></tr>"]
@@ -209,7 +284,7 @@ def html_doc(rows: list[dict], today: str, end: str, built: str, last_night: dic
     return "\n".join(H)
 
 
-def workbook(rows: list[dict], out: str) -> str:
+def workbook(rows: list[dict], out: str, fresh_data: dict | None = None) -> str:
     inc = included(rows)
     wb = Workbook()
     ws = wb.active
@@ -245,15 +320,33 @@ def workbook(rows: list[dict], out: str) -> str:
         s2.cell(row=k, column=1, value=name)
         s2.cell(row=k, column=2, value=f"=COUNTIF(Pipeline!G:G,A{k})")
         s2.cell(row=k, column=3, value=f"=SUMIF(Pipeline!G:G,A{k},Pipeline!B:B)").number_format = "0.0"
+    if fresh_data is not None:
+        s3 = wb.create_sheet("Fresh leads today")
+        heads = ["Caller", "Allocated", "New", "Reassigned", "Dialled", "Reached", "Real conversation", "Follow-up fixed", "Into pipeline"]
+        for j, n in enumerate(heads, 1):
+            c = s3.cell(row=1, column=j, value=n)
+            c.font, c.fill = Font(bold=True, color="FFFFFF"), PatternFill("solid", fgColor="1F4E46")
+            s3.column_dimensions[L(j)].width = 16
+        for k, (n, v) in enumerate(sorted(fresh_data["callers"].items()), 2):
+            for j, key in enumerate(["allocated", "new", "reassigned", "dialled", "reached", "real", "followup", "pipeline"], 2):
+                s3.cell(row=k, column=j, value=v[key])
+            s3.cell(row=k, column=1, value=n)
+        r0 = len(fresh_data["callers"]) + 3
+        for j, n in enumerate(["Fresh lead", "Caller", "New or reassigned", "Result", "Follow-up", "Where it stands", "Next step"], 1):
+            s3.cell(row=r0, column=j, value=n).font = Font(bold=True)
+        for k, g in enumerate(fresh_data["good"], r0 + 1):
+            for j, v in enumerate([g["name"], g["owner"], "new" if g["new"] else "reassigned",
+                                   f"Pipeline {g['chance']}%" if g["pipeline"] else "Follow-up fixed", g["followup"], g["summary"], g["next_step"]], 1):
+                s3.cell(row=k, column=j, value=v).alignment = Alignment(wrap_text=True, vertical="top")
     wb.save(out)
     return out
 
 
-def build(rows: list[dict], today: str, built: str, last_night: dict, out_dir: str, team: str) -> dict:
+def build(rows: list[dict], today: str, built: str, last_night: dict, out_dir: str, team: str, fresh_data: dict | None = None) -> dict:
     end = horizon(today)
     os.makedirs(out_dir, exist_ok=True)
     stem = os.path.join(out_dir, f"Elite_pipeline_to_{datetime.strptime(end, '%Y-%m-%d'):%-d_%b}")
-    render(html_doc(rows, today, end, built, last_night, team), stem + ".html", stem + ".pdf")
-    workbook(rows, stem + ".xlsx")
+    render(html_doc(rows, today, end, built, last_night, team, fresh_data), stem + ".html", stem + ".pdf")
+    workbook(rows, stem + ".xlsx", fresh_data)
     inc = included(rows)
-    return {"pdf": stem + ".pdf", "xlsx": stem + ".xlsx", "horizon": end, "summary": summary(inc, today), "top": inc[:10]}
+    return {"pdf": stem + ".pdf", "xlsx": stem + ".xlsx", "horizon": end, "summary": summary(inc, today), "top": inc[:10], "fresh": fresh_data}

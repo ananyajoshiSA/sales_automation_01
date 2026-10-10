@@ -201,3 +201,26 @@ def test_pipeline_horizon_candidates_and_state(tmp_path):
     assert state.latest_before(str(tmp_path), "2026-10-10", "pipeline_") is None
     text = pipeline.brief("by {horizon_short}; {today_long}; {days_left} days", "2026-10-10", "2026-10-31")
     assert text == "by 31 Oct; Saturday 10 Oct 2026; 21 days"
+
+
+def test_fresh_leads_allocated_today_and_what_they_produced():
+    from analytics.daily_plan import pipeline
+    leads = [dict(l) for l in LEADS]
+    leads[0].update(mx_Assigned_On="2026-10-10 04:00:00", CreatedOn="2026-10-09 10:00:00")   # L1 new, Asha
+    leads[1].update(mx_Assigned_On="2026-10-10 04:00:00")                                      # L2 old lead reassigned, Ravi
+    leads[2].update(mx_Assigned_On="2026-10-10 05:00:00", mx_Next_follow_up_date="2026-10-12 06:00:00")  # L3 reached, LSQ follow-up
+    leads[3].update(mx_Assigned_On="2026-10-01 05:00:00")                                      # L4 not today
+    cs = [call("u1", "L1", "2026-10-10 06:00:00", "Answered", 400), call("u2", "L2", "2026-10-10 06:00:00"),
+          call("u1", "L3", "2026-10-10 07:00:00", "Answered", 70)]
+    s = snap(cs, leads=leads)
+    alloc = pipeline.fresh(s, "2026-10-10")
+    assert alloc == {"L1": {"owner": "Asha K", "new": True}, "L2": {"owner": "Ravi S", "new": False}, "L3": {"owner": "Asha K", "new": False}}
+    assert pipeline.candidates(s, "2026-10-10", {}, {}, alloc) == {"L1", "L3"}
+    reads = [{"lead_id": "L1", "name": "Lead1", "owner": "Asha K", "include": True, "month_chance": 12, "stage_reached": "3 Fee and plan discussed",
+              "followup_agreed": True, "followup_when": "Mon 12 Oct 18:00"}]
+    F = pipeline.fresh_outcomes(s, "2026-10-10", alloc, reads)
+    a, r = F["callers"]["Asha K"], F["callers"]["Ravi S"]
+    assert (a["allocated"], a["new"], a["dialled"], a["reached"], a["real"], a["followup"], a["pipeline"]) == (2, 1, 2, 2, 1, 2, 1)
+    assert (r["allocated"], r["reassigned"], r["dialled"], r["reached"], r["followup"]) == (1, 1, 1, 0, 0)
+    assert [g["lead_id"] for g in F["good"]] == ["L1", "L3"] and F["good"][0]["followup"] == "Mon 12 Oct 18:00"
+    assert "Fresh leads allocated Sat 10 Oct" in pipeline.fresh_html(F, "Sat 10 Oct")

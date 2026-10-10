@@ -145,7 +145,8 @@ def cmd_pipeline_prepare(a):
     last = state.latest_before(a.state_dir, a.date, "pipeline_")
     last_night = state.resolve(last, snap.leads)
     plan = state.resolve(state.load(a.state_dir, a.date), snap.leads)
-    cand = pipeline.candidates(snap, a.date, last_night, plan)
+    allocated = pipeline.fresh(snap, a.date)
+    cand = pipeline.candidates(snap, a.date, last_night, plan, allocated)
     nums = pipeline.numbers(snap, cand)
     tx = transcripts.fetch(nums, os.path.join(d, "tx"), pause=a.pause)
     have, missing = transcripts.coverage(tx, nums)
@@ -164,7 +165,7 @@ def cmd_pipeline_prepare(a):
         f = os.path.join(d, "reads", f"batch_{k}.txt")
         open(f, "w").write("\n".join(os.path.join(d, "dossiers", f"{x['lead_id']}.txt") for x in b))
         files.append(f)
-    info = {"date": a.date, "horizon": end, "candidates": len(cand), "last_night": last["date"] if last else None,
+    info = {"date": a.date, "horizon": end, "candidates": len(cand), "fresh_allocated": len(allocated), "last_night": last["date"] if last else None,
             "brief": os.path.join(d, "brief.md"), "batches": files, "with_transcript": have, "without_transcript": missing}
     json.dump(info, open(os.path.join(d, "prepare.json"), "w"), indent=1)
     print(json.dumps(info, indent=1))
@@ -175,11 +176,16 @@ def cmd_pipeline_build(a):
     d = os.path.join(p["dir"], "pipeline")
     rws = pipeline.load(os.path.join(d, "reads"))
     last = state.latest_before(a.state_dir, a.date, "pipeline_")
-    res = pipeline.build(rws, a.date, now_ist().strftime("%a %-d %b %H:%M"), (last or {}).get("leads", {}), p["out"], a.team)
+    snap = _snap(p)
+    F = pipeline.fresh_outcomes(snap, a.date, pipeline.fresh(snap, a.date), rws)
+    res = pipeline.build(rws, a.date, now_ist().strftime("%a %-d %b %H:%M"), (last or {}).get("leads", {}), p["out"], a.team, F)
     inc = pipeline.included(rws)
     print(f"pipeline -> {state.save(pipeline.to_state(a.date, inc), a.state_dir, 'pipeline_')}; {res['pdf']}")
     S = res["summary"]
+    FT = {k: sum(v[k] for v in F["callers"].values()) for k in ("allocated", "new", "real", "followup", "pipeline")}
     text = (f"{a.team}: pipeline to {res['horizon']} — {S['leads']} leads, expected {S['expected_low']:.0f}–{S['expected_high']:.0f} enrollments (estimate).\n"
+            f"Fresh leads allocated today: {FT['allocated']} ({FT['new']} new); {FT['real']} real conversations, {FT['followup']} follow-ups fixed, "
+            f"{FT['pipeline']} into the pipeline.\n"
             + "\n".join(f"{i}. {r.get('name')} ({r.get('owner')}) {r['month_chance']}% · {r.get('expected_window')} · {r.get('next_step')}"
                         for i, r in enumerate(res["top"], 1)))
     print(text)

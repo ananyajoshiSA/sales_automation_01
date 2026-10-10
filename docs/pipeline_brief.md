@@ -32,7 +32,8 @@ lead_id, name, owner (caller), phone (as in the dossier), course (confirmed from
 include (bool), exclude_reason ("" if included), stage_reached, month_chance (int), expected_window (a date range like "12–14 Oct",
 "by 17 Oct" or "by {horizon_short}"), fee_quoted (amount and plan if known, else "unknown"),
 summary (2–3 plain sentences with dates: where the conversation stands), blockers (list of short strings: what could stop it),
-who_decides, how_pay, last_real_conversation (date IST), next_step (the exact next action and when), risk_note (one line:
+who_decides, how_pay, last_real_conversation (date IST), followup_agreed (true if the latest call ended with a dated next call,
+meeting or payment time agreed with the lead, even if include=false), followup_when (that date/time, else ""), next_step (the exact next action and when), risk_note (one line:
 what would make this slip, or Zip/CRM disagreement).
 Text fields <= 300 characters, plain language for team leaders.
 When done, reply only with: leads written, how many include=true, and the 5 highest month_chance names with their chance.

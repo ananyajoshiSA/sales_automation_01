@@ -83,7 +83,8 @@ each, following `data/daily/$D/pipeline/brief.md` (made from `docs/pipeline_brie
 ```
 
 The horizon is month end (the end of next month in a month's last 3 days). The report marks new leads and chance changes
-since last night. The expected range is the sum of the chances, up to 2.4x that.
+since last night. A section on **fresh leads allocated that day** (assigned or created today, split into new and reassigned) shows,
+per caller, how many were dialled, reached, had a real conversation, got a dated follow-up, and entered the pipeline, and lists those leads. The expected range is the sum of the chances, up to 2.4x that.
 
 ## Email settings (environment variables in the cloud environment's settings)
 
