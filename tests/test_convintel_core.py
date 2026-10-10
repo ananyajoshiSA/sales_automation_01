@@ -5,10 +5,11 @@ from datetime import datetime, timedelta, timezone
 import pytest
 
 from analytics.convintel import schema as S
+from analytics.convintel.analyze import save_findings
 from analytics.convintel.attribution import Directory
 from analytics.convintel.classify import classify, parse_duration
 from analytics.convintel.fetch import match, process_number, run_fetch, source_id
-from analytics.convintel.inventory import from_activity, inventory, window_bounds
+from analytics.convintel.inventory import TEAM_SOURCE, from_activity, inventory, restamp_teams, window_bounds
 from analytics.convintel.reconcile import reconcile
 from analytics.convintel.store import Registry, derive_status, ts
 from integrations.transcripts.client import Call, TranscriptError
@@ -84,6 +85,42 @@ def test_upsert_is_idempotent_and_never_overwrites_stamped_team(reg):
     assert reg.upsert_calls([moved], NOW)["changed"] == 1
     c = reg.call("c1")
     assert c["team"] == "Team Alpha +Neel" and c["duration_s"] == 240
+
+
+def test_team_is_the_first_group_that_is_not_calling_software():
+    d = Directory(USERS + [
+        {"ID": "u4", "FirstName": "Meena", "LastName": "Das", "MemberOfGroups": ["Acefone Users", "Team Beta", "Team Alpha"]},
+        {"ID": "u5", "FirstName": "Kiran", "LastName": "Pal", "MemberOfGroups": ["New Joinees - Mcube", " "]}])
+    assert d.person("u4")["team"] == "Team Beta" and d.person("u5")["team"] == "Unassigned"
+    assert d.person("u1")["team"] == "Team Alpha +Neel"
+
+
+def test_only_calls_the_old_team_rule_got_wrong_move_and_only_once(reg):
+    reg.upsert_calls([
+        {**rec(1, "2026-10-05 05:00:00"), "caller_id": "u4", "caller_name": "Meena Das", "team": "Mcube Users"},
+        rec(2, "2026-10-05 05:10:00"),                                  # a sales team: the same under both rules
+        {**rec(3, "2026-10-05 05:20:00"), "caller_id": "gone", "caller_name": "Left Company", "team": "Acefone Users"},
+        {**rec(4, "2026-10-05 05:30:00"), "caller_id": None, "caller_name": "(a phone number, not a LeadSquared user)",
+         "caller_kind": "not_a_user", "team": "Not a user"},
+        {**rec(6, "2026-10-05 05:40:00"), "caller_id": "x", "caller_name": "System", "caller_kind": "bot",
+         "team": "Not a user"},
+        {**rec(7, "2026-10-05 05:50:00", user="u2"), "team": "Unassigned"}], NOW)     # first group was blank
+    reg.db.execute("UPDATE transcript_coverage_registry SET team_source = ?", ("caller's LeadSquared group when inventoried",))
+    save_findings(reg, reg.call("c1"), S.SEMANTIC, [{"category": "other", "reasoning": "x"}], NOW)
+    users = [{"ID": "u1", "FirstName": "Asha", "LastName": "Rao", "MemberOfGroups": ["Team Beta"]},   # moved since
+             {"ID": "u2", "FirstName": "Ravi", "LastName": "Iyer", "MemberOfGroups": ["", "Team Beta"]},
+             {"ID": "u4", "FirstName": "Meena", "LastName": "Das", "MemberOfGroups": ["Mcube Users", "Team Beta"]}]
+
+    assert restamp_teams(reg, Directory(users), NOW) == 3
+    assert [reg.call(f"c{i}")["team"] for i in (1, 2, 3, 4, 6, 7)] == [
+        "Team Beta", "Team Alpha +Neel", "Unassigned", "Not a user", "Not a user", "Team Beta"]
+    assert reg.q("SELECT team FROM conversation_quality_findings WHERE call_id = 'c1'") == [{"team": "Team Beta"}]
+    assert {reg.call(f"c{i}")["team_source"] for i in (1, 2, 3, 4, 6, 7)} == {TEAM_SOURCE}
+    users[2]["MemberOfGroups"] = ["Mcube Users", "Team Gamma"]
+    assert restamp_teams(reg, Directory(users), NOW) == 0                     # once only: later moves change nothing
+    assert reg.call("c1")["team"] == "Team Beta"
+    assert reg.q("SELECT team FROM conversation_quality_findings WHERE call_id = 'c1'") == [{"team": "Team Beta"}]
+    assert rec(5, "2026-10-05 06:00:00")["team_source"] == TEAM_SOURCE       # new calls carry today's rule
 
 
 def test_not_connected_call_becomes_expected_when_it_turns_out_answered(reg):

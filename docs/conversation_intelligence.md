@@ -134,10 +134,15 @@ valid result for each layer; no claim is stuck; how much of the search queue is 
 
 ## Teams, accountability and revenue
 
-- A call belongs to its caller and the caller's first LeadSquared group when inventoried (the same team rule as
-  the calling report). Shared admin logins (Rinku Jhala, Admin) are never a person and bots are never callers:
-  both stay in organisation totals. Some users' first group is a dialer group (Mcube Users, Acefone Users); they
-  are shown under that name until the team rule changes for every report together.
+- A call belongs to its caller and the caller's team when inventoried: the first LeadSquared group the caller is
+  in that is not calling software (any group named Acefone or Mcube, such as Acefone Users or New Joinees - Mcube),
+  else "Unassigned". It is `analytics.definitions.team_of`, the rule the calling report (v1.5) and the main
+  dashboard use, so the teams match. Each call counts once, in that team. Shared admin logins (Rinku Jhala,
+  Admin) are never a person and bots are never callers: both stay in organisation totals.
+- Calls inventoried under the earlier rule (a caller's first group) are checked once, the next time `inventory` or
+  `report` runs. Only a call stamped with a calling-software group or "Unassigned" moves, with its stored findings,
+  to the caller's team today ("Unassigned" if the caller has left LeadSquared). A call stamped with a sales team
+  keeps it, because both rules give that team for that day, even if the caller has moved team since.
 - Team leader: `data/convintel/config.json` `{"team_leaders": {"Team": "Name"}}` if present, else the name in
   the team label ("Team Bootcamp +Anas" -> Anas), else "(not recorded)".
 - Accountability reuses `analytics/accountability.py` ("Change log first": owner changes are credited from the

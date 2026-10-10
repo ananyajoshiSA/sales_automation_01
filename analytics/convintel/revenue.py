@@ -292,7 +292,7 @@ def revenue_section(enrolments: list[dict], calls: list[dict], users: list[dict]
             "Revenue is counted only from LeadSquared payment records (event 213) with a readable amount; it is "
             "never estimated from enrolments or an average fee.",
             "Each first-time enrolment is credited once per view: to the team of the lead owner recorded with the "
-            "enrolment (the owner's current LeadSquared group), and to the team of the last person with an answered "
+            "enrolment (the owner's current team), and to the team of the last person with an answered "
             "call on the lead at or before it (the team stamped on that call). Otherwise it is unattributed.",
             "Payments are credited the same way: the owner at the lead's first-time enrolment, and the last "
             "person with an answered call before the payment."],

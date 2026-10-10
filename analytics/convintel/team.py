@@ -8,7 +8,7 @@ pseudo-teams and never among callers. Counts are accumulated in one pass over th
 (team, caller), then summed upwards, so 30 days of calls (~700,000) stay fast.
 
 Enrolments are credited once per view with ``attribution.credit_enrolments``: to the lead owner's team
-(``enrolmentsOwner``; the owner LeadSquared shows now, in that person's current group) and to the last person with
+(``enrolmentsOwner``; the owner LeadSquared shows now, in that person's current team) and to the last person with
 an answered call at or before it (``enrolmentsLastCaller``). In each view the organisation's total is the teams'
 sum plus the unattributed count. Revenue is not measurable until LeadSquared returns payment records.
 """
@@ -434,10 +434,13 @@ def _notes(org: dict) -> list[str]:
     return [
         "A real call here means answered and 3+ minutes. This rule is used only in this view; the main "
         "dashboard's 2-minute 'real conversation' is unchanged.",
+        "A caller's team is the first LeadSquared group they are in that is not calling software (Acefone, Mcube), "
+        "as in the calling report and the main dashboard; a caller in no other group is 'Unassigned'. Each call "
+        "counts once, in its caller's team.",
         "Unique-lead counts (leads contacted, leads with a real call) do not add up across teams or callers: a lead "
         "called by two teams counts in each. Organisation totals count each lead once.",
         "Each enrolment is credited once in each of two views: to the lead owner's team (the owner LeadSquared "
-        "shows for the lead now, in that person's current group; LeadSquared keeps no team history) and to the "
+        "shows for the lead now, in that person's current team; LeadSquared keeps no team history) and to the "
         "last person whose answered call on the lead came at or before the enrolment (only calls in this period "
         f"are searched). Organisation totals count every enrolment once; {u['ownerAtEnrolment']} could not be "
         f"credited to an owner's team (shared login, automation, not a user or no owner) and "

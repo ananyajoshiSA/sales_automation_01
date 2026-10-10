@@ -143,8 +143,8 @@ def _call_priority(c: dict) -> tuple:
 
 
 def lead_teams(leads: dict, users: list[dict]) -> dict:
-    """The lead details with each lead's team: its owner's current LeadSquared group when the owner is a person
-    (LeadSquared keeps no team on the lead itself)."""
+    """The lead details with each lead's team: its owner's current team when the owner is a person (LeadSquared
+    keeps no team on the lead itself)."""
     from analytics.convintel.attribution import PERSON, Directory, user_name, user_team
     d, out = Directory(users), {}
     for lid, x in (leads or {}).items():
@@ -370,6 +370,8 @@ def run_report(reg: Registry, day_from: str, day_to: str, now: datetime, key: st
                log=lambda *a: None) -> dict:
     """Fetch the period's sources (read-only), build the snapshot and write the files. Returns where they went."""
     from analytics.convintel import integrity
+    from analytics.convintel.attribution import Directory
+    from analytics.convintel.inventory import restamp_teams
     from analytics.convintel.snapshot_html import write_html
     if client is None:
         from integrations.leadsquared import LeadSquaredClient
@@ -381,6 +383,9 @@ def run_report(reg: Registry, day_from: str, day_to: str, now: datetime, key: st
     _, d1 = sources.day_window(day_from, day_to)
     name = f"{p_from}_{day_to}"
     users = sources.cached("users", client.get_users, SOURCE_MAX_AGE, refresh)
+    moved = restamp_teams(reg, Directory(users), now)
+    if moved:
+        log(f"{moved} calls moved to their caller's team by today's team rule")
     enrol_all = sources.cached(f"enrolments_{name}", lambda: sources.first_enrolments(client, p0, d1 + timedelta(
         days=sources.CONVERSION_DAYS)), SOURCE_MAX_AGE, refresh)
     zips = sources.cached(f"zip_{day_from}_{day_to}", lambda: sources.zip_notes(client, d0, d1), SOURCE_MAX_AGE, refresh)

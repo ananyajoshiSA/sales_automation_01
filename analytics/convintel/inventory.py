@@ -13,15 +13,16 @@ from __future__ import annotations
 from collections import Counter
 from datetime import datetime, timedelta
 
-from analytics.convintel.attribution import Directory
+from analytics.convintel.attribution import NOT_USER, UNASSIGNED, Directory, user_team
 from analytics.convintel.classify import classify, is_answered, parse_duration
 from analytics.convintel.sources import calls as source_calls, days
 from analytics.convintel.store import Registry, ts
+from analytics.definitions import is_calling_software
 from integrations.leadsquared import parse_activity_note, parse_phone_call
 from integrations.timeutil import IST, ist_day, ist_day_start, utc
 from integrations.transcripts.client import normalize_phone
 
-TEAM_SOURCE = "caller's LeadSquared group when inventoried"
+TEAM_SOURCE = "caller's sales team when inventoried (first LeadSquared group that is not calling software)"
 BLOCK_DAYS = 7
 
 
@@ -41,6 +42,21 @@ def record(c: dict, directory: Directory, duration_raw=None, source: str = "lead
             "duration_s": dur, "duration_raw": None if raw is None else str(raw), "call_class": cls, "class_reason": why,
             "caller_id": who["id"], "caller_name": who["name"], "caller_kind": who["kind"], "team": who["team"],
             "team_source": TEAM_SOURCE, "source": source}
+
+
+def restamp_teams(reg: Registry, directory: Directory, now: datetime) -> int:
+    """Move calls stamped under the older team rule (before 10 Oct 2026 a caller's first LeadSquared group) once.
+    The two rules differ only when that group was calling software (Acefone Users, Mcube Users) or blank, so only
+    those calls are re-read, to the caller's team in ``directory``, or "Unassigned" when the caller has left
+    LeadSquared. Any other stamp is already today's team for that day and is kept, even if the caller has since
+    moved team. Returns the calls moved."""
+    def team_for(r: dict) -> str:
+        stamped = r.get("team")
+        if stamped and stamped != UNASSIGNED and not is_calling_software(stamped):
+            return stamped
+        u = directory.find(r.get("caller_id"), r.get("caller_name")) if r.get("caller_kind") != NOT_USER else None
+        return user_team(u) if u else UNASSIGNED
+    return reg.restamp_teams(TEAM_SOURCE, team_for, now)
 
 
 def from_activity(a: dict, directory: Directory) -> dict:
@@ -67,6 +83,10 @@ def inventory(reg: Registry, client, day_from: str, day_to: str, now: datetime, 
     directory = Directory(users if users is not None else client.get_users())
     run = reg.start_run("inventory", {"from": day_from, "to": day_to, "window": window}, now)
     total = Counter()
+    moved = restamp_teams(reg, directory, now)
+    if moved:
+        total["teams_restamped"] = moved
+        log(f"{moved} calls moved to their caller's team by today's team rule")
     all_days = days(day_from, day_to)
     blocks = [[d] for d in all_days] if window else [all_days[i:i + block_days] for i in range(0, len(all_days), block_days)]
     try:

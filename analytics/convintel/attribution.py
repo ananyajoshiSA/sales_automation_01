@@ -1,9 +1,10 @@
 """Who a call or an enrolment belongs to: one person and one team, so nothing is counted twice.
 
-A call belongs to the user who made or took it and to that user's team when the call was inventoried (the
-first LeadSquared group, as in the calling report). Shared admin logins (``SHARED_ACCOUNTS``, e.g. Rinku
-Jhala's) are never a person and LeadSquared automation is a bot: both stay in organisation totals and
-coverage but never in caller rankings.
+A call belongs to the user who made or took it and to that user's team when the call was inventoried: the first
+LeadSquared group that is not a calling-software group such as Acefone Users or Mcube Users
+(``analytics.definitions.team_of``, the rule the calling report and the main dashboard use). Shared admin logins
+(``SHARED_ACCOUNTS``, e.g. Rinku Jhala's) are never a person and LeadSquared automation is a bot: both stay in
+organisation totals and coverage but never in caller rankings.
 
 An enrolment is credited once per view: to the lead owner's team at enrolment, and separately to the last
 person whose answered call on the lead came at or before it. When neither is known it is "unattributed".
@@ -16,6 +17,7 @@ from bisect import bisect_right
 from datetime import datetime
 
 from analytics.accountability import AUTOMATION, SHARED_ACCOUNTS
+from analytics.definitions import groups_of, team_of
 from analytics.team_performance import BOT
 from integrations.timeutil import utc
 
@@ -37,8 +39,7 @@ def user_name(u: dict) -> str:
 
 
 def user_team(u: dict | None) -> str:
-    gs = (u or {}).get("MemberOfGroups") or []
-    return gs[0].strip() if gs and gs[0].strip() else UNASSIGNED
+    return team_of(groups_of(u), UNASSIGNED)
 
 
 class Directory:

@@ -23,7 +23,7 @@ import os
 import sqlite3
 from collections import Counter
 from datetime import datetime, timedelta, timezone
-from typing import Iterable
+from typing import Callable, Iterable
 
 from analytics.convintel import schema as S
 
@@ -240,6 +240,26 @@ class Registry:
             out["changed"] += 1
         self.db.commit()
         return out
+
+    def restamp_teams(self, source: str, team_for: Callable[[dict], str], now: datetime) -> int:
+        """Stamp again, once, the team of calls stamped under another team rule (``team_source`` other than
+        ``source``): ``team_for(row)`` gives the call's team. Quality findings stored for a call follow its team.
+        Returns how many calls changed team."""
+        changed, n = 0, ts(now)
+        for r in self.q("SELECT call_id, caller_id, caller_name, caller_kind, team FROM transcript_coverage_registry "
+                        "WHERE team_source IS NOT ?", (source,)):
+            team = team_for(r)
+            if team != r["team"]:
+                self.db.execute("UPDATE transcript_coverage_registry SET team = ?, team_source = ?, updated_utc = ? "
+                                "WHERE call_id = ?", (team, source, n, r["call_id"]))
+                self.db.execute("UPDATE conversation_quality_findings SET team = ? WHERE call_id = ?",
+                                (team, r["call_id"]))
+                changed += 1
+            else:
+                self.db.execute("UPDATE transcript_coverage_registry SET team_source = ? WHERE call_id = ?",
+                                (source, r["call_id"]))
+        self.db.commit()
+        return changed
 
     def call(self, call_id: str) -> dict | None:
         rows = self.q("SELECT * FROM transcript_coverage_registry WHERE call_id = ?", (call_id,))
