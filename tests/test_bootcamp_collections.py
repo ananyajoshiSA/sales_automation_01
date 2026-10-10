@@ -1,4 +1,5 @@
-from analytics.bootcamp_collections import build, callbacks, loss_reason, parse_tag, summarise
+from analytics.bootcamp_collections import (build, booking_start, callbacks, loss_reason, parse_tag, summarise,
+                                             webinar_weekend)
 from integrations.timeutil import utc
 
 NOW = utc("2026-10-09 06:00:00")
@@ -100,3 +101,35 @@ def test_loss_reason():
     assert loss_reason("I do not want to continue because of financial issues") == "Cannot afford the balance"
     assert loss_reason("didn't find the course relevant, wants refund") == "Doubts about course value or trust"
     assert loss_reason("NI") == "No reason recorded"
+
+
+def test_booking_episode_and_webinar_weekend():
+    old, a, b = utc("2025-03-17 05:00:00"), utc("2026-07-31 05:00:00"), utc("2026-08-17 05:00:00")
+    assert booking_start([b, old, a]) == a            # 17 days apart: one booking; the 2025 one is an earlier pool
+    assert booking_start([old, utc("2026-10-06 05:00:00")]) == utc("2026-10-06 05:00:00")
+    assert booking_start([]) is None
+    assert webinar_weekend(utc("2026-10-04 10:00:00")) == "2026-10-03"   # Sunday
+    assert webinar_weekend(utc("2026-10-05 19:00:00")) == "2026-10-03"   # Monday 00:30 IST
+    assert webinar_weekend(utc("2026-10-03 05:00:00")) == "2026-10-03"   # Saturday
+
+
+def test_community_lead_from_its_latest_booking():
+    hist = {"c": [stage("2025-03-17 05:00:00", "Booking fees received"),
+                  stage("2025-04-01 05:00:00", "Course Enrolled", "Booking fees received"),
+                  stage("2026-10-04 05:00:00", "Booking fees received", "Course Enrolled"),
+                  {"EventCode": 3001, "CreatedOn": "2026-10-04 20:00:00", "Data": [{"Key": "CurrentOwner", "Value": "Asha Rao"}]},
+                  *[call(f"2026-10-05 0{h}:00:00", status="NotAnswered", dur=0) for h in range(3, 9)],
+                  call("2026-10-06 06:00:00", dur=90),
+                  stage("2026-10-08 05:00:00", "Collections done", "Booking fees received")]}
+    leads = [lead("c", "Collections done", tag="Community Webinar Collections"), lead("old", "Not Interested",
+             tag="Community Webinar Collections")]
+    hist["old"] = [stage("2026-03-02 05:00:00", "Booking fees received")]
+    views, recon = build(leads, hist, {"u1": "Elite Changemakers"}, NOW, frozenset({"Asha Rao"}), ("2026-06", "2026-10"))
+    assert recon["booked outside 2026-06 to 2026-10"] == 1
+    (v,) = views
+    assert (v["kind"], v["course"], v["weekend"], v["booked_day"]) == ("Community", "Community", "2026-10-03", "Sun")
+    assert v["enrolled_before_booking"] and v["outcome"] == "collected" and v["days_to_collect"] == 4.0
+    assert v["hrs_to_handover"] == 15.0 and v["hrs_handover_to_team_dial"] == 7.0
+    assert (v["dials_first_48h"], v["max_dials_one_day"], v["first_talk_min"]) == (6, 6, 1.5)   # the answered call is 49 h after booking
+    s = summarise(views)
+    assert s["collected_%"] == 100.0 and s["dialled_5plus_in_a_day_%"] == 100.0 and s["first_talk_under_2min_%"] == 100.0

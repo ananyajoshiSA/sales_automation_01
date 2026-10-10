@@ -1,9 +1,16 @@
-"""How the bootcamp collection teams work the leads who paid a booking fee.
+"""How the collection teams work the leads who paid a booking amount, bootcamp and community side by side.
 
-A collection lead paid a booking fee during a bootcamp (stage change to "Booking fees received") and
-carries a "Bootcamp collections" tag; the collection teams then collect the balance. For each lead this
-traces booking → first dial → first answered call → scheduled callbacks kept or missed → outcome
-(balance collected, lost, deferred or still open), and sums it per team, bootcamp, caller and loss reason.
+A collection lead paid a booking amount (stage change to "Booking fees received") during a bootcamp or
+one of the community's sales webinars, and carries a "Bootcamp collections" tag (community leads carry
+"Community Webinar Collections"); the collection teams then collect the balance. The pool is every such
+lead. For each lead this traces booking → hand-over → first dial → first answered call → scheduled
+callbacks kept or missed → outcome (balance collected, lost, deferred or still open), and sums it per
+kind, team, webinar weekend, caller and loss reason. Collected means the stage reached "Collections done"
+or "Course Enrolled"; rupees wait for payment data.
+
+The booking is the lead's latest booking episode: bookings within 21 days of each other are one (a stage
+re-saved, a part payment), an older one belongs to an earlier pool the lead was in. Community leads are
+placed on the webinar weekend (Saturday on or before the booking day) because their tag has no date.
 
 Scheduled callbacks are the follow-up time saved on each disposition form (event 103, ``mx_Custom_1``,
 UTC). A callback is kept when the lead is dialled within 2 hours either side of it (GOAL.md L6); one
@@ -11,7 +18,7 @@ replaced by a newer form more than 2 hours before it fell due is not counted.
 
 Inputs come from ``scripts/fetch_bootcamp_collections.py``.
 
-    python -m analytics.bootcamp_collections data/bc exports/bootcamp_collections
+    python -m analytics.bootcamp_collections data/coll exports/collections
 """
 
 from __future__ import annotations
@@ -37,6 +44,8 @@ DEFERRED = frozenset({"May buy later"})
 CALLBACK_WINDOW = timedelta(hours=2)
 NOT_A_SCHEDULE = timedelta(minutes=15)   # a callback set for "now" is a form default, not a plan
 STALLED_DAYS = 7
+EPISODE_GAP = timedelta(days=21)
+FIRST_DAYS = timedelta(hours=48)
 BOT = re.compile(r"\b(system|bot|welcome|reminder|webinar|ivr)\b", re.I)
 SYSTEM_COMMENT = re.compile(r'^\s*\{"ActionType"')
 
@@ -75,6 +84,11 @@ def parse_tag(tag: str | None) -> tuple[str, str]:
     return course, d.strftime("%Y-%m-%d")
 
 
+def is_community(tag: str | None) -> bool:
+    """Community collection tags ("Community Webinar Collections") carry no bootcamp date."""
+    return bool(re.search(r"\bcommunity\b", tag or "", re.I))
+
+
 def course_family(course: str) -> str:
     """Bootcamp names drift ("Independent Directors", "Remote Work for Women AI"); group the obvious variants."""
     c = course.lower()
@@ -88,6 +102,25 @@ def course_family(course: str) -> str:
         if key in c:
             return name
     return course
+
+
+def booking_start(times: list[datetime]) -> datetime | None:
+    """Start of the latest booking episode among the lead's "Booking fees received" stage changes."""
+    times = sorted(times)
+    if not times:
+        return None
+    start = times[-1]
+    for t in reversed(times[:-1]):
+        if start - t > EPISODE_GAP:
+            break
+        start = t
+    return start
+
+
+def webinar_weekend(t: datetime) -> str:
+    """The Saturday on or before the IST day of ``t``: bookings on Sunday and Monday belong to that weekend."""
+    d = t.astimezone(IST).date()
+    return (d - timedelta(days=(d.weekday() - 5) % 7)).isoformat()
 
 
 def loss_reason(text: str) -> str:
@@ -152,10 +185,12 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
     """
     acts = sorted((a for a in acts if utc(a.get("CreatedOn"))), key=lambda a: a["CreatedOn"])
     stages = [(utc(a["CreatedOn"]), _data(a)) for a in acts if a.get("EventCode") == 3002]
-    booked = next((t for t, d in stages if (d.get("CurrentStage") or "").strip().lower() == BOOKED), None)
+    booked = booking_start([t for t, d in stages if (d.get("CurrentStage") or "").strip().lower() == BOOKED])
     if not booked:
         return None
-    course, camp_day = parse_tag(lead.get("mx_Bootcamp_collections"))
+    tag = lead.get("mx_Bootcamp_collections") or ""
+    community = is_community(tag)
+    course, camp_day = ("Community", "") if community else parse_tag(tag)
     calls = [c for c in (_call(a) for a in acts if a.get("EventCode") in (21, 22))
              if c["t"] and c["t"] >= booked and not BOT.search(c["by"])]
     dials = [c for c in calls if c["out"]]
@@ -163,9 +198,11 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
     real = [c for c in answered if c["dur"] >= REAL_CONVERSATION_SECS]
     first_dial = dials[0]["t"] if dials else None
     team_dial = next((c["t"] for c in dials if c["by"] in team_callers), None)
+    per_day = Counter(ist_day(c["t"]) for c in dials)
     handed = [t for t, d in ((utc(a["CreatedOn"]), _data(a)) for a in acts if a.get("EventCode") == 3001)
               if (d.get("CurrentOwner") or "").strip() in team_callers]
     handover = booked if any(t <= booked for t in handed) else next((t for t in handed if t > booked), None)
+    handover_dial = next((c["t"] for c in dials if handover and c["by"] in team_callers and c["t"] >= handover), None)
     first_ans = answered[0]["t"] if answered else None
     after = [(t, d) for t, d in stages if t >= booked]
     collected = next((t for t, d in after if d.get("CurrentStage") in COLLECTED), None)
@@ -200,9 +237,10 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
     mins = (first_dial - booked).total_seconds() / 60 if first_dial else None
     team_mins = (team_dial - booked).total_seconds() / 60 if team_dial else None
     return {
-        "lead_id": lead["ProspectID"], "team": team, "owner": lead.get("OwnerIdName") or "",
-        "tag": lead.get("mx_Bootcamp_collections") or "", "course": course_family(course), "bootcamp_day": camp_day,
-        "booked_ist": booked.astimezone(IST).strftime("%Y-%m-%d %H:%M"), "booked": booked,
+        "lead_id": lead["ProspectID"], "kind": "Community" if community else "Bootcamp", "team": team,
+        "owner": lead.get("OwnerIdName") or "", "tag": tag, "course": course_family(course), "bootcamp_day": camp_day,
+        "weekend": webinar_weekend(booked), "booked_ist": booked.astimezone(IST).strftime("%Y-%m-%d %H:%M"),
+        "booked_day": booked.astimezone(IST).strftime("%a"), "booked": booked,
         "stage": stage, "outcome": outcome, "enrolled_before_booking": enrolled_before,
         "mins_to_first_dial": round(mins) if mins is not None else None, "speed": speed_bucket(mins),
         "dialled_24h": mins is not None and mins <= 1440,
@@ -211,6 +249,11 @@ def lead_view(lead: dict, acts: list[dict], team: str, now: datetime, team_calle
         "team_mins_to_first_dial": round(team_mins) if team_mins is not None else None,
         "team_dialled_24h": team_mins is not None and team_mins <= 1440,
         "hrs_to_handover": round((handover - booked).total_seconds() / 3600, 1) if handover else None,
+        "hrs_handover_to_team_dial": round((handover_dial - handover).total_seconds() / 3600, 1) if handover_dial else None,
+        "dials_first_48h": sum(1 for c in dials if c["t"] - booked <= FIRST_DAYS),
+        "max_dials_one_day": max(per_day.values(), default=0),
+        "first_talk_min": round(answered[0]["dur"] / 60, 1) if answered else None,
+        "days_to_collect": round((collected - booked).total_seconds() / 86400, 1) if collected else None,
         "dials": len(dials), "answered_dials": sum(1 for c in dials if c["answered"]),
         "connected": bool(answered), "real_convs": len(real), "talk_min": round(sum(c["dur"] for c in answered) / 60, 1),
         "callbacks_set": sum(1 for f in forms if (t := utc(f.get("CreatedOn"))) and t >= booked
@@ -237,7 +280,7 @@ def median(xs: list) -> float | None:
     if not xs:
         return None
     m = len(xs) // 2
-    return float(xs[m]) if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
+    return round(float(xs[m]) if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2, 1)
 
 
 def summarise(views: list[dict]) -> dict:
@@ -247,8 +290,10 @@ def summarise(views: list[dict]) -> dict:
     closed = out["collected"] + out["lost"] + out["deferred"]
     dials = sum(v["dials"] for v in views)
     due = sum(v["callbacks_due"] for v in views)
+    connected = [v for v in views if v["connected"]]
     return {
         "leads": n,
+        "collected_%": pct(out["collected"], n),
         "dialled_24h_%": pct(sum(v["dialled_24h"] for v in views), n),
         "never_dialled": sum(1 for v in views if v["mins_to_first_dial"] is None),
         "median_hrs_to_first_dial": round(m / 60, 1) if (m := median([v["mins_to_first_dial"] for v in views])) is not None else None,
@@ -266,6 +311,12 @@ def summarise(views: list[dict]) -> dict:
         "callbacks_missed_whole_day_%": pct(sum(v["callbacks_missed_whole_day"] for v in views), due),
         "team_dialled_24h_%": pct(sum(v["team_dialled_24h"] for v in views), n),
         "median_hrs_to_handover": median([v["hrs_to_handover"] for v in views]),
+        "median_hrs_handover_to_team_dial": median([v["hrs_handover_to_team_dial"] for v in views]),
+        "median_dials_first_48h": median([v["dials_first_48h"] for v in views]),
+        "dialled_5plus_in_a_day_%": pct(sum(1 for v in views if v["max_dials_one_day"] >= 5), n),
+        "median_first_talk_min": median([v["first_talk_min"] for v in connected]),
+        "first_talk_under_2min_%": pct(sum(1 for v in connected if v["first_talk_min"] < 2), len(connected)),
+        "median_days_to_collect": median([v["days_to_collect"] for v in views]),
         "handed_over_after_24h": sum(1 for v in views if v["hrs_to_handover"] is not None and v["hrs_to_handover"] > 24),
         "inbound_answer_%": pct(sum(v["inbound_answered"] for v in views),
                                 sum(v["inbound_answered"] + v["inbound_missed"] for v in views)),
@@ -288,8 +339,12 @@ def group(views: list[dict], *keys: str, min_leads: int = 1) -> list[dict]:
 
 
 def build(leads: list[dict], hist: dict[str, list], team_of_owner: dict[str, str], now: datetime,
-          team_callers: frozenset = frozenset()) -> tuple[list[dict], dict]:
-    """Lead views for every tagged lead with history, plus a reconciliation of what was left out."""
+          team_callers: frozenset = frozenset(), months: tuple[str, str] | None = None) -> tuple[list[dict], dict]:
+    """Lead views for every tagged lead with history, plus a reconciliation of what was left out.
+
+    ``months`` (first, last as ``YYYY-MM``) keeps leads whose booking falls in those IST months: community
+    tags have no date, so this is what limits them to the period asked for.
+    """
     views, skipped = [], Counter()
     for l in leads:
         acts = hist.get(l["ProspectID"])
@@ -300,8 +355,19 @@ def build(leads: list[dict], hist: dict[str, list], team_of_owner: dict[str, str
         if v is None:
             skipped["never reached Booking fees received"] += 1
             continue
+        if months and not months[0] <= v["booked_ist"][:7] <= months[1]:
+            skipped[f"booked outside {months[0]} to {months[1]}"] += 1
+            continue
         views.append(v)
     return views, {"tagged": len(leads), "analysed": len(views), **skipped}
+
+
+def _counts(views: list[dict], key: str) -> dict[str, dict]:
+    """``key`` counted per "kind / team"."""
+    g: dict[str, Counter] = defaultdict(Counter)
+    for v in views:
+        g[f'{v["kind"]} / {v["team"]}'][v[key]] += 1
+    return {k: dict(c.most_common()) for k, c in sorted(g.items())}
 
 
 def _write_csv(path: str, rows: list[dict]) -> None:
@@ -323,24 +389,28 @@ def main(data_dir: str, out_dir: str) -> None:
         if d.get("activities") is not None and not d.get("error"):
             hist[d["lead_id"]] = d["activities"]
     now = utc(meta["fetched_at_utc"])
-    views, recon = build(leads, hist, team_of_owner, now, frozenset(meta.get("team_callers") or ()))
+    months = tuple(meta["months"]) if meta.get("months") else None
+    views, recon = build(leads, hist, team_of_owner, now, frozenset(meta.get("team_callers") or ()), months)
+    recon["by_kind"] = dict(Counter(v["kind"] for v in views))
     os.makedirs(out_dir, exist_ok=True)
     report = {
         "fetched_at_ist": now.astimezone(IST).strftime("%Y-%m-%d %H:%M"), "bootcamps": meta["bootcamps"],
         "reconciliation": recon,
-        "by_team": group(views, "team"),
-        "by_team_course": group(views, "team", "course"),
-        "by_team_bootcamp": group(views, "team", "course", "bootcamp_day"),
-        "by_caller": group(views, "team", "owner"),
-        "speed": {t: Counter(v["speed"] for v in views if v["team"] == t) for t in {v["team"] for v in views}},
-        "loss_reasons": {t: Counter(v["reason"] for v in views if v["team"] == t and v["reason"])
-                         for t in {v["team"] for v in views}},
+        "by_kind": group(views, "kind"),
+        "by_kind_team": group(views, "kind", "team"),
+        "by_kind_team_weekend": group(views, "kind", "team", "weekend"),
+        "by_kind_booked_day": group(views, "kind", "booked_day"),
+        "by_team_course": group([v for v in views if v["kind"] == "Bootcamp"], "team", "course"),
+        "by_team_bootcamp": group([v for v in views if v["kind"] == "Bootcamp"], "team", "course", "bootcamp_day"),
+        "by_caller": group(views, "kind", "team", "owner"),
+        "speed": _counts(views, "speed"),
+        "loss_reasons": _counts([v for v in views if v["reason"]], "reason"),
     }
     json.dump(report, open(os.path.join(out_dir, "report.json"), "w"), indent=1, default=str)
     _write_csv(os.path.join(out_dir, "leads.csv"), [{k: v for k, v in x.items() if k != "booked"} for x in views])
-    for name in ("by_team_course", "by_team_bootcamp", "by_caller"):
+    for name in ("by_kind_team", "by_kind_team_weekend", "by_team_course", "by_team_bootcamp", "by_caller"):
         _write_csv(os.path.join(out_dir, f"{name}.csv"), report[name])
-    print(json.dumps({k: report[k] for k in ("fetched_at_ist", "reconciliation", "by_team")}, indent=1, default=str))
+    print(json.dumps({k: report[k] for k in ("fetched_at_ist", "reconciliation", "by_kind_team")}, indent=1, default=str))
 
 
 if __name__ == "__main__":
