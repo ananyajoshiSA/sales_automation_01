@@ -51,6 +51,7 @@ def test_parse_tag():
     assert parse_tag("Remote Women AI Bootcamp Collection - 3rd October'26") == ("Remote Women AI", "2026-10-03")
     assert parse_tag("Women AI bootcamp collections - 6th July '24")[1] == "2024-07-06"
     assert parse_tag("Community Webinar Collections") == ("Community Webinar", "")
+    assert parse_tag("Women AI Bootcamp Collection - 5Th September'26") == ("Women AI", "2026-09-05")
 
 
 def test_views_trace_speed_connection_and_outcome():

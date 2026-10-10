@@ -77,7 +77,7 @@ def parse_tag(tag: str | None) -> tuple[str, str]:
     """("Independent Director", "18 Jul 2026") from "Independent Director Bootcamp Collection - 18th July'26"."""
     tag = (tag or "").strip()
     course = re.split(r"\s+bootcamp\b|\s+collections?\b", tag, maxsplit=1, flags=re.I)[0].strip(" -") or tag
-    m = re.search(r"(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3})[A-Za-z]*\s*'\s*(\d\d)", tag)
+    m = re.search(r"(\d{1,2})(?:st|nd|rd|th)?\s*([A-Za-z]{3})[A-Za-z]*\s*'\s*(\d\d)", tag, re.I)
     if not m:
         return course, ""
     try:
