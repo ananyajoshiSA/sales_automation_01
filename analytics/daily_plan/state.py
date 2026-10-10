@@ -25,7 +25,8 @@ def to_state(date: str, by_owner: dict, priority: list[dict]) -> dict:
         for r in rows:
             p = pri.get(r["lead_id"], {})
             leads[h(r["lead_id"])] = {"owner": owner, "tier": r["tier"], "chance": r.get("chance", 0),
-                                      "verify": bool(r.get("verify")), "group": p.get("group"), "check_by": p.get("check_by", "")}
+                                      "verify": bool(r.get("verify")), "group": p.get("group"), "check_by": p.get("check_by", ""),
+                                      "bootcamp": r.get("status") == "bootcamp"}
     for lid, p in pri.items():  # priority leads owned outside the sheets still count
         leads.setdefault(h(lid), {"owner": p.get("owner"), "tier": "A", "chance": p.get("chance", 0), "verify": False,
                                   "group": p.get("group"), "check_by": p.get("check_by", "")})

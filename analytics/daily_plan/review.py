@@ -47,6 +47,8 @@ def enrollments(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list
             if d.get("CurrentStage") == "Course Enrolled":
                 by, comment = d.get("CreatedBy") or "", d.get("Comment") or ""
         r = reads.get(l["ProspectID"], {})
+        if r.get("status") == "bootcamp":  # Rs 10 bootcamp registration staged as Course Enrolled: not an enrollment
+            continue
         out.append({"lead_id": l["ProspectID"], "name": ((l.get("FirstName") or "") + " " + (l.get("LastName") or "")).strip() or "Unnamed",
                     "owner": l.get("OwnerIdName"), "at": t.strftime("%H:%M"), "by": by, "comment": comment, "how": "Course Enrolled",
                     "evidence": r.get("payment_evidence") or comment or ""})
@@ -59,6 +61,17 @@ def enrollments(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list
     return out
 
 
+def bootcamp_registrations(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list[dict]:
+    """Leads moved to Course Enrolled on ``day`` whose only payment was the Rs 10 bootcamp registration (not counted)."""
+    out = []
+    for l in enrolled:
+        t = ist(l.get("first_enrolled"))
+        r = reads.get(l["ProspectID"], {})
+        if t and t.strftime("%Y-%m-%d") == day and r.get("status") == "bootcamp" and l.get("OwnerIdName") in snap.callers:
+            out.append({"name": r.get("name") or snap.lead_name(l["ProspectID"]), "owner": l.get("OwnerIdName")})
+    return out
+
+
 def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict) -> list[dict]:
     out = []
     for lid, p in prev_plan.items():
@@ -68,7 +81,7 @@ def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict) -> lis
         o = [c for c in cs if c["direction"] == "outbound"]
         best = max((c["duration"] for c in cs if c["status"] == "Answered"), default=0)
         r = reads.get(lid, {})
-        if r.get("status") == "paid_new" or (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED:
+        if r.get("status") == "paid_new" or ((snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and r.get("status") != "bootcamp"):
             result = "Won"
         elif not o and not cs:
             result = "Not called"
@@ -115,7 +128,7 @@ def active_plan(snap: Snap, day: str, plan: dict) -> dict:
         if e.get("tier") == "P" or e.get("verify"):
             continue
         called = any(c["t"].strftime("%Y-%m-%d") == day for c in snap.by_lead.get(lid, []))
-        if (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and not called:
+        if (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and not called and not e.get("bootcamp"):
             continue
         out[lid] = e
     return out
@@ -126,5 +139,6 @@ def facts(snap: Snap, day: str, before: str | None, prev_plan: dict, reads: dict
     stats = day_stats(snap, day, prev_plan)
     stats_before = day_stats(snap, before, None) if before else None
     return {"day": day, "before": before, "stats": stats, "stats_before": stats_before, "quality": quality(reads),
-            "enrollments": enrollments(snap, day, enrolled, reads), "priority_outcomes": priority_outcomes(snap, day, prev_plan, reads),
+            "enrollments": enrollments(snap, day, enrolled, reads), "bootcamp": bootcamp_registrations(snap, day, enrolled, reads),
+            "priority_outcomes": priority_outcomes(snap, day, prev_plan, reads),
             "missed": missed(snap, day, stats, prev_plan, reads), "has_plan": bool(prev_plan)}

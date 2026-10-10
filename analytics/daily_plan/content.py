@@ -167,7 +167,8 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
         ["Tier B coverage", _yn(T["b_total"] and T["b_tried"] >= T["b_total"] * 0.9, T["b_tried"] >= T["b_total"] * 0.5), f"{T['b_tried']} of {T['b_total']} B leads dialled, {T['b_reached']} reached."],
     ] if facts.get("has_plan") else [["Plan adherence", "—", "No saved plan for the previous day, so adherence could not be measured."]]
     scorecard = [
-        ["Enrollments (Course Enrolled or paid on the call)", "—", str(len(confirmed)), ", ".join(f"{e['name']} ({e['owner'].split()[0]})" for e in confirmed[:8])],
+        ["Enrollments (Course Enrolled or paid on the call)", "—", str(len(confirmed)), ", ".join(f"{e['name']} ({e['owner'].split()[0]})" for e in confirmed[:8])
+         + (f". Not counted: {len(facts.get('bootcamp', []))} Rs 10 bootcamp registration(s)" if facts.get("bootcamp") else "")],
         ["Callers who dialled", f"{TB.get('callers_dialling', '—')} of {TB.get('callers', '—')}" if TB else "—", f"{T['callers_dialling']} of {T['callers']}",
          ", ".join(T["absent"]) + (" absent" if T["absent"] else "")],
         ["Dials", f"{TB['dials']:,}" if TB else "—", f"{T['dials']:,}", ""],

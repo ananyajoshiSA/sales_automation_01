@@ -53,7 +53,7 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         stage = l.get("ProspectStage") or ""
         st = r.get("status", "")
         # Enrolled = Course Enrolled in LeadSquared, or the lead said on a call that they paid. Never back on a sheet.
-        if stage in CLOSED or st in PAID:
+        if (stage in CLOSED and st != "bootcamp") or st in PAID:
             enrolled_leads.append({**r, "owner": owner, "stage": stage, "first_enrolled": first_enr.get(lid)})
             continue
         if st in EXCLUDE or r.get("tier") == "D":
@@ -62,6 +62,8 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         if owner not in team:
             continue
         rows[lid] = {**r, "owner": owner, "lead_id": lid, "stage": stage, "source": "re-read"}
+        if st == "bootcamp":  # Rs 10 bootcamp registration: still a prospect for the course, whatever the stage says
+            rows[lid]["why"] = "Paid only the Rs 10 bootcamp registration (not a course enrollment). " + (r.get("why") or "")
     yesterday = max((c["t"] for c in snap.calls if c["t"].strftime("%Y-%m-%d") < today), default=now).strftime("%Y-%m-%d")
     for lid, p in prev_plan.items():  # yesterday's sheet leads that were not re-read (mostly F/R/C)
         if lid in rows or lid in reads or lid not in snap.leads:

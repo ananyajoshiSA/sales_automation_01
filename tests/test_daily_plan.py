@@ -64,6 +64,24 @@ def test_enrolled_or_paid_leads_never_go_back_on_a_sheet():
     assert flat["L7"]["source"] == "carried" and flat["L7"]["tier"] == "C"
 
 
+def test_rs10_bootcamp_registration_is_a_prospect_not_an_enrollment():
+    from analytics.daily_plan import review
+    leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] in ("L1", "L3") else l for l in LEADS]
+    reads = {"L1": {"lead_id": "L1", "name": "Lead1", "status": "bootcamp", "tier": "B", "chance": 8, "payment_evidence": "Rs 10 bootcamp registration"},
+             "L3": {"lead_id": "L3", "name": "Lead3", "status": "paid_new", "tier": "D", "chance": 0}}
+    enrolled = [{"ProspectID": lid, "FirstName": f"Lead{lid[1:]}", "OwnerIdName": "Asha K", "first_enrolled": "2026-10-09 06:00:00", "history": []}
+                for lid in ("L1", "L3")]
+    s = snap([], leads=leads)
+    R = rows.build_rows(s, "2026-10-10", reads, {}, enrolled)
+    flat = {r["lead_id"]: r for rs in R["by_owner"].values() for r in rs}
+    assert flat["L1"]["tier"] == "B" and "Rs 10 bootcamp" in flat["L1"]["why"] and "L3" not in flat
+    assert [e["lead_id"] for e in review.enrollments(s, "2026-10-09", enrolled, reads)] == ["L3"]
+    assert [b["name"] for b in review.bootcamp_registrations(s, "2026-10-09", enrolled, reads)] == ["Lead1"]
+    st = state.to_state("2026-10-10", R["by_owner"], [{"lead_id": "L1", "group": 3, "check_by": "15:30"}])
+    S = status.build(s, "2026-10-10", state.resolve(st, s.leads), [], "Tara L")
+    assert [p["lead_id"] for p in S["priority"]] == ["L1"]
+
+
 def test_priority_groups_respect_the_day_the_lead_asked_for():
     R = {"today": "2026-10-10", "by_owner": {"Asha K": [
         {"lead_id": "a", "name": "A", "tier": "A", "chance": 30, "callback_requested": ""},

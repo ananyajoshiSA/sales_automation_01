@@ -75,3 +75,5 @@ details. Never put these in the repo or in chat.
   it needs the owner's go-ahead.
 - Payments are not in the LeadSquared API (GOAL.md G1). An enrollment is a lead in Course Enrolled, or a lead who said on a
   call that they paid; no screenshot or UTR is needed. Enrolled leads never appear on the sheets or the status to-do list.
+  A Rs 10 bootcamp registration (or a free bootcamp sign-up) is not an enrollment, even when staged Course Enrolled:
+  the lead stays on the sheets as a prospect for the course.

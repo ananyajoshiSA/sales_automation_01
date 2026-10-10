@@ -38,7 +38,7 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     now = snap.fetched
     # enrolled leads are done: never on the to-do list (legacy P/verify rows, or Course Enrolled before today's calls)
     plan = {lid: e for lid, e in plan.items() if not (e.get("tier") == "P" or e.get("verify")
-                                                       or (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED)}
+                                                       or ((snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and not e.get("bootcamp")))}
     st = day_stats(snap, date, plan)
     T = st["team"]
     pri = []
@@ -88,8 +88,8 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     if later:
         todo.append("Callbacks booked later today: " + "; ".join(f"{p['name']} {p['check_by']} ({p['owner'].split()[0]})" for p in later[:10]) + ".")
     if enr_today:
-        todo.append(f"Enrolled today ({len(enr_today)}): "
-                    + "; ".join(f"{e['name']} ({e['owner'].split()[0]}, by {e['by'] or '?'})" for e in enr_today) + ".")
+        todo.append(f"Moved to Course Enrolled today ({len(enr_today)}; Rs 10 bootcamp registrations are not enrollments — check the note): "
+                    + "; ".join(f"{e['name']} ({e['owner'].split()[0]}, by {e['by'] or '?'}{', note: ' + e['comment'][:40] if e['comment'] else ''})" for e in enr_today) + ".")
     if lines:
         todo.append(f"Lines: most non-answers log as 0 seconds for {', '.join(lines)} — switch them to the +91 8065 pool.")
     low_sheet = [f"{n.split()[0]} {v['on_sheet_pct']}%" for n, v in st["callers"].items() if v["dials"] >= 20 and v["on_sheet_pct"] < 60]
