@@ -58,7 +58,7 @@ def data_checks(run: dict, A: dict) -> list[dict]:
                       f"{nu_calls} calls ({pct:.1f}%) from callers who are not LeadSquared users; limit {NOT_A_USER_MAX_PCT}%"))
 
     people, G = A["people"], A.get("groups") or {}
-    users = {(c["team"], c["name"]): c["groups"] for c in calls if c["team"] != "Not a user"}
+    users = {(p["team"], p["name"]): p["groups"] for p in people}
     wrong = [k for k, gs in users.items() if is_calling_software(k[0]) or k[0] not in gs
              and not (k[0] == "Unassigned" and all(is_calling_software(g) for g in gs))]
     shared = {g for p in people if p["dials"] for g in p["groups"] if g != p["team"]}

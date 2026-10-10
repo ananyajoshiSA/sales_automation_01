@@ -120,4 +120,19 @@ describe("team rule", () => {
     expect(db.sqlite.prepare("SELECT id, team FROM users ORDER BY id").all())
       .toEqual([{ id: "u1", team: "Team Alpha" }, { id: "u3", team: SHARED_TEAM }]);
   });
+
+  it("clears the team of a user who comes back with no sales team", async () => {
+    const db = fakeD1();
+    const reply = (groups: string[]) => vi.fn(async () => new Response(JSON.stringify([
+      { ID: "u1", FirstName: "Asha", LastName: "K", MemberOfGroups: groups },
+      { ID: "u2", FirstName: "Ravi", LastName: "S", MemberOfGroups: ["Team Beta"] },
+    ])));
+    const env = { DB: db, LEADSQUARED_HOST: "h", LEADSQUARED_ACCESS_KEY: "k", LEADSQUARED_SECRET_KEY: "s" } as unknown as Env;
+    vi.stubGlobal("fetch", reply(["Team Alpha", "Mcube Users"]));
+    await runUsers(env);
+    vi.stubGlobal("fetch", reply(["Mcube Users"]));                  // removed from Team Alpha, left on the phone system
+    await runUsers(env);
+    expect(db.sqlite.prepare("SELECT id, team FROM users ORDER BY id").all())
+      .toEqual([{ id: "u1", team: "" }, { id: "u2", team: "Team Beta" }]);
+  });
 });

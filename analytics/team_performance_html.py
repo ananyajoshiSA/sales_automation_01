@@ -222,14 +222,18 @@ def _also(c: dict[str, int], k: int = 2) -> str:
 def _groups(A: dict) -> str:
     """P11a: the groups that share callers with another team, each caller counted in every group (section 3)."""
     G, tot, acc = A.get("groups") or {}, A["totals"], _account(A)
-    multi = tot["multi_group_callers"]
+    multi, phone_only = tot["multi_group_callers"], tot.get("phone_only_callers", 0)
+    belong = "belongs" if multi == 1 else "belong"
     if not G:
-        return ("<h3>Callers in more than one group</h3><p>" + (f"{plural(multi, 'caller')} belong to more than one group, "
-                "but every group's dialling callers all count in that group, so the team tables already show each group.</p>"
-                if multi else "No caller who called on the day belongs to more than one group.</p>"))
+        return ("<h3>Callers in more than one group</h3><p>" + (
+            f"{plural(multi, 'caller')} {belong} to more than one group, but no group has a dialling caller who counts in "
+            "another team, so the team tables already show every group.</p>" if multi
+            else "No caller who called on the day belongs to more than one group.</p>"))
     rows = "".join(
-        f"<tr><td>{e(short(g))}{'<br>' + _tag('phone', 'phone system') if s['phone'] else ''}</td><td class='n'>{s['callers']}</td>"
-        f"<td class='n'>{s['elsewhere']}</td><td class='n'>{s['dials']:,}</td><td class='n'>{f(s['answer_pct'], '%') if s['dials'] else '–'}</td>"
+        f"<tr><td>{e(short(g))}{_tag('warm') if s['warm'] else ''}{'<br>' + _tag('phone', 'phone system') if s['phone'] else ''}</td>"
+        f"<td class='n'>{s['callers']}</td><td class='n'>{s['elsewhere']}"
+        + (f"<br><span class='also'>+{s['no_team']} no team</span>" if s["no_team"] else "") + "</td>"
+        f"<td class='n'>{s['dials']:,}</td><td class='n'>{f(s['answer_pct'], '%') if s['dials'] else '–'}</td>"
         f"<td class='n'>{f(s['failed_pct'], '%')}</td><td class='n'>{s['real']}</td><td class='n'>{s['reached']}</td>"
         f"<td class='n'><b>{s['credited']}</b></td><td class='n'>{f(s['conv_pct'], '%') if s['reached'] else '–'}</td>"
         f"<td>{_also(s['also_in'])}</td></tr>" for g, s in G.items())
@@ -241,20 +245,25 @@ def _groups(A: dict) -> str:
             else f"{e(short(g))} callers {s['answer_pct']}% and {f(s['failed_pct'], '%')}" for i, (g, s) in enumerate(phones))
                      + (f", against {acc['answer']}% answered and {f(acc['failed'], '%')} failed across the day." if acc["answer"] is not None else ".")
                      + " Compare them before judging a caller who uses one.")
-    other = sorted(((g, s) for g, s in G.items() if not s["phone"]), key=lambda x: (-x[1]["elsewhere"], -x[1]["callers"], x[0]))
+    other = sorted(((g, s) for g, s in G.items() if not s["phone"] and s["elsewhere"]),
+                   key=lambda x: (-x[1]["elsewhere"], -x[1]["callers"], x[0]))
     if other:
         g, s = other[0]
         teams = [f"{e(short(t))} ({v})" for t, v in list(s["teams_elsewhere"].items())[:2]]
-        who = ("its only caller counts" if s["callers"] == 1 else f"all {s['callers']} of its callers count"
-               if s["elsewhere"] == s["callers"] else f"{s['elsewhere']} of its {s['callers']} callers count{'s' if s['elsewhere'] == 1 else ''}")
-        means.append(f"{e(short(g))} has the most callers counted in another team: {who} in "
+        who = (("its only caller counts" if s["callers"] == 1 else f"all {s['callers']} of its callers count") if s["elsewhere"] == s["callers"]
+               else f"{s['elsewhere']} of its {s['callers']} callers count{'s' if s['elsewhere'] == 1 else ''}")
+        means.append(f"Of the sales groups, {e(short(g))} has the most callers counted in another team: {who} in "
                      + (joined(teams) if len(s["teams_elsewhere"]) <= 2 else ", ".join(teams) + " and others")
                      + f" in the tables above. As a group it had {plural(s['credited'], 'enrolment')} for "
-                     f"{plural(s['reached'], 'lead')} reached" + (f", a conversion of {s['conv_pct']}%." if s["reached"] else "."))
+                     f"{plural(s['reached'], 'lead')} reached" + (f", a conversion of {s['conv_pct']}%." if s["reached"] else ".")
+                     + (" Most of its callers are in warm-lead teams, so compare it with those teams, not the front line."
+                        if not s["warm"] and 2 * s["warm_callers"] >= s["callers"] > 0 else ""))
     means.append("A caller in three groups appears in three rows here, so the rows overlap and do not add up to the day's totals. "
                  "The ranking and the team tables count each caller once.")
+    no_team = (f"; {plural(phone_only, 'caller')} whose groups are all phone systems {'has' if phone_only == 1 else 'have'} no team "
+               "and count as Unassigned" if phone_only else "")
     return f"""<h3>Groups that share callers with another team</h3>
-<p>{plural(multi, 'caller')} {'belongs' if multi == 1 else 'belong'} to more than one LeadSquared group. The tables above count each caller once, in their team: the first group LeadSquared lists for them that is not a phone system (Acefone or Mcube). So that no group's figures are lost, this table counts each caller in every group they belong to. It lists every group with at least one dialling caller who counts in another team; "In another team" says how many of its callers that is.</p>
+<p>{f"{plural(multi, 'caller')} {belong} to more than one LeadSquared group. " if multi else ""}The tables above count each caller once, in their team: the first group LeadSquared lists for them that is not a phone system (Acefone or Mcube){no_team}. So that no group's figures are lost, this table counts each caller in every group they belong to. It lists every group with at least one dialling caller who counts in another team{" or in no team" if phone_only else ""}; "In another team" says how many of its callers that is.</p>
 <table class="grp"><thead><tr><th style="width:19%">Group</th><th class='n'>Callers</th><th class='n'>In another team</th><th class='n'>Dials</th><th class='n'>Answer rate</th><th class='n'>Dials failed</th><th class='n'>Real conv.</th><th class='n'>Leads reached</th><th class='n'>Enrolled (credited)</th><th class='n'>Conversion</th><th style="width:23%">Its callers are also in</th></tr></thead>{rows}</table>
 <div class="means"><b class="h">What this means</b><ul>{''.join(f'<li>{x}</li>' for x in means)}</ul></div>"""
 
@@ -806,6 +815,14 @@ def _method(A: dict, tx: dict | None, validation: str, checks: list[dict] | None
     d0, cw_end = _when(A["window"]["d0"]), _when(A["window"]["cw_end"])
     no_zip = [short(t) for t in A["rank"] if T[t]["zip_n"] == 0]
     days, multi, moved = tot.get("edit_margin_days", 0), tot["multi_group_callers"], tot.get("phone_first_callers", 0)
+    phone_only, belong = tot.get("phone_only_callers", 0), "belongs" if multi == 1 else "belong"
+    if not multi:
+        grp = "No caller belongs to more than one group" + ("; section 3 lists the phone-system groups of the callers with no team"
+                                                             if A.get("groups") else "") + " (P11a). "
+    elif A.get("groups"):
+        grp = f"{plural(multi, 'caller')} {belong} to more than one group; section 3 also counts them in each group that shares callers with another team (P11a). "
+    else:
+        grp = f"{plural(multi, 'caller')} {belong} to more than one group, but no group shares a dialling caller with another team, so section 3 has no group table (P11a). "
     if not tx:
         tx_note = "<b>Recorded calls:</b> none were read for this report."
     else:
@@ -833,10 +850,10 @@ def _method(A: dict, tx: dict | None, validation: str, checks: list[dict] | None
          "midnight for a late call)" + (f". No Zipteams notes for {joined([e(t) for t in no_zip])} (\"–\")." if no_zip else ".")
          if tot["zip_total"] else "<b>Zipteams:</b> no Zipteams notes were written for this day, so section 8 has no scores."),
         "<b>Teams:</b> each caller counts once, in the first group LeadSquared lists for them that is not a phone system "
-        "(Acefone or Mcube; rule P11)" + (f": {plural(moved, 'caller')} listed under a phone system first {'was' if moved == 1 else 'were'} "
-                                           "counted in their sales team instead" if moved else "")
-        + f". {plural(multi, 'caller')} {'belongs' if multi == 1 else 'belong'} to more than one group; section 3 also counts them in "
-        f"each group that shares callers with another team (P11a). Warm-lead teams "
+        "(Acefone or Mcube; rule P11): " + (f"{plural(moved, 'caller')} listed under a phone system first {'was' if moved == 1 else 'were'} "
+                                            "counted in their sales team instead" if moved else "no caller was listed under a phone system first")
+        + (f"; {plural(phone_only, 'caller')} with only phone-system groups {'is' if phone_only == 1 else 'are'} in Unassigned" if phone_only else "")
+        + ". " + grp + "Warm-lead teams "
         f"({joined(sorted(e(short(t)) for t in WARM))}) are marked \"warm\".",
         tx_note,
     ]

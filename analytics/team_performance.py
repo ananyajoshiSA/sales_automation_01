@@ -198,26 +198,35 @@ def enrol_days(E: list[dict], d0: datetime, cw_end: datetime) -> list[dict]:
     return days
 
 
-def group_view(calls: list[dict], people: list[dict]) -> dict[str, dict]:
+def _union(lists) -> list[str]:
+    """The groups of a caller's calls in LeadSquared's order, each once (two users can share a full name)."""
+    out: list[str] = []
+    for gs in lists:
+        out += [g for g in gs if g not in out]
+    return out
+
+
+def group_view(P: dict[tuple, list[dict]], people: list[dict]) -> dict[str, dict]:
     """P11a: the groups that share callers with another team. A caller in several groups counts once in the team
     tables; here each such group gets the figures of every caller in it, so no group's figures are lost. Listed:
-    every group with a dialling caller whose team is another group. Rows overlap and don't add up to the day."""
-    G, members = defaultdict(list), defaultdict(set)
-    for c in calls:
-        for g in c["groups"]:
-            G[g].append(c)
-            members[g].add((c["team"], c["name"]))
-    P = {(p["team"], p["name"]): p for p in people}
+    every group with a dialling caller whose team is another group, or who has no team because all their groups
+    are phone systems. ``P`` is each caller's calls by (team, name). Rows overlap and don't add up to the day."""
+    members = defaultdict(list)
+    for p in people:
+        for g in p["groups"]:
+            members[g].append(p)
     out = {}
-    for g, cs in G.items():
-        dial = [P[k] for k in members[g] if k in P and P[k]["dials"]]
-        elsewhere = [p for p in dial if p["team"] != g]
-        if not elsewhere:
+    for g, ps in members.items():
+        dial = [p for p in ps if p["dials"]]
+        elsewhere = [p for p in dial if p["team"] not in (g, "Unassigned")]
+        no_team = [p for p in dial if p["team"] == "Unassigned"]
+        if not elsewhere and not no_team:
             continue
         also = Counter(o for p in dial for o in p["groups"] if o != g)
-        out[g] = {**scorecard(cs, [], sum(P[k]["credited"] for k in members[g] if k in P)), "elsewhere": len(elsewhere),
+        out[g] = {**scorecard([c for p in ps for c in P[(p["team"], p["name"])]], [], sum(p["credited"] for p in ps)),
+                  "elsewhere": len(elsewhere), "no_team": len(no_team), "warm_callers": sum(p["team"] in WARM for p in dial),
                   "teams_elsewhere": dict(Counter(p["team"] for p in elsewhere).most_common()),
-                  "also_in": dict(sorted(also.items(), key=lambda x: (-x[1], x[0]))), "phone": is_calling_software(g)}
+                  "also_in": dict(sorted(also.items(), key=lambda x: (-x[1], x[0]))), "phone": is_calling_software(g), "warm": g in WARM}
     return dict(sorted(out.items(), key=lambda x: (not x[1]["phone"], -x[1]["callers"], x[0])))
 
 
@@ -233,7 +242,7 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
     meta = run["meta"]
     d0 = datetime.fromisoformat(meta["d0"])
     cw_end = min(datetime.fromisoformat(meta["cw_end"]), as_of) if as_of else datetime.fromisoformat(meta["cw_end"])
-    calls, bots, multi, outside, bad_time = map_calls(run["calls"], run["users"], d0)
+    calls, bots, _, outside, bad_time = map_calls(run["calls"], run["users"], d0)
     day_end = d0 + timedelta(days=1)
     late = sum(1 for c in calls if (m := utc(c.get("modified_utc"))) and m >= day_end)
     E = credit_enrollments(run["enrollments"], calls, run["users"], cw_end)
@@ -250,7 +259,7 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
         ZT[z["team"]].append(z)
         ZP[(z["team"], z["name"])].append(z)
     teams = {t: {**scorecard(r, ZT[t], cred_t[t]), "same_day_owner": own_same[t], "warm": t in WARM} for t, r in T.items()}
-    people = [{"team": k[0], "name": k[1], "groups": r[0]["groups"], **scorecard(r, ZP[k], cred_p[k])}
+    people = [{"team": k[0], "name": k[1], "groups": _union(c["groups"] for c in r), **scorecard(r, ZP[k], cred_p[k])}
               for k, r in P.items() if k[0] != "Not a user"]
     for p in people:  # a working day of dials, half or more failed: the dialer, not the caller (CLAUDE.md)
         p["dialer_issue"] = p["dials"] >= WORKING_DAY_DIALS and (p["failed_pct"] or 0) >= 100 * DIALER_FAILURE_SHARE
@@ -278,7 +287,7 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
         "best_front_line": front[0] if front else None,
         "rec": rec, "coach_case": cases[0] if cases else None, "support": support, "assets": assets,
         "ties_left_out": {"rec": _ties(ranked_people, RECOGNISE), "support": _ties(cases, SUPPORT)},
-        "groups": group_view(calls, people),
+        "groups": group_view(P, people),
         "enrollments": E, "sample": meta.get("sample"),
         "funnel": funnel(calls, E), "hours": by_hour(calls), "enrol_days": enrol_days(E, d0, cw_end),
         "totals": {"calls_raw": len(run["calls"]), "outside_window_excluded": outside, "unreadable_time_excluded": bad_time,
@@ -288,8 +297,10 @@ def analyse(run: dict, as_of: datetime | None = None) -> dict:
                    "zip_total": len(run["zips"]) - zip_other_day, "zip_attr": len(Z), "zip_dropped": dropped,
                    "zip_other_day_excluded": zip_other_day, "zip_after_day_kept": sum(z["after_day"] for z in Z), "enroll_window": len(E),
                    "enroll_credited": sum(cred_t.values()), "payments": len(run["payments"]),
-                   "multi_group_callers": len({c.get("user_id") for c in calls} & multi),
-                   "phone_first_callers": len({(c["team"], c["name"]) for c in calls if c["groups"] and c["groups"][0] != c["team"]})},
+                   "multi_group_callers": sum(len(p["groups"]) > 1 for p in people),
+                   "phone_first_callers": sum(bool(p["groups"]) and is_calling_software(p["groups"][0]) and p["team"] != "Unassigned"
+                                              for p in people),
+                   "phone_only_callers": sum(bool(p["groups"]) and p["team"] == "Unassigned" for p in people)},
         "_calls": calls, "_zip": Z,
     }
 

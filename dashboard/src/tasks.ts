@@ -313,17 +313,24 @@ export async function runArrivals(env: Env): Promise<number> {
 export async function runUsers(env: Env): Promise<number> {
   const now = fmtUtc(new Date());
   const shared = sharedNames(env.SHARED_ACCOUNTS);
-  const users = (await getUsers(env))
+  const all = (await getUsers(env))
     .map((u) => {
       const name = `${u.FirstName ?? ""} ${u.LastName ?? ""}`.trim();
       return { id: String(u.ID ?? ""), name,
                team: shared.has(name) ? SHARED_TEAM : teamFromGroups(u.MemberOfGroups) };
     })
-    .filter((u) => u.id && u.team);
+    .filter((u) => u.id);
+  const users = all.filter((u) => u.team);
+  // A user who came back with no sales team (left every team, or only a phone-system group) loses the old one.
+  const noTeam = all.filter((u) => !u.team).map((u) => str(u.id));
+  const clear: string[] = [];
+  for (let i = 0; i < noTeam.length; i += 1000)
+    clear.push(`UPDATE users SET team = '', updated_at = ${str(now)} WHERE team <> '' AND id IN (${noTeam.slice(i, i + 1000).join(",")})`);
   return writeBatch(env.DB, [
     ...multiInsert("users", ["id", "name", "team", "updated_at"],
       users.map((u) => [str(u.id), str(u.name), str(u.team), str(now)]),
       "ON CONFLICT(id) DO UPDATE SET name = excluded.name, team = excluded.team, updated_at = excluded.updated_at"),
+    ...clear,
     `DELETE FROM lead_last_call WHERE at < ${str(fmtUtc(new Date(Date.now() - 3 * 24 * 60 * MIN)))}`,
     `DELETE FROM summary_cache WHERE computed_at < ${str(fmtUtc(new Date(Date.now() - 24 * 60 * MIN)))}`,
     ...["write_budget", "read_budget"].map((t) =>

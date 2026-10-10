@@ -275,7 +275,7 @@ def test_callers_listed_under_a_phone_system_first_count_in_their_sales_team():
     assert A["teams"]["Team A"] == base["teams"]["Team A"]                  # same team figures as without the phone groups
     assert A["rank"] == ["Team A"] and not {"Acefone Users", "Mcube Users", "New Joinees - Mcube"} & set(A["teams"])
     assert A["teams"]["Unassigned"]["callers"] == 1                         # only phone-system groups: no team
-    assert A["totals"]["phone_first_callers"] == 3
+    assert (A["totals"]["phone_first_callers"], A["totals"]["phone_only_callers"]) == (2, 1)   # u4 has no team, not moved
     assert list(A["groups"]) == ["Acefone Users", "Mcube Users", "New Joinees - Mcube", "Other"]   # phone systems first
     ace, mc, other = A["groups"]["Acefone Users"], A["groups"]["Mcube Users"], A["groups"]["Other"]
     asha = next(p for p in A["people"] if p["name"] == "Asha K")
@@ -287,7 +287,7 @@ def test_callers_listed_under_a_phone_system_first_count_in_their_sales_team():
     assert "3. Teams and groups compared" in html and "Groups that share callers with another team" in html
     assert "Acefone Users<br><span class='tag phone'>phone system</span>" in html
     assert "Phone systems: Acefone Users callers answered" in html and "; Mcube Users callers " in html
-    assert "3 callers listed under a phone system first were counted in their sales team instead" in html
+    assert "2 callers listed under a phone system first were counted in their sales team instead; 1 caller with only phone-system groups is in Unassigned" in html
     assert "Calling-software group" not in html
 
 
@@ -311,9 +311,8 @@ def test_group_check_fails_on_a_phone_team_or_a_missing_group():
     del A["groups"]["Other"]
     assert not {c["check"]: c["ok"] for c in data_checks(run(), A)}[name]
     A = analyse(run())
-    for c in A["_calls"]:
-        if c["name"] == "Asha K":
-            c["team"], c["groups"] = "Mcube Users", ["Mcube Users", "Team A"]
+    asha = next(p for p in A["people"] if p["name"] == "Asha K")
+    asha["team"], asha["groups"] = "Mcube Users", ["Mcube Users", "Team A"]
     assert not {c["check"]: c["ok"] for c in data_checks(run(), A)}[name]
 
 
@@ -364,3 +363,38 @@ def test_a_warm_runner_up_after_a_warm_best_team_is_not_explained_twice():
          "window": {"cw_end": "2026-10-08T23:59:59+05:30"}}
     items, _ = _verdict(A, [], None)
     assert " ".join(items).count("It mainly calls warm leads") == 1 and items[1].endswith("It also mainly calls warm leads.")
+
+
+def test_group_counts_hold_for_callers_matched_by_name_and_shared_names():
+    r = run()
+    r["calls"] = [{**c, "user_id": ""} if c["user_id"] == "u2" else c for c in r["calls"]]      # Ravi S found by name (P10)
+    for c in r["calls"]:
+        if c["user_id"] == "" and not c["caller"]:
+            c["caller"] = "Ravi S"
+    A = analyse(r)
+    assert A["totals"]["multi_group_callers"] == 1 and list(A["groups"]) == ["Other"]
+    r = run()                                                    # a second "Asha K" in Team A, also on Mcube
+    r["users"] = USERS + [{"ID": "u9", "FirstName": "Asha", "LastName": "K", "MemberOfGroups": ["Mcube Users", "Team A"]}]
+    r["calls"] += [call("u9", f"P{i}", "2026-10-05 11:00:00") for i in range(3)]
+    A = analyse(r)
+    asha = next(p for p in A["people"] if p["name"] == "Asha K")
+    assert asha["groups"] == ["Team A", "Mcube Users"] and A["groups"]["Mcube Users"]["dials"] == asha["dials"]
+    assert {c["check"]: c["ok"] for c in data_checks(r, A)}["Callers in several groups: one team each, every shared group shown"]
+
+
+def test_group_wording_without_shared_groups_and_for_warm_umbrellas():
+    from analytics.team_performance_html import _also, _groups
+    assert _also({"A": 4, "B": 3, "C": 2, "D": 1}) == "A (4), B (3) +2 more" and _also({}) == "–"
+    r = run()
+    r["users"] = [{**u, "MemberOfGroups": ["Team A"]} if u["ID"] == "u2" else u for u in USERS]
+    A = analyse(r)
+    html, _ = report_html(A, None, "Validated")
+    assert A["groups"] == {} and "No caller who called on the day belongs to more than one group." in html
+    assert "no caller was listed under a phone system first" in html and "No caller belongs to more than one group (P11a)." in html
+    A["totals"]["multi_group_callers"] = 1
+    assert "1 caller belongs to more than one group, but no group has a dialling caller" in _groups(A)
+    r = run()
+    r["users"] = [{**u, "MemberOfGroups": ["Elite Changemakers", "Umbrella"]} if u["ID"] in ("u1", "u2", "u3") else u for u in USERS]
+    text = _groups(analyse(r))
+    assert "Of the sales groups, Umbrella has the most callers counted in another team: all 3 of its callers count in Elite Changemakers (3)" in text
+    assert "Most of its callers are in warm-lead teams, so compare it with those teams, not the front line." in text
