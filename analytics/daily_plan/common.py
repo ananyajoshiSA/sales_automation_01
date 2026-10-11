@@ -28,7 +28,8 @@ def ist(s: str | None) -> datetime | None:
 
 
 def name_of(u: dict) -> str:
-    first, last = (u.get("FirstName") or "").strip(), (u.get("LastName") or "").strip()
+    first, last = ((u.get(k) or "").strip() for k in ("FirstName", "LastName"))
+    last = "" if last.lower() in ("none", "null") else last  # some imports wrote the word "None"
     if last and first.lower().endswith(last.lower()):  # LeadSquared often repeats the surname in FirstName
         return first
     return f"{first} {last}".strip()

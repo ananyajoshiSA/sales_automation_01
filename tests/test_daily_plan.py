@@ -101,9 +101,10 @@ def test_priority_groups_respect_the_day_the_lead_asked_for():
         {"lead_id": "b", "name": "B", "tier": "B", "chance": 8, "callback_requested": "Sat 10 Oct 18:00"},
         {"lead_id": "c", "name": "C", "tier": "B", "chance": 12, "callback_requested": "Monday evening"},
         {"lead_id": "d", "name": "D", "tier": "A", "chance": 40, "callback_requested": "", "exact_ask": "Send the payment link today"},
+        {"lead_id": "f", "name": "F", "tier": "B", "chance": 12, "callback_requested": "Monday 12 Oct (on a train Saturday; do not call today)"},
         {"lead_id": "e", "name": "E", "tier": "C", "chance": 2, "callback_requested": ""}]}}
     g = {p["lead_id"]: (p["group"], p["check_by"]) for p in content.priority(R, "2026-10-10")}
-    assert g == {"d": (0, "12:00"), "a": (1, "11:30"), "b": (2, "18:00"), "c": (5, "later")}
+    assert g == {"d": (0, "12:00"), "a": (1, "11:30"), "b": (2, "18:00"), "c": (5, "later"), "f": (5, "later")}
 
 
 def test_workbook_counts_paid_without_asking_for_proof(tmp_path):
@@ -122,7 +123,8 @@ def test_status_lists_untouched_tried_and_unreturned():
     plan = {"L1": {"owner": "Asha K", "tier": "A", "group": 1, "check_by": "11:30"},
             "L3": {"owner": "Asha K", "tier": "A", "group": 1, "check_by": "11:30"},
             "L5": {"owner": "Asha K", "tier": "B", "group": 2, "check_by": "18:00"},
-            "L7": {"owner": "Asha K", "tier": "A", "group": 1, "check_by": "11:30"}}
+            "L7": {"owner": "Asha K", "tier": "A", "group": 1, "check_by": "11:30"},
+            "L8": {"owner": "Ravi S", "tier": "B", "group": 5, "check_by": "later"}}                   # asked for Monday
     cs = [call("u1", "L3", "2026-10-10 05:00:00"), call("u0", "L2", "2026-10-10 06:00:00", "Missed", 0, "inbound")]
     leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] == "L7" else l for l in LEADS]
     S = status.build(snap(cs, leads=leads), "2026-10-10", plan, [], "Tara L")

@@ -7,6 +7,7 @@ import html
 from datetime import datetime
 
 from analytics.daily_plan.common import CLOSED, Snap, ist
+from analytics.daily_plan.content import LATER_DAY
 from analytics.daily_plan.stats import day_stats
 
 GROUP_SHORT = ["Money moving", "Tier A", "Callback today", "Hot B", "Rang us", "Later day"]
@@ -43,7 +44,7 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     T = st["team"]
     pri = []
     for lid, e in plan.items():
-        if e.get("group") is None:
+        if e.get("group") is None or e["group"] == LATER_DAY:  # asked for another day: not today's work
             continue
         s, txt = lead_status(snap, lid, date)
         pri.append({"lead_id": lid, "name": snap.lead_name(lid), "owner": e["owner"], "group": e["group"], "check_by": e.get("check_by") or "",

@@ -55,6 +55,10 @@ def _hhmm(txt):
     return f"{h + 12 if h < 9 else h:02d}:{m.group(2)}"
 
 
+LATER_DAY = 5  # priority group of leads who asked to be called on another day
+NOT_TODAY = re.compile(r"\b(?:do not|don't|dont|not to|no)\s+(?:call\s+)?today\b|\bnot today\b", re.I)
+
+
 def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict]:
     """Every lead where an enrollment could come today, in six groups, with a computed role and check-by time."""
     overrides = overrides or {}
@@ -66,7 +70,7 @@ def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict
     for o, rs in rows["by_owner"].items():
         for r in rs:
             cb = r.get("callback_requested") or ""
-            later = bool(later_rx.search(cb)) and not today_rx.search(cb)
+            later = bool(later_rx.search(cb)) and (not today_rx.search(cb) or bool(NOT_TODAY.search(cb)))
             if later:
                 g = 5 if r["tier"] in "AB" and r["chance"] >= 10 else None
             elif r["tier"] == "A" and re.search(r"pay|link|emi|block|token|today", (r.get("exact_ask") or "") + " " + cb, re.I) and r["chance"] >= 30:
