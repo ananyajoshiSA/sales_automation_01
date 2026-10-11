@@ -398,7 +398,8 @@ def caller_sheet(wb, owner, rows, day="tomorrow"):
     return ws, first, last
 
 
-def summary_sheet(wb, owners, ranges, team="Team", day="tomorrow", targets=None, default_target=DEFAULT_TARGET):
+def summary_sheet(wb, owners, ranges, team="Team", day="tomorrow", targets=None, default_target=DEFAULT_TARGET,
+                  inbound=True):
     """``targets`` overrides the per-caller target, e.g. 0 for a team leader who only monitors."""
     targets = targets or {}
     ws = wb.create_sheet("Team summary", 1)
@@ -411,9 +412,11 @@ def summary_sheet(wb, owners, ranges, team="Team", day="tomorrow", targets=None,
     heads = ["Caller", "Return calls (M)", "Unpaid links (P)", "Tier A", "Tier B", "New leads (F)", "Revive + nurture (R, C)",
              "Leads on sheet", "Pipeline: expected enrollments over 3 days", "Target tomorrow", "3-day pipeline minus target",
              "Attempts required", "Attempts logged", "Leads not started", "M, P or A not started", "Enrolled so far"]
+    if not inbound:  # no Tier M without incoming calls
+        heads = [h for h in heads if h != "Return calls (M)"]
     C = {h: i + 1 for i, h in enumerate(heads)}
     X = lambda h: get_column_letter(C[h])  # noqa: E731
-    _hdr(ws, 4, heads, [20, 9, 9, 8, 8, 10, 10, 10, 12, 8, 10, 11, 11, 11, 11, 11])
+    _hdr(ws, 4, heads, [20] + [10] * (len(heads) - 1))
     L = lambda name: get_column_letter(COL[name])  # noqa: E731
     for i, o in enumerate(owners):
         r = 5 + i
@@ -434,7 +437,8 @@ def summary_sheet(wb, owners, ranges, team="Team", day="tomorrow", targets=None,
             "Enrolled so far": f'=COUNTIF({st},"Enrolled")',
         }
         for h, k in (("Return calls (M)", "M"), ("Unpaid links (P)", "P"), ("Tier A", "A"), ("Tier B", "B"), ("New leads (F)", "F")):
-            vals[h] = f'=COUNTIF({tier},"{k} ·*")'
+            if h in C:
+                vals[h] = f'=COUNTIF({tier},"{k} ·*")'
         for h, v in vals.items():
             cell = ws.cell(row=r, column=C[h], value=v)
             cell.font = Font(name=FONT, size=10, bold=h == "Caller", color="0000FF" if h == "Target tomorrow" else "000000")
@@ -527,7 +531,8 @@ def write_workbook(plan: dict, out: str) -> dict[str, list[dict]]:
     for o in owners:
         _, f, l = caller_sheet(wb, o, by_owner[o], day)
         ranges[o] = (f, l)
-    summary_sheet(wb, owners, ranges, team, day, plan.get("targets"), plan.get("default_target", DEFAULT_TARGET))
+    summary_sheet(wb, owners, ranges, team, day, plan.get("targets"), plan.get("default_target", DEFAULT_TARGET),
+                  plan.get("inbound", True))
     if backlog:
         backlog_sheet(wb, backlog, owners)
         json.dump(backlog, open(out.replace(".xlsx", "_backlog.json"), "w"), indent=1, default=str)

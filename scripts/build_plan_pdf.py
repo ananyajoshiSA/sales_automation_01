@@ -8,7 +8,8 @@ left out falls back to a neutral default, so the PDF is never tied to one team o
   window ("1 Sep – 11 Oct 2026"), pulled ("12:40 IST, Sun 11 Oct"), new_window ("1 Sep – 11 Oct"),
   workbook, target (enrolments per caller), subteams ({caller: team}), programs ([...]),
   inbound (false: the team takes no incoming calls, so no missed-call steps), dialer_check ([callers]), unblock ([...]), notes ([...]), rebalance (text; default: computed),
-  objections ([[objection, answer], ...]; default: the general playbook)
+  objections ([[objection, answer], ...]; default: the general playbook),
+  focus (true: open with the team leader's focus list from scripts/build_focus_list.py)
 
     python scripts/build_plan_pdf.py exports/plans/call_plan_Team_2026-10-12.json out.html [--meta meta.json]
     chrome --headless --print-to-pdf=out.pdf out.html
@@ -161,7 +162,7 @@ td.t { white-space: nowrap; font-weight: bold; color: #123f36; }
 
 DEFAULT_META = {"team": "Team", "leader": "", "date_label": "tomorrow", "day": "tomorrow", "next_day": "the next day",
                 "window": "the last 15 days", "pulled": "", "new_window": "the last 7 days", "workbook": "the workbook",
-                "target": 4, "inbound": True, "subteams": {}, "programs": [], "dialer_check": [], "unblock": [], "notes": [], "rebalance": "", "objections": [],
+                "target": 4, "inbound": True, "subteams": {}, "programs": [], "dialer_check": [], "unblock": [], "notes": [], "rebalance": "", "objections": [], "focus": False,
                 "reading": "Every lead was tiered by rule from its calls, stage and Zipteams notes; the opening line, ask and "
                            "objection are the standard ones for its tier.",
                 "zip_check": "It only sees one call, so the tier also weighs calls from the lead, long calls, the stage and "
@@ -212,6 +213,10 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
     missed = sum(1 for r in all_rows if r.get("missed_unreturned"))
     carried = sum(1 for r in all_rows if r.get("callback_missed"))
     day, nxt, target, inb = M["day"], M["next_day"], M["target"], M["inbound"]
+    focus = []
+    if M["focus"]:
+        from scripts.build_focus_list import focus_rows, focus_section  # imports this module: load it late
+        focus = focus_rows(P, M["leader"])
     cols = "MABFRC" if inb else "ABFRC"  # no Tier M for a team without incoming calls
     heads = "".join(f"<th>{k}</th>" for k in cols)
     who = f"for {html.escape(M['leader'])}, Team Leader" if M["leader"] else "for the team leader"
@@ -261,6 +266,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
       <div><b>≈{team_p3:.0f}</b><span>enrolments in the 3-day pipeline</span></div>
     </div>
     <h3>Contents</h3>
+    {f'<p><b>Start here:</b> the {len(focus)} leads that can enrol {day} or {nxt}.</p>' if focus else ''}
     <ol class="toc">
       <li>The target and where enrolments will come from</li>
       <li>How the call lists were built</li>
@@ -278,6 +284,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
     <p class="note">Data: LeadSquared leads, calls, stages and follow-ups plus Zipteams call notes, {html.escape(M['window'])}{f" (pulled {html.escape(M['pulled'])})" if M['pulled'] else ''}. Companion file: <b>{html.escape(M['workbook'])}</b> (phone numbers, attempt tracking, live team summary).</p>
   </div>
 </div>
+{focus_section(focus, M, standalone=False) if focus else ''}
 
 <section>
 <h2>1. The target and where enrolments will come from</h2>
