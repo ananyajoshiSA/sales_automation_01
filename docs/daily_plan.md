@@ -3,7 +3,7 @@
 **Lever:** calling the right leads first, returning leads' calls, and the ask on every conversation. It is seen in
 enrollments on the team leader's day-close count.
 
-Three scheduled Claude Code routines run Monday–Saturday (IST) in fresh cloud sessions on this repository:
+Four scheduled Claude Code routines run every day (IST) in fresh cloud sessions on this repository:
 
 | Routine | Starts | Lands | What it sends |
 |---|---|---|---|
