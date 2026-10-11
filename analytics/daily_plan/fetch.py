@@ -47,10 +47,13 @@ def latest_snapshot(root: str = "data/daily", start: str | None = None) -> str |
     return max(stamped)[1] if stamped else None
 
 
-def cached_enrolled(root: str = "data/daily", keep: int = 3) -> dict:
-    """Enrolled leads from the latest few saved pulls, by lead ID (newest wins)."""
-    paths = sorted(glob.glob(os.path.join(root, "*", "enrolled.json")) + glob.glob(os.path.join(root, "*", "status_*_enrolled.json")),
-                   key=os.path.getmtime)[-keep:]
+def cached_enrolled(root: str = "data/daily", days: int = 3) -> dict:
+    """Enrolled leads from every saved pull in the latest few day folders, by lead ID (newest file wins).
+
+    All files count, not just the newest few: a status pull covers one day and would hide the morning's full list."""
+    dirs = sorted(d for d in glob.glob(os.path.join(root, "2*")) if os.path.isdir(d))[-days:]
+    paths = sorted((p for d in dirs for p in glob.glob(os.path.join(d, "enrolled.json")) + glob.glob(os.path.join(d, "status_*_enrolled.json"))),
+                   key=os.path.getmtime)
     out = {}
     for p in paths:
         try:

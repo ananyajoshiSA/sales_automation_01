@@ -341,3 +341,20 @@ def test_lead_flow_types_speed_attempts_and_status_todo():
     night = datetime(2026, 10, 10, 1, 34, tzinfo=IST)
     assert leadflow.clock_start(night).strftime("%H:%M") == "09:30"
     assert leadflow.clock_start(night.replace(hour=21)).strftime("%d %H:%M") == "11 09:30"
+
+
+def test_enrolled_cache_reads_every_pull_of_recent_days(tmp_path):
+    import os
+    import time
+    from analytics.daily_plan import fetch
+
+    for day, name, ids in (("2026-10-08", "enrolled.json", ["OLD"]), ("2026-10-10", "enrolled.json", ["A", "B"]),
+                           ("2026-10-11", "enrolled.json", ["C"]), ("2026-10-11", "status_1345_enrolled.json", ["D"]),
+                           ("2026-10-11", "status_1646_enrolled.json", ["E"]), ("2026-10-11", "status_1822_enrolled.json", ["F"])):
+        (tmp_path / day).mkdir(exist_ok=True)
+        json.dump([{"ProspectID": i, "first_enrolled": "x"} for i in ids], open(tmp_path / day / name, "w"))
+        time.sleep(0.01)
+    (tmp_path / "month").mkdir()
+    got = fetch.cached_enrolled(str(tmp_path), days=2)
+    assert sorted(got) == ["A", "B", "C", "D", "E", "F"]          # all of the last two days, nothing older
+    assert os.path.isdir(tmp_path / "month")
