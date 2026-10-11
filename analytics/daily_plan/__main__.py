@@ -5,6 +5,7 @@
     #   ... Claude reads every batch -> data/daily/<date>/reads/out_*.jsonl, writes narrative.json ...
     python -m analytics.daily_plan build   2026-10-12 [--mail]   # rows, review, workbook, PDF, state
     python -m analytics.daily_plan status  2026-10-12 [--mail]   # 14:00 / 17:00 status check (fetches today)
+    python -m analytics.daily_plan fetch-month 2026-10-12        # month-to-date snapshot for the month lead flow (pipeline-prepare runs it)
     python -m analytics.daily_plan fetch 2026-10-12 --days-back 3 && python -m analytics.daily_plan pipeline-prepare 2026-10-12
     #   ... Claude reads every batch -> data/daily/<date>/pipeline/reads/out_*.jsonl ...
     python -m analytics.daily_plan pipeline-build 2026-10-12 [--mail] [--publish-state]   # nightly pipeline to month end
@@ -18,7 +19,7 @@ import os
 import sys
 from datetime import datetime
 
-from analytics.daily_plan import content, dossiers, mailer, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
+from analytics.daily_plan import content, dossiers, leadflow, mailer, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
 from analytics.daily_plan.common import LEADER, TEAM, Snap, load_snapshots, previous_working_day
 from integrations.timeutil import now_ist
 
@@ -44,6 +45,44 @@ def cmd_fetch(a):
     cache = {} if a.full else fetch.cached_enrolled()
     fetch.snapshot(a.date, a.days_back, p["snap"], a.team, prev)
     fetch.enrolled(since, p["enrolled"], cache=cache)
+
+
+def flow_sections(snap: Snap, day: str, today: str, day_label: str) -> str:
+    """Lead flow for ``day`` (from the daily snapshot) and month to date (from the month snapshot, when one exists)."""
+    H = [leadflow.section(f"Lead flow: leads that came in on {day_label}", leadflow.rows(snap, day, day), by_caller=True)]
+    M = load_month(today)
+    if M is None:
+        H.append("<p class='small'>Month-to-date lead flow: no month pull yet (it is refreshed by the nightly run).</p>")
+        return "".join(H)
+    month = leadflow.rows(M, today[:8] + "01", today)
+    H.append(leadflow.section(f"Lead flow: leads received this month (1 to {int(today[8:])} {datetime.strptime(today, '%Y-%m-%d'):%b}, "
+                              f"data to {M.fetched:%a %H:%M} IST)", month, leads=False, by_caller=True))
+    cold = [r for r in month if not r["reached"]]
+    if cold:
+        H.append(f"<h3>This month's leads never reached ({len(cold)}): never dialled first, then oldest</h3>" + leadflow.lead_table(cold, limit=80))
+    return "".join(H)
+
+
+def month_path(date: str) -> str:
+    return f"data/daily/month/{date[:7]}.json"
+
+
+def cmd_fetch_month(a):
+    """Team snapshot from the 1st of the month to ``date``, refreshed from the last month pull: feeds the month lead flow."""
+    from analytics.daily_plan import fetch
+
+    out = month_path(a.date)
+    days = int(a.date[8:]) - 1
+    prev = out if os.path.exists(out) and not a.full else None
+    tmp = out + ".tmp"
+    fetch.snapshot(a.date, days, tmp, a.team, prev)
+    os.replace(tmp, out)
+
+
+def load_month(date: str) -> Snap | None:
+    """The month snapshot if one exists for ``date``'s month (the leads that came in this month, with all their calls)."""
+    p = month_path(date)
+    return Snap(load_snapshots([p])) if os.path.exists(p) else None
 
 
 def cmd_prepare(a):
@@ -82,6 +121,7 @@ def cmd_build(a):
     F = review.facts(snap, prev, before, prev_plan, reads, enrolled)
     N = json.load(open(p["narrative"])) if os.path.exists(p["narrative"]) else None
     C = content.build(R, F, N, a.team, a.leader)
+    C["leadflow_html"] = flow_sections(snap, prev, a.date, f"{datetime.strptime(prev, '%Y-%m-%d'):%A %-d %b}")
     if info:
         C["data_note"] = (f"Data: LeadSquared pulled {R['built_at']} IST. Salesa transcripts: {info.get('transcript_numbers')} numbers searched "
                           f"(≤10 numbers per request, ≤9 requests per run); {info.get('with_transcript')} had a transcript, {info.get('without_transcript')} did not. "
@@ -143,6 +183,8 @@ def cmd_status(a):
 def cmd_pipeline_prepare(a):
     p = paths(a.date)
     d = os.path.join(p["dir"], "pipeline")
+    a.full = False
+    cmd_fetch_month(a)  # month lead flow for tonight's pipeline and tomorrow's morning report (about a minute once seeded)
     snap = _snap(p)
     last = state.latest_before(a.state_dir, a.date, "pipeline_")
     last_night = state.resolve(last, snap.leads)
@@ -180,7 +222,8 @@ def cmd_pipeline_build(a):
     last = state.latest_before(a.state_dir, a.date, "pipeline_")
     snap = _snap(p)
     F = pipeline.fresh_outcomes(snap, a.date, pipeline.fresh(snap, a.date), rws)
-    res = pipeline.build(rws, a.date, now_ist().strftime("%a %-d %b %H:%M"), (last or {}).get("leads", {}), p["out"], a.team, F)
+    res = pipeline.build(rws, a.date, now_ist().strftime("%a %-d %b %H:%M"), (last or {}).get("leads", {}), p["out"], a.team, F,
+                         flow_sections(snap, a.date, a.date, "today, " + datetime.strptime(a.date, "%Y-%m-%d").strftime("%a %-d %b")))
     inc = pipeline.included(rws)
     print(f"pipeline -> {state.save(pipeline.to_state(a.date, inc), a.state_dir, 'pipeline_')}; {res['pdf']}")
     S = res["summary"]
@@ -217,10 +260,11 @@ def main(argv=None):
     b = sub.add_parser("build"); b.add_argument("date"); b.add_argument("--mail", action="store_true"); b.add_argument("--publish-state", action="store_true")
     s = sub.add_parser("status"); s.add_argument("date"); s.add_argument("--mail", action="store_true"); s.add_argument("--no-fetch", action="store_true")
     s.add_argument("--snapshot"); s.add_argument("--enrolled"); s.add_argument("--full", action="store_true")
+    fm = sub.add_parser("fetch-month"); fm.add_argument("date"); fm.add_argument("--full", action="store_true")
     pp = sub.add_parser("pipeline-prepare"); pp.add_argument("date"); pp.add_argument("--pause", type=int, default=60)
     pb = sub.add_parser("pipeline-build"); pb.add_argument("date"); pb.add_argument("--mail", action="store_true"); pb.add_argument("--publish-state", action="store_true")
     a = ap.parse_args(argv)
-    {"fetch": cmd_fetch, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
+    {"fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
      "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build}[a.cmd](a)
 
 

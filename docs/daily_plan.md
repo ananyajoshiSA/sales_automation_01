@@ -106,3 +106,23 @@ details. Never put these in the repo or in chat.
   call that they paid; no screenshot or UTR is needed. Enrolled leads never appear on the sheets or the status to-do list.
   A Rs 10 bootcamp registration (or a free bootcamp sign-up) is not an enrollment, even when staged Course Enrolled:
   the lead stays on the sheets as a prospect for the course.
+
+## Lead flow (Shivangi's request, 11 Oct)
+
+Every report now shows, for the leads that came in, how fast each was first dialled, how many attempts it got, whether it
+was reached, and its disposition (LeadSquared stage) now, by lead type: **High Priority**, **Chat**, **Incoming**,
+**Incoming Missed** and **Other** (`analytics/daily_plan/leadflow.py`).
+
+- Type comes from the lead's Report_Type field (High Priority / Incoming / Chat/Email/Referral), else Lead Request type,
+  else Source (Inbound Phone call → Incoming, a chat source → Chat). Incoming Missed has no field: the lead's first contact
+  was a call to us that nobody answered.
+- First dial is timed from when the lead came in (created; for a reassigned lead, when it was assigned). A lead arriving
+  before 09:30 or after 20:30 IST is timed from the next 09:30.
+- Status checks (14:00, 17:00): today's leads, with to-do lines for leads not dialled, dialled but not reached, and leads
+  given to a caller who has made no calls today.
+- Morning report (after the review): the previous day's leads by type and by caller, then this month's leads by type and
+  by caller and the month's leads never reached.
+- Nightly pipeline: today's leads and the month to date. `pipeline-prepare` refreshes the month pull
+  (`data/daily/month/<YYYY-MM>.json`) first; `fetch-month <date> --full` rebuilds it.
+- Leads not yet given to a caller are not in the team's lead list, so they are not counted.
+

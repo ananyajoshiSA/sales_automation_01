@@ -1,4 +1,5 @@
 import json
+from datetime import datetime
 
 from analytics.daily_plan import content, mailer, rows, state, status, transcripts, workbook
 from analytics.daily_plan.common import Snap, previous_working_day
@@ -313,3 +314,30 @@ def test_latest_snapshot_picks_the_newest_pull(tmp_path):
     json.dump([], open(tmp_path / "2026-10-11" / "status_1345_enrolled.json", "w"))
     assert fetch.latest_snapshot(str(tmp_path)).endswith("status_1345.json")
     assert fetch.latest_snapshot(str(tmp_path), start="2026-10-10").endswith("2026-10-10/snap.json")   # the status pull starts too late
+
+
+def test_lead_flow_types_speed_attempts_and_status_todo():
+    from analytics.daily_plan import leadflow
+
+    leads = [dict(l, CreatedOn="2026-10-10 04:30:00", mx_Report_Type="High Priority") if l["ProspectID"] == "L1" else
+             dict(l, mx_Assigned_On="2026-10-10 05:00:00") if l["ProspectID"] == "L2" else
+             dict(l, CreatedOn="2026-10-10 06:00:00", Source="Inbound Phone call") if l["ProspectID"] == "L3" else l for l in LEADS]
+    cs = [call("u1", "L1", "2026-10-10 04:40:00"), call("u1", "L1", "2026-10-10 04:55:00", "Answered", 200),
+          call("u0", "L3", "2026-10-10 06:00:00", "Missed", 0, "inbound")]
+    s = snap(cs, leads=leads)
+    F = {x["lead_id"]: x for x in leadflow.rows(s, "2026-10-10", "2026-10-10")}
+    assert set(F) == {"L1", "L2", "L3"}
+    assert (F["L1"]["type"], F["L1"]["mins"], F["L1"]["attempts"], F["L1"]["real"]) == ("High Priority", 10, 2, True)
+    assert not F["L2"]["new"] and F["L2"]["mins"] is None and F["L2"]["type"] == "Other"
+    assert F["L3"]["type"] == "Incoming Missed" and F["L3"]["missed_in"] == 1
+    allrow = leadflow.summary(list(F.values()))[-1]
+    assert (allrow["group"], allrow["leads"], allrow["dialled"], allrow["never"], allrow["reached"]) == ("All", 3, 1, 2, 1)
+    S = status.build(s, "2026-10-10", {}, [], "Tara L")
+    assert any("not dialled yet" in t and "Lead2" in t and "Lead3 (Incoming Missed" in t for t in S["todo"])
+    assert "New leads today: 3" in status.text_summary(S, "Team")
+    assert any("sit with callers who have made no calls today" in t and "Lead2" in t for t in S["todo"])  # Ravi S made no calls
+    assert "Incoming Missed" in leadflow.section("t", list(F.values()))
+    from integrations.timeutil import IST
+    night = datetime(2026, 10, 10, 1, 34, tzinfo=IST)
+    assert leadflow.clock_start(night).strftime("%H:%M") == "09:30"
+    assert leadflow.clock_start(night.replace(hour=21)).strftime("%d %H:%M") == "11 09:30"

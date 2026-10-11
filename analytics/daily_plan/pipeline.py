@@ -221,7 +221,8 @@ def fresh_html(F: dict, day_label: str) -> str:
     return "\n".join(H)
 
 
-def html_doc(rows: list[dict], today: str, end: str, built: str, last_night: dict, team: str, fresh_data: dict | None = None) -> str:
+def html_doc(rows: list[dict], today: str, end: str, built: str, last_night: dict, team: str, fresh_data: dict | None = None,
+             extra: str = "") -> str:
     e = html.escape
     inc = included(rows)
     S = summary(inc, today)
@@ -251,6 +252,7 @@ def html_doc(rows: list[dict], today: str, end: str, built: str, last_night: dic
          "Only leads whose conversation reached fee, payment or a decision are here; new leads who enroll fast add to it. Leads already enrolled (Course Enrolled, or said on a "
          "call they paid, including part-payers with a balance) are left out; Rs 10 bootcamp registrations are judged as prospects.</p>",
          (fresh_html(fresh_data, datetime.strptime(today, "%Y-%m-%d").strftime("%a %-d %b")) if fresh_data is not None else ""),
+         extra,
          f"<h2 style='page-break-before:always'>The pipeline, highest chance first</h2><table><tr><th style='width:3%'>#</th><th style='width:15%'>Lead · caller</th>"
          "<th style='width:13%'>Course · fee</th><th style='width:9%'>Stage · chance · when</th><th style='width:24%'>Where it stands</th>"
          "<th style='width:17%'>Possible blocks</th><th style='width:19%'>Next step</th></tr>"]
@@ -342,11 +344,12 @@ def workbook(rows: list[dict], out: str, fresh_data: dict | None = None) -> str:
     return out
 
 
-def build(rows: list[dict], today: str, built: str, last_night: dict, out_dir: str, team: str, fresh_data: dict | None = None) -> dict:
+def build(rows: list[dict], today: str, built: str, last_night: dict, out_dir: str, team: str, fresh_data: dict | None = None,
+          extra: str = "") -> dict:
     end = horizon(today)
     os.makedirs(out_dir, exist_ok=True)
     stem = os.path.join(out_dir, f"Elite_pipeline_to_{datetime.strptime(end, '%Y-%m-%d'):%-d_%b}")
-    render(html_doc(rows, today, end, built, last_night, team, fresh_data), stem + ".html", stem + ".pdf")
+    render(html_doc(rows, today, end, built, last_night, team, fresh_data, extra), stem + ".html", stem + ".pdf")
     workbook(rows, stem + ".xlsx", fresh_data)
     inc = included(rows)
     return {"pdf": stem + ".pdf", "xlsx": stem + ".xlsx", "horizon": end, "summary": summary(inc, today), "top": inc[:10], "fresh": fresh_data}

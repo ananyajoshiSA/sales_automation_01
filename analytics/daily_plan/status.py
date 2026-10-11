@@ -7,6 +7,7 @@ import html
 from datetime import datetime
 
 from analytics.daily_plan.common import CLOSED, Snap, ist
+from analytics.daily_plan import leadflow
 from analytics.daily_plan.content import LATER_DAY
 from analytics.daily_plan.stats import day_stats
 
@@ -72,7 +73,22 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     overdue = [p for p in timed if not (len(p["check_by"]) == 5 and p["check_by"][2] == ":") or p["check_by"] <= hm]
     later = [p for p in timed if p not in overdue]
     lines = [n for n, v in st["callers"].items() if v["dials"] >= 20 and v["zero_sec_pct"] >= 50]
+    fresh = leadflow.rows(snap, date, date)
+    fresh_wait = [x for x in fresh if x["mins"] is None]
+    fresh_tried = [x for x in fresh if x["mins"] is not None and not x["reached"]]
     todo = []
+    if fresh_wait:
+        todo.append(f"{len(fresh_wait)} lead(s) that came in today not dialled yet — call within 5 minutes of arrival: "
+                    + "; ".join(f"{x['name']} ({x['type']}, {x['owner'].split()[0]}, in at {x['arrived']:%H:%M}, waiting {leadflow._mins(x['waiting'])})"
+                                for x in fresh_wait[:12]) + ".")
+    stranded = [x for x in fresh if x["owner"] in T["absent"] and not x["reached"]]
+    if stranded:
+        todo.append(f"{len(stranded)} lead(s) that came in today sit with callers who have made no calls today — reassign now: "
+                    + "; ".join(f"{x['name']} ({x['type']}, {x['owner']}, in at {x['arrived']:%H:%M})" for x in stranded[:12]) + ".")
+    if fresh_tried:
+        todo.append(f"{len(fresh_tried)} lead(s) that came in today dialled but not reached — redial within 15 minutes, then WhatsApp: "
+                    + "; ".join(f"{x['name']} ({x['type']}, {x['owner'].split()[0]}, {x['attempts']} attempt{'s' if x['attempts'] != 1 else ''})"
+                                for x in fresh_tried[:12]) + ".")
     if T["absent"]:
         todo.append(f"Not dialling yet: {', '.join(T['absent'])}. Confirm attendance; give their untouched P/A leads to the callers present.")
     if untouched:
@@ -97,7 +113,7 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     if low_sheet:
         todo.append("Below 60% of dials on the sheet: " + ", ".join(low_sheet) + ". Sheet leads first; old leads only after 16:00.")
     return {"date": date, "at": now.strftime("%H:%M"), "block": next_block(now.hour), "stats": st, "priority": pri,
-            "enrolled_today": enr_today, "unreturned": unret, "todo": todo, "leader": leader}
+            "enrolled_today": enr_today, "unreturned": unret, "todo": todo, "leader": leader, "fresh": fresh}
 
 
 def html_doc(S: dict, team: str) -> str:
@@ -124,6 +140,7 @@ def html_doc(S: dict, team: str) -> str:
         H.append(f"<tr><td>{GROUP_SHORT[p['group']] if p['group'] is not None and p['group'] < len(GROUP_SHORT) else ''}</td><td>{e(p['name'])}</td>"
                  f"<td>{e(p['phone'])}</td><td>{e(p['owner'])}</td><td>{e(p['check_by'])}</td><td class='{cls}'>{e(p['detail'])}</td></tr>")
     H.append("</table>")
+    H.append(leadflow.section(f"Leads that came in today ({len(S.get('fresh') or [])})", S.get("fresh") or []))
     if S["enrolled_today"]:
         H.append("<h2>Enrolled today</h2><table><tr><th>Lead</th><th>Owner</th><th>At</th><th>By</th><th>Note</th></tr>"
                  + "".join(f"<tr><td>{e(x['name'])}</td><td>{e(x['owner'])}</td><td>{e(x['at'])}</td><td>{e(x['by'])}</td><td>{e(x['comment'])}</td></tr>" for x in S["enrolled_today"])
@@ -137,6 +154,8 @@ def text_summary(S: dict, team: str) -> str:
     T = S["stats"]["team"]
     out = [f"{team} — status at {S['at']}", "",
            f"So far: {T['dials']} dials, {T['answer_pct']}% answered, {T['real']} real conversations, {T['callers_dialling']} of {T['callers']} callers dialling, "
-           f"P/A leads tried {T['a_tried']} of {T['a_total']}, {T['inbound_missed']} of {T['inbound']} calls from leads missed.", "",
+           f"P/A leads tried {T['a_tried']} of {T['a_total']}, {T['inbound_missed']} of {T['inbound']} calls from leads missed.",
+           leadflow.text_line(S.get("fresh") or []), "",
            f"To do {S['block']}:"] + [f"{k}. {x}" for k, x in enumerate(S["todo"], 1)]
     return "\n".join(out)
+

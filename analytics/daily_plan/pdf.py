@@ -64,6 +64,8 @@ def html_doc(R: dict, C: dict) -> str:
              "".join(f"<tr><td><b>{e(a)}</b></td><td>{e(b)}</td><td>{e(c)}</td></tr>" for a, b, c in RV["prev_priority"]) + "</table>" if RV["prev_priority"] else "<p class='small'>No saved priority list for that day.</p>")
     H.append("<h3>Missed opportunities</h3>" + "".join(f"<div class='box bad'><b>{e(a)}.</b> {e(b)}</div>" for a, b in RV["missed"]))
     H.append(f"<h3>Points for your conversation with {LN}</h3><ol>" + "".join(f"<li>{e(x)}</li>" for x in RV["talking"]) + "</ol>")
+    if C.get("leadflow_html"):  # how fast new leads were called, attempts, disposition: previous day and month to date
+        H.append(C["leadflow_html"])
     # 2 priority
     H.append(f"<h2>2. {LN}: your priority leads</h2><p>{C['priority_intro']}</p><table><tr><th style='width:3%'>#</th><th style='width:21%'>Lead</th><th style='width:28%'>Why this lead</th><th style='width:24%'>What the caller must do</th><th style='width:24%'>Your role · check by</th></tr>")
     cur = None
