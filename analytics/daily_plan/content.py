@@ -123,9 +123,9 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     pl = pd.strftime("%A")
     st, q, T = facts["stats"], facts["quality"], facts["stats"]["team"]
     callers = sorted(st["callers"], key=lambda n: (-st["callers"][n]["dials"], n))
-    paid_by = {}
-    for r in rows["paid"]:
-        paid_by.setdefault(r["owner"], []).append(r.get("name") or "")
+    paid_by = {}  # the previous day's enrollments only; rows["paid"] also holds leads who enrolled long ago
+    for e in facts["enrollments"]:
+        paid_by.setdefault(e["owner"], []).append(e.get("name") or "")
     fb_n = N.get("feedback", {})
     feedback = []
     for n in callers:
@@ -196,6 +196,9 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
                             + ", ".join(f"{k} {v}" for k, v in sorted(M["unreturned"].items(), key=lambda kv: -kv[1])) + "."))
     if lines:
         missed_list.append(("Lines", "Callers whose non-answers mostly log as 0 seconds: " + ", ".join(lines) + ". Move them to a line that shows failures."))
+    if facts.get("paid_unstaged"):
+        missed_list.append(("Paid earlier, stage still not Course Enrolled", "; ".join(f"{x['name']} ({x['owner']})" for x in facts["paid_unstaged"][:10])
+                            + ". Not new enrollments; move them to Course Enrolled and hand the balance to admissions."))
     missed_list += [tuple(x) for x in N.get("missed_extra", [])]
     promised = [p for p in pri if p["group"] == 0]
     cbs = [p for p in pri if p["group"] == 2]

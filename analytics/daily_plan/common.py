@@ -28,7 +28,10 @@ def ist(s: str | None) -> datetime | None:
 
 
 def name_of(u: dict) -> str:
-    return f"{u.get('FirstName') or ''} {u.get('LastName') or ''}".strip()
+    first, last = (u.get("FirstName") or "").strip(), (u.get("LastName") or "").strip()
+    if last and first.lower().endswith(last.lower()):  # LeadSquared often repeats the surname in FirstName
+        return first
+    return f"{first} {last}".strip()
 
 
 def load_snapshots(paths: list[str]) -> dict:
@@ -71,7 +74,7 @@ class Snap:
 
     def lead_name(self, lid: str) -> str:
         l = self.leads.get(lid) or {}
-        return f"{l.get('FirstName') or ''} {l.get('LastName') or ''}".strip() or "Unnamed lead"
+        return name_of(l) or "Unnamed lead"
 
 
 def previous_working_day(snap: Snap, today: str, min_dials: int = 50) -> str:

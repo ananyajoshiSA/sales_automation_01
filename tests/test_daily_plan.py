@@ -82,6 +82,19 @@ def test_rs10_bootcamp_registration_is_a_prospect_not_an_enrollment():
     assert [p["lead_id"] for p in S["priority"]] == ["L1"]
 
 
+def test_an_old_payment_is_a_stage_fix_not_the_days_enrollment():
+    from analytics.daily_plan import review
+    reads = {"L1": {"lead_id": "L1", "name": "Lead1", "status": "paid_new", "paid_on": "2026-08-13", "payment_evidence": "Rs 3,000 in Aug"},
+             "L3": {"lead_id": "L3", "name": "Lead3", "status": "paid_new", "paid_on": "2026-10-09", "payment_evidence": "Rs 3,000 on the call"},
+             "L4": {"lead_id": "L4", "name": "Lead4", "status": "paid_new", "payment_evidence": "paid, date unknown"}}
+    s = snap([])
+    assert [e["lead_id"] for e in review.enrollments(s, "2026-10-09", [], reads)] == ["L3"]
+    assert sorted(x["lead_id"] for x in review.paid_unstaged(s, "2026-10-09", reads)) == ["L1", "L4"]
+    plan = {"L1": {"owner": "Asha K", "group": 1}, "L3": {"owner": "Asha K", "group": 1}}
+    res = {o["lead_id"]: o["result"] for o in review.priority_outcomes(s, "2026-10-09", plan, reads, {"L3"})}
+    assert res == {"L1": "Paid earlier", "L3": "Won"}
+
+
 def test_priority_groups_respect_the_day_the_lead_asked_for():
     R = {"today": "2026-10-10", "by_owner": {"Asha K": [
         {"lead_id": "a", "name": "A", "tier": "A", "chance": 30, "callback_requested": ""},

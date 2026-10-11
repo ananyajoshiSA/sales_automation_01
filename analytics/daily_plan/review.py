@@ -53,12 +53,22 @@ def enrollments(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list
                     "owner": l.get("OwnerIdName"), "at": t.strftime("%H:%M"), "by": by, "comment": comment, "how": "Course Enrolled",
                     "evidence": r.get("payment_evidence") or comment or ""})
     seen = {e["lead_id"] for e in out}
-    for lid, r in reads.items():  # said on a call that they paid, stage not moved yet: still an enrollment
+    for lid, r in reads.items():  # said on a call that they paid on ``day``, stage not moved yet: still that day's enrollment
         l = snap.leads.get(lid) or {}
-        if r.get("status") == "paid_new" and lid not in seen and l.get("ProspectStage") not in CLOSED and l.get("OwnerIdName") in snap.callers:
+        if r.get("status") == "paid_new" and lid not in seen and l.get("ProspectStage") not in CLOSED and l.get("OwnerIdName") in snap.callers \
+                and r.get("paid_on") == day:
             out.append({"lead_id": lid, "name": r.get("name") or snap.lead_name(lid), "owner": l.get("OwnerIdName"), "at": "", "by": "", "comment": "",
                         "how": "paid on the call (move to Course Enrolled)", "evidence": r.get("payment_evidence") or ""})
     return out
+
+
+def paid_unstaged(snap: Snap, day: str, reads: dict) -> list[dict]:
+    """Leads who paid before ``day`` (or on an unknown date) but are still not in Course Enrolled: a stage to fix, not a new enrollment."""
+    return [{"lead_id": lid, "name": r.get("name") or snap.lead_name(lid), "owner": (snap.leads.get(lid) or {}).get("OwnerIdName"),
+             "evidence": r.get("payment_evidence") or ""}
+            for lid, r in reads.items()
+            if r.get("status") == "paid_new" and r.get("paid_on") != day and (snap.leads.get(lid) or {}).get("ProspectStage") not in CLOSED
+            and (snap.leads.get(lid) or {}).get("OwnerIdName") in snap.callers]
 
 
 def bootcamp_registrations(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list[dict]:
@@ -72,7 +82,8 @@ def bootcamp_registrations(snap: Snap, day: str, enrolled: list[dict], reads: di
     return out
 
 
-def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict) -> list[dict]:
+def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict, won: set[str] = frozenset()) -> list[dict]:
+    """How each of the previous plan's priority leads ended the day; ``won`` holds the day's enrollments."""
     out = []
     for lid, p in prev_plan.items():
         if p.get("group") is None:
@@ -81,8 +92,10 @@ def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict) -> lis
         o = [c for c in cs if c["direction"] == "outbound"]
         best = max((c["duration"] for c in cs if c["status"] == "Answered"), default=0)
         r = reads.get(lid, {})
-        if r.get("status") == "paid_new" or ((snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and r.get("status") != "bootcamp"):
+        if lid in won:
             result = "Won"
+        elif r.get("status") == "paid_new" or ((snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and r.get("status") != "bootcamp"):
+            result = "Paid earlier"
         elif not o and not cs:
             result = "Not called"
         elif best >= 120:
@@ -93,7 +106,7 @@ def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict) -> lis
             result = "Not reached"
         out.append({"lead_id": lid, "name": snap.lead_name(lid), "owner": p.get("owner"), "group": p["group"], "result": result,
                     "what": r.get("friday_summary") or (f"{len(o)} dial(s), none answered" if o else "No dial")})
-    order = {"Won": 0, "Spoke": 1, "Short pickup": 2, "Not reached": 3, "Not called": 4}
+    order = {"Won": 0, "Paid earlier": 1, "Spoke": 1, "Short pickup": 2, "Not reached": 3, "Not called": 4}
     return sorted(out, key=lambda x: (order[x["result"]], x["group"]))
 
 
@@ -138,7 +151,9 @@ def facts(snap: Snap, day: str, before: str | None, prev_plan: dict, reads: dict
     prev_plan = active_plan(snap, day, prev_plan)
     stats = day_stats(snap, day, prev_plan)
     stats_before = day_stats(snap, before, None) if before else None
+    enr = enrollments(snap, day, enrolled, reads)
     return {"day": day, "before": before, "stats": stats, "stats_before": stats_before, "quality": quality(reads),
-            "enrollments": enrollments(snap, day, enrolled, reads), "bootcamp": bootcamp_registrations(snap, day, enrolled, reads),
-            "priority_outcomes": priority_outcomes(snap, day, prev_plan, reads),
+            "enrollments": enr, "bootcamp": bootcamp_registrations(snap, day, enrolled, reads),
+            "paid_unstaged": paid_unstaged(snap, day, reads),
+            "priority_outcomes": priority_outcomes(snap, day, prev_plan, reads, {e["lead_id"] for e in enr}),
             "missed": missed(snap, day, stats, prev_plan, reads), "has_plan": bool(prev_plan)}
