@@ -12,6 +12,9 @@ Inputs (JSON):
                order (M, P, A, B and promises now due always stay), so a long lead window still gives a sheet one
                day can finish
   team, date_label, targets, default_target - optional sheet titles and per-caller targets
+  inbound    - optional, default true: false for a team that takes no incoming calls, so no lead becomes
+               Tier M (a call from the lead stays a sign of interest in the reason, not a callback owed)
+  discovery  - optional {lead_id: text}: what the bot's or a counsellor's discovery found, shown to the caller
   carry      - optional: earlier call-plan workbooks; leads marked "Link sent", "Token paid" or "EMI docs
                pending" there and not paid come back as Tier P ("link sent, not paid")
 
@@ -89,16 +92,22 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
     for f in plan["first"]:
         if f["lead_id"] in rows:
             continue
+        bot = f.get("bot_discovery")  # date the AI voice agent did discovery: a closer's first call, not discovery
         rows[f["lead_id"]] = {
             "owner": f["owner"], "lead_id": f["lead_id"], "name": f["name"], "tier": "F",
             "prob_3d": chance.get("F") or (5 if f["source"] != "Inbound Phone call" else 6), "month_end_due": False,
             "course": f.get("course", ""),
             "why": (f"New {f['source']} lead created {f['created_ist']}; {f['dials']} dial(s), "
-                    f"{f['answered_calls']} answered, no real conversation yet."),
-            "opening_line": "Hi, this is <name> from LawSikho — you enquired about our course on our website. "
-                            "Is this a good time for 2 minutes?",
-            "next_action": "Discovery: background, goal, timeline; pitch the matching program; book a fixed "
-                           "callback or send the fee sheet on WhatsApp.",
+                    f"{f['answered_calls']} answered, no real conversation with us yet."
+                    + (f" The bot did discovery on {bot}: see 'Discovery so far'." if bot else "")),
+            "opening_line": ("Hi, this is <name> from LawSikho — you spoke with our assistant about the US Accounting "
+                             "bootcamp and your goals. I'd like to show you how the programme fits them; is this a good time?"
+                             if bot else "Hi, this is <name> from LawSikho — you enquired about our course on our website. "
+                             "Is this a good time for 2 minutes?"),
+            "next_action": ("Discovery is done: confirm what the bot noted in one line, then pitch the programme with the "
+                            "fee and EMI split and ask for a seat block or a fixed decision call." if bot else
+                            "Discovery: background, goal, timeline; pitch the matching program; book a fixed "
+                            "callback or send the fee sheet on WhatsApp."),
             "best_time": "anytime", "objection_to_prepare": "", "phone": f.get("phone"), "stage": f["stage"],
             "last_conv": "", "source_list": "fresh", "rank": f.get("rank", 0),
         }
@@ -139,8 +148,9 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         }
 
     cand = {c["lead_id"]: c for c in plan["candidates"]}
+    inbound = plan.get("inbound", True)
     for c in plan["candidates"]:  # a lead who rang us and was never called back goes first
-        if not c.get("inbound_missed_unreturned"):
+        if not inbound or not c.get("inbound_missed_unreturned"):
             continue
         prev = rows.get(c["lead_id"])
         if prev and prev["tier"] in ("A", "P"):
@@ -167,7 +177,8 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         r["phone"] = r.get("phone") or c.get("phone")
         r["stage"] = stages.get(r["lead_id"]) or c.get("stage") or r.get("stage", "")
         r["last_conv"] = c.get("last_conversation_ist") or r.get("last_conv", "")
-        r["missed_unreturned"] = c.get("inbound_missed_unreturned", 0)
+        r["missed_unreturned"] = c.get("inbound_missed_unreturned", 0) if inbound else 0
+        r["discovery"] = plan.get("discovery", {}).get(r["lead_id"], "")
         if r["stage"] in CLOSED_STAGES:
             continue
         r["opening_line"] = (r.get("opening_line") or "").replace("<name>", r["owner"].split()[0])
@@ -279,7 +290,7 @@ def read_carry(paths: list[str]) -> list[dict]:
 CALLER_COLS = [
     ("#", 5), ("Tier", 22), ("When to call", 24), ("Lead", 24), ("Phone", 15), ("Course", 28),
     ("Est. chance (3 days)", 11), ("Month-end promise due", 11), ("Missed call not returned", 11),
-    ("Why this lead", 50), ("Opening line", 50), ("What to send / ask", 50), ("Prepare for", 30),
+    ("Why this lead", 50), ("Discovery so far", 50), ("Opening line", 50), ("What to send / ask", 50), ("Prepare for", 30),
     ("Best time (past pick-ups)", 14), ("Last conversation", 16), ("Stage", 18), ("Attempts required", 10),
     ("Attempt 1 time", 11), ("Attempt 1 outcome", 20), ("Attempt 2 time", 11), ("Attempt 2 outcome", 20),
     ("Attempt 3 time", 11), ("Attempt 3 outcome", 20), ("Attempt 4 time", 11), ("Attempt 4 outcome", 20),
@@ -341,7 +352,7 @@ def caller_sheet(wb, owner, rows, day="tomorrow"):
             "Est. chance (3 days)": round(r["prob_3d"] / 100, 2),
             "Month-end promise due": "Yes" if r.get("month_end_due") else "",
             "Missed call not returned": "Yes" if r.get("missed_unreturned") else "",
-            "Why this lead": r.get("why", ""), "Opening line": r.get("opening_line", ""),
+            "Why this lead": r.get("why", ""), "Discovery so far": r.get("discovery", ""), "Opening line": r.get("opening_line", ""),
             "What to send / ask": r.get("next_action", ""), "Prepare for": r.get("objection_to_prepare", ""),
             "Best time (past pick-ups)": r.get("best_time", ""), "Last conversation": r.get("last_conv", ""),
             "Stage": r.get("stage", ""), "Attempts required": ATTEMPTS[r["tier"]], "Lead ID": r["lead_id"],
@@ -349,7 +360,7 @@ def caller_sheet(wb, owner, rows, day="tomorrow"):
         for name, v in vals.items():
             c = ws.cell(row=rr, column=COL[name], value=v)
             c.font = Font(name=FONT, size=9, bold=name in ("Lead", "Tier"))
-            c.alignment = Alignment(wrap_text=name in ("Why this lead", "Opening line", "What to send / ask",
+            c.alignment = Alignment(wrap_text=name in ("Why this lead", "Discovery so far", "Opening line", "What to send / ask",
                                                        "Prepare for", "Course", "Lead"), vertical="top")
             c.fill = PatternFill("solid", fgColor=TIER_FILL[r["tier"]])
             c.border = BORDER

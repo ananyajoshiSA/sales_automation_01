@@ -86,6 +86,27 @@ def test_missed_callback_is_flagged_and_new_leads_least_tried_first():
     assert [r["lead_id"] for r in build_rows(p)["Asha K"] if r["tier"] == "F"] == ["n2", "n1"]  # n1 dialled twice
 
 
+def test_no_inbound_course_filter_and_discovery_notes():
+    snap = {**SNAP, "leads": [lead("hot", "Asha K", "Follow Up For Closure", mx_Enquired_Course="US Accounting Bootcamp",
+                                   mx_Conversation_Summary="Pune, B.Com, 3 years in AP, uses Tally, wants US clients"),
+                              lead("rang", "Asha K", mx_Enquired_Course="US Accounting Bootcamp"),
+                              lead("law", "Asha K", "Follow Up For Closure", mx_Enquired_Course="Contract Drafting"),
+                              lead("bot", "Asha K", "Discovery Call Done", created="2026-10-06 05:00:00", mx_Conversation_Summary="cnp"),
+                              lead("new", "Asha K", "New Lead", created="2026-10-07 05:00:00")],
+            "calls": [call("hot", "2026-10-07 06:00:00"), call("law", "2026-10-07 06:00:00"),
+                      call("rang", "2026-10-08 06:00:00", 0, "NotAnswered", "inbound")]}
+    bot = {"bot": [{"start_ist": "2026-10-05T11:00:00", "campaign": "U.SAcc_12thSep", "secs": 300, "outcome": "Full Conversion",
+                    "summary": "CA Inter, 2 years in audit, wants remote US work."},
+                   {"start_ist": "2026-09-01T11:00:00", "campaign": "Content_Writing", "secs": 300, "outcome": "x", "summary": "y"}]}
+    p = build_plan(snap, "2026-10-09", inbound=False, course="account", bot_calls=bot, bot_campaign="acc")
+    rows = build_rows(p)["Asha K"]
+    assert [(r["lead_id"], r["tier"]) for r in rows] == [("hot", "A"), ("bot", "F"), ("new", "F"), ("rang", "R")]
+    assert "Caller's notes: Pune" in rows[0]["discovery"]
+    assert rows[1]["discovery"].startswith("Bot, 5 Oct (Full Conversion, 5 min): CA Inter")
+    assert "bot did discovery on 5 Oct" in rows[1]["why"] and "Discovery is done" in rows[1]["next_action"]
+    assert rows[2]["discovery"] == "" and not any(r["missed_unreturned"] for r in rows)
+
+
 def test_tier_outcomes_measures_each_tier_and_needs_enough_leads(tmp_path):
     path = tmp_path / "call_plan_Team_Test_2026-10-09.json"
     plan = {"Asha K": [{"lead_id": "a1", "tier": "A", "prob_3d": 35}, {"lead_id": "a2", "tier": "A", "prob_3d": 35},

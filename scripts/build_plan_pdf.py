@@ -7,7 +7,7 @@ left out falls back to a neutral default, so the PDF is never tied to one team o
   team, leader, date_label ("Monday 12 October 2026"), day ("Monday"), next_day ("Tuesday"),
   window ("1 Sep – 11 Oct 2026"), pulled ("12:40 IST, Sun 11 Oct"), new_window ("1 Sep – 11 Oct"),
   workbook, target (enrolments per caller), subteams ({caller: team}), programs ([...]),
-  dialer_check ([callers]), unblock ([...]), notes ([...]), rebalance (text; default: computed),
+  inbound (false: the team takes no incoming calls, so no missed-call steps), dialer_check ([callers]), unblock ([...]), notes ([...]), rebalance (text; default: computed),
   objections ([[objection, answer], ...]; default: the general playbook)
 
     python scripts/build_plan_pdf.py exports/plans/call_plan_Team_2026-10-12.json out.html [--meta meta.json]
@@ -72,7 +72,7 @@ def lead_rows(rs):
   <td class="lead"><b>{name(r)}</b><div class="sub">{esc(r.get('course'), 70)}</div>
       <div class="sub">Stage: {esc(r.get('stage'))} · {int(r['prob_3d'])}% · Best: {esc(r.get('best_time') or 'anytime', 30)}</div>
       <div>{flags(r)}</div></td>
-  <td>{esc(r.get('why'), 300)}</td>
+  <td>{esc(r.get('why'), 300)}{('<div class="sub"><b>Discovery so far:</b> ' + esc(r.get('discovery'), 360) + '</div>') if r.get('discovery') else ''}</td>
   <td><i>“{esc(r.get('opening_line'), 260)}”</i></td>
   <td>{esc(action, 300)}{('<div class="sub"><b>Prepare:</b> ' + esc(r.get('objection_to_prepare'), 160) + '</div>') if r.get('objection_to_prepare') else ''}</td>
 </tr>""")
@@ -102,7 +102,7 @@ def caller_section(owner, rs, M):
     <div><b>{tm:.1f}</b><span>Likely enrolments {M['day']}</span></div>
     <div><b>{p3:.1f}</b><span>3-day pipeline ({gap})</span></div>
   </div>
-  <p class="note">First 30 minutes: {missed} missed call(s) to return, {carried} booked callback(s) that were missed, {ni} stage(s) to correct. Then work the list below in order.</p>
+  <p class="note">First 30 minutes: {f"{missed} missed call(s) to return, " if M["inbound"] else ""}{carried} booked callback(s) that were missed, {ni} stage(s) to correct. Then work the list below in order.</p>
   {f'<h3>First: return the lead\'s call (M) and unpaid links (P) ({len(t["M"]) + len(t["P"])})</h3><table class="leads"><thead><tr><th>#</th><th>Lead</th><th>Why</th><th>Opening line</th><th>What to send / ask</th></tr></thead><tbody>' + lead_rows(t['M'] + t['P']) + '</tbody></table>' if t['M'] or t['P'] else ''}
   <h3>Tier A – close today ({len(t['A'])})</h3>
   {'<table class="leads"><thead><tr><th>#</th><th>Lead</th><th>Why</th><th>Opening line</th><th>What to send / ask</th></tr></thead><tbody>' + lead_rows(t['A']) + '</tbody></table>' if t['A'] else '<p class="note">No Tier A lead. Start with the B list at 10:30.</p>'}
@@ -161,7 +161,7 @@ td.t { white-space: nowrap; font-weight: bold; color: #123f36; }
 
 DEFAULT_META = {"team": "Team", "leader": "", "date_label": "tomorrow", "day": "tomorrow", "next_day": "the next day",
                 "window": "the last 15 days", "pulled": "", "new_window": "the last 7 days", "workbook": "the workbook",
-                "target": 4, "subteams": {}, "programs": [], "dialer_check": [], "unblock": [], "notes": [], "rebalance": "", "objections": [],
+                "target": 4, "inbound": True, "subteams": {}, "programs": [], "dialer_check": [], "unblock": [], "notes": [], "rebalance": "", "objections": [],
                 "reading": "Every lead was tiered by rule from its calls, stage and Zipteams notes; the opening line, ask and "
                            "objection are the standard ones for its tier.",
                 "zip_check": "It only sees one call, so the tier also weighs calls from the lead, long calls, the stage and "
@@ -211,7 +211,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
     team_p3 = sum(r["prob_3d"] for r in all_rows) / 100
     missed = sum(1 for r in all_rows if r.get("missed_unreturned"))
     carried = sum(1 for r in all_rows if r.get("callback_missed"))
-    day, nxt, target = M["day"], M["next_day"], M["target"]
+    day, nxt, target, inb = M["day"], M["next_day"], M["target"], M["inbound"]
     who = f"for {html.escape(M['leader'])}, Team Leader" if M["leader"] else "for the team leader"
     programs = ", ".join(map(html.escape, M["programs"])) or "every program on the A lists"
     dialer = (f" Place one test call on each line used by {', '.join(map(html.escape, M['dialer_check']))} "
@@ -234,7 +234,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
     summary_rows = "".join(
         f"<tr><td><b>{html.escape(o)}</b></td>" + "".join(f"<td>{sum(1 for r in P[o] if r['tier'] == k)}</td>" for k in "MABFRC")
         + f"<td>{len(P[o])}</td><td><b>{tomorrow(P[o]):.1f}</b></td><td>{sum(r['prob_3d'] for r in P[o]) / 100:.1f}</td>"
-        f"<td>{sum(1 for r in P[o] if r.get('missed_unreturned'))}</td></tr>" for o in owners)
+        + (f"<td>{sum(1 for r in P[o] if r.get('missed_unreturned'))}</td>" if inb else "") + "</tr>" for o in owners)
     me_rows = "".join(f"<tr><td>{html.escape(o)}</td><td>{name(r)}</td><td>{esc(r.get('why'), 220)}</td></tr>" for o, r in month_end)
     fixes = [(o, r) for o in owners for r in P[o] if r.get("stage_fix")]
     fix_rows = "".join(f"<tr><td>{html.escape(o)}</td><td>{name(r)}</td><td>{esc(r.get('stage'))}</td><td>{esc(r['stage_fix'], 220)}</td></tr>"
@@ -281,9 +281,9 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <h2>1. The target and where enrolments will come from</h2>
 <p>The goal is <b>{target} enrolments per caller</b> {day}, {target * len(owners)} across the {len(owners)} callers. Every lead on the sheets has an estimated chance of enrolling within 3 days, judged by reading its call summaries and checking them against LeadSquared activity. Adding these up gives a realistic picture:</p>
 <table>
-<thead><tr><th>Caller</th><th>M</th><th>A</th><th>B</th><th>F</th><th>R</th><th>C</th><th>Leads</th><th>Likely {day}</th><th>3-day pipeline</th><th>Missed calls to return</th></tr></thead>
+<thead><tr><th>Caller</th><th>M</th><th>A</th><th>B</th><th>F</th><th>R</th><th>C</th><th>Leads</th><th>Likely {day}</th><th>3-day pipeline</th>{'<th>Missed calls to return</th>' if inb else ''}</tr></thead>
 <tbody>{summary_rows}
-<tr><td><b>Team</b></td><td><b>{T['M']}</b></td><td><b>{T['A']}</b></td><td><b>{T['B']}</b></td><td><b>{T['F']}</b></td><td><b>{T['R']}</b></td><td><b>{T['C']}</b></td><td><b>{len(all_rows)}</b></td><td><b>{team_tom:.1f}</b></td><td><b>{team_p3:.1f}</b></td><td><b>{missed}</b></td></tr>
+<tr><td><b>Team</b></td><td><b>{T['M']}</b></td><td><b>{T['A']}</b></td><td><b>{T['B']}</b></td><td><b>{T['F']}</b></td><td><b>{T['R']}</b></td><td><b>{T['C']}</b></td><td><b>{len(all_rows)}</b></td><td><b>{team_tom:.1f}</b></td><td><b>{team_p3:.1f}</b></td>{f'<td><b>{missed}</b></td>' if inb else ''}</tr>
 </tbody></table>
 {f"""<h3>By team</h3>
 <table><thead><tr><th>Team</th><th>Callers</th><th>M</th><th>A</th><th>B</th><th>F</th><th>R</th><th>C</th><th>Leads</th><th>Likely {day}</th><th>3-day pipeline</th></tr></thead><tbody>{subteam_rows}</tbody></table>""" if subteam_rows else ''}
@@ -292,7 +292,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <ol>
   <li><b>Tier A ({T['A']} across the team):</b> the main source. These leads are already discussing payment, EMI, documents or a seat block, or promised a decision now due. Each is roughly 25–35% likely to close within 3 days, and most of that can happen {day} if called at the right time with the payment link ready.</li>
   <li><b>The best 5–6 Tier B leads:</b> real interest, one or two steps from paying (fee or EMI clarity, family approval, a document). Each is roughly 10–20% likely. Two or three Bs closing makes the difference between 2 and 4.</li>
-  <li><b>Leads who called us and weren't called back ({missed} on the sheets):</b> highest intent per minute spent. Return every one in the first 30 minutes.</li>
+  {f"<li><b>Leads who called us and weren't called back ({missed} on the sheets):</b> highest intent per minute spent. Return every one in the first 30 minutes.</li>" if inb else f"<li><b>Booked callbacks that were missed ({carried} on the sheets):</b> the lead agreed a time and was not called. Call them first, at the time they gave if it is today.</li>"}
   <li><b>Promises now due ({len(month_end)}):</b> leads who said they'd decide or pay by a date that has now come (section 11).</li>
   <li><b>New leads (F) and revive (R):</b> lower chance per lead (about 4–6%), but there are many. They feed the next two days' closes.</li>
 </ol>
@@ -304,7 +304,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <h2>2. How the call lists were built</h2>
 <ul>
   <li><b>Scope:</b> every open lead owned by the team that had a real conversation (answered and 2 minutes or more, or a Zip note) in {html.escape(M['window'])}, plus every new lead created {html.escape(M['new_window'])} with no real conversation yet, plus open-stage leads with no real conversation for 15+ days (revive). Enrolled, irrelevant and invalid leads are excluded.</li>
-  <li><b>Scoring:</b> each lead's timeline was assembled: every dial, answered call and talk time, calls from the lead to us, missed calls never returned, follow-up dates, stage, and Zipteams intent, reason and summary.</li>
+  <li><b>Scoring:</b> each lead's timeline was assembled: every dial, answered call and talk time, calls from the lead to us, follow-up dates, stage, Zipteams intent, reason and summary{', and the discovery so far (the AI voice agent\'s discovery call and the callers\' own discovery notes)' if any(r.get('discovery') for r in all_rows) else ''}.</li>
   <li><b>Reading:</b> {html.escape(M['reading'])} The best time to call is the slot in which the lead answered most often.</li>
   <li><b>Zip intent was cross-checked, not trusted alone.</b> {html.escape(M['zip_check'])}</li>
 </ul>
@@ -312,12 +312,12 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <table><thead><tr><th>Tier</th><th>Meaning</th><th>Typical chance (3 days)</th><th>Attempts {day}</th></tr></thead><tbody>
 <tr><td><b>A · Close today</b></td><td>Payment, EMI, documents or a seat block already under discussion; a decision made or due; still reachable</td><td>25–50%</td><td>4 + WhatsApp</td></tr>
 <tr><td><b>B · Hot follow-up</b></td><td>Real interest, 1–2 steps from paying (fee clarity, family approval, a document)</td><td>8–25%</td><td>3 + WhatsApp</td></tr>
-<tr><td><b>M · Return the lead's call</b></td><td>The lead called us and nobody called back</td><td>~6%</td><td>3, first thing</td></tr>
+{"<tr><td><b>M · Return the lead's call</b></td><td>The lead called us and nobody called back</td><td>~6%</td><td>3, first thing</td></tr>" if inb else ""}
 <tr><td><b>F · New lead</b></td><td>Created {html.escape(M['new_window'])}, no real conversation yet</td><td>~5%</td><td>3 + WhatsApp</td></tr>
 <tr><td><b>R · Revive</b></td><td>Still at an open stage (closure, callback, counselled, may buy later), no real conversation for 15+ days; up to 8 per caller</td><td>~4%</td><td>2, WhatsApp first</td></tr>
 <tr><td><b>C · Nurture</b></td><td>Interested but blocked or more than a week away, or gone quiet</td><td>2–8%</td><td>1, WhatsApp first</td></tr>
 </tbody></table>
-<p class="note">Within each tier, leads with an unreturned missed call come first, then promises now due, then the highest chance.</p>
+<p class="note">Within each tier, {'leads with an unreturned missed call come first, then ' if inb else ''}promises now due come first, then the highest chance.</p>
 </section>
 
 <section>
@@ -326,7 +326,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <tr><td class="t">09:15</td><td>Open the workbook; check every caller has their sheet.{dialer}</td><td>Lines confirmed working, or callers told which line to use.</td></tr>
 <tr><td class="t">09:25</td><td>Rebalance as in section 1, in LeadSquared.</td><td>Both callers know which leads they received.</td></tr>
 <tr><td class="t">09:35</td><td>Check payment links, the EMI split sheet (3/6/12/18 months) and the refund / money-back terms are ready for every program on the A lists: {programs}.</td><td>Each caller can send a link within 30 seconds on a call.</td></tr>
-<tr><td class="t">09:45</td><td>Huddle (15 min). Each caller reads out their Tier A names, the exact ask for each, and the time they will call. Agree the lunch split so inbound is always covered. Remind the team: callbacks to missed calls within 15 minutes all day.</td><td>Everyone has said their A list aloud.</td></tr>
+<tr><td class="t">09:45</td><td>Huddle (15 min). Each caller reads out their Tier A names, the exact ask for each, and the time they will call. {'Agree the lunch split so inbound is always covered. Remind the team: callbacks to missed calls within 15 minutes all day.' if inb else 'Remind the team: every booked callback is made at the time the lead gave.'}</td><td>Everyone has said their A list aloud.</td></tr>
 </tbody></table>
 <div class="callout"><p><b>Huddle script:</b> "Today's target is {target} per person. Your sheet is in order. Do not skip ahead to easier calls. Every A gets a call before 11:30 with the link ready. Every connected call ends with a date: payment, seat block or a fixed callback. Log every attempt in your sheet as you go. I'll check at 12, 3, 6 and 7:30."</p></div>
 </section>
@@ -334,12 +334,12 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <section>
 <h2>4. The day, hour by hour</h2>
 <table><thead><tr><th>Time</th><th>What callers do</th><th>What you do</th></tr></thead><tbody>
-<tr><td class="t">10:00–10:30</td><td>Return every missed call from a lead ({missed} on sheets). Make the {carried} booked callbacks that didn't happen or weren't answered (flagged on the sheets).</td><td>Walk the floor; make sure nobody starts with C leads.</td></tr>
+<tr><td class="t">10:00–10:30</td><td>{f'Return every missed call from a lead ({missed} on sheets). ' if inb else ''}Make the {carried} booked callbacks that didn't happen or weren't answered (flagged on the sheets).</td><td>Walk the floor; make sure nobody starts with C leads.</td></tr>
 <tr><td class="t">10:30–11:30</td><td>Tier A first attempts, in order (honour each lead's best time). Send the payment link while the lead is on the call. If unanswered, WhatsApp immediately (template A1).</td><td>Be available for 3-way calls with parents or spouses and for EMI or discount approvals.</td></tr>
-<tr><td class="t">11:30–12:00</td><td>Overnight new leads and any fresh missed calls. First call to a new lead within 5 minutes of it appearing.</td><td>Check new leads were assigned (not stuck with the distributor).</td></tr>
+<tr><td class="t">11:30–12:00</td><td>Overnight new leads{' and any fresh missed calls' if inb else ''}. First call to a new lead within 5 minutes of it appearing.</td><td>Check new leads were assigned (not stuck with the distributor).</td></tr>
 <tr><td class="t">12:00</td><td colspan="2"><b>Checkpoint 1</b> (section 9).</td></tr>
 <tr><td class="t">12:00–13:30</td><td>Tier B first attempts, best-time leads first. Push for a token or seat block, not just "send details".</td><td>Listen to 2 live calls; coach on asking for the commitment.</td></tr>
-<tr><td class="t">13:30–14:15</td><td>Lunch in two shifts (half the team at 13:30, half at 14:00).</td><td>Cover inbound during the changeover.</td></tr>
+<tr><td class="t">13:30–14:15</td><td>Lunch in two shifts (half the team at 13:30, half at 14:00).</td><td>{'Cover inbound during the changeover.' if inb else ''}</td></tr>
 <tr><td class="t">14:15–15:00</td><td>Tier F: new leads from {html.escape(M['new_window'])} that never had a real conversation, newest first. Discovery → matching program → fixed callback or fee sheet.</td><td>Spot-check that F calls aren't 30-second "is this a good time" calls.</td></tr>
 <tr><td class="t">15:00</td><td colspan="2"><b>Checkpoint 2.</b></td></tr>
 <tr><td class="t">15:00–16:00</td><td>Second attempts on A and B; leads whose best time is the afternoon; promises now due.</td><td>Chase any caller with Tier A still "Not started".</td></tr>
@@ -375,7 +375,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
   <li><b>Discovery (3–5 questions):</b> background, current work, goal, timeline, who decides, budget comfort.</li>
   <li>Pitch <b>one</b> matching program, not a menu. Share the fee with EMI on the call.</li>
   <li>End with a fixed next step: a callback time, a masterclass or demo slot, or the payment link.</li>
-  <li>Three attempts today (14:15, 17:30, 19:00) plus WhatsApp F1 after the first missed call.</li>
+  <li>Three attempts today (14:15, 17:30, 19:00) plus WhatsApp F1 after the first unanswered dial.</li>
 </ol>
 <h3>Tier R – revive closure-stage</h3>
 <ol>
@@ -437,7 +437,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <p>Open the <b>Team summary</b> tab. Each row updates as callers log attempts.</p>
 <table><thead><tr><th>Time</th><th>Look at</th><th>Must be true</th><th>If not, do this</th></tr></thead><tbody>
 <tr><td class="t">12:00</td><td>"Tier A not started"</td><td>0 for every caller</td><td>Sit with that caller; dial the A list together now.</td></tr>
-<tr><td class="t">12:00</td><td>Missed calls</td><td>Every missed call from a lead returned</td><td>Return it yourself or assign it immediately.</td></tr>
+{'<tr><td class="t">12:00</td><td>Missed calls</td><td>Every missed call from a lead returned</td><td>Return it yourself or assign it immediately.</td></tr>' if inb else '<tr><td class="t">12:00</td><td>Booked callbacks</td><td>Every missed booked callback on the sheets attempted</td><td>Call it yourself or assign it immediately.</td></tr>'}
 <tr><td class="t">15:00</td><td>"Attempts logged" vs B count; "Enrolled so far"</td><td>Every B attempted once; at least 1 payment link or enrolment per caller</td><td>Find out why: failing calls (switch line), a slow caller (pair them up), or stuck on low tiers (redirect).</td></tr>
 <tr><td class="t">18:00</td><td>Each caller's A rows</td><td>Every A attempted 3 times; every F twice</td><td>Reassign unattempted A leads to whoever is free.</td></tr>
 <tr><td class="t">19:30</td><td>"Leads not started"; Next step column</td><td>0 not started; every connected call has a next-step date and time</td><td>Unfinished leads go to the top of {nxt}'s list.</td></tr>
@@ -483,7 +483,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 
 <section>
 <h2>12. Caller-wise call lists</h2>
-<p>One section per caller. Tier A and B leads are listed in full and in call order, with the reason, the opening line and the ask. New, revive and nurture leads are named; their full details, and phone numbers for every lead, are in the caller's sheet in the workbook. Flags: <span class="chip bad">Missed call from lead</span> return first · <span class="chip warn">Promise now due</span> · <span class="chip warn">Booked callback missed</span> a callback was booked and not made – do it first · <span class="chip good">Updated from the latest calls</span> re-judged on the newest conversation · <span class="chip bad">Staged Not Interested – fix</span>.</p>
+<p>One section per caller. Tier A and B leads are listed in full and in call order, with the reason, the opening line and the ask. New, revive and nurture leads are named; their full details, and phone numbers for every lead, are in the caller's sheet in the workbook. Flags: {'<span class="chip bad">Missed call from lead</span> return first · ' if inb else ''}<span class="chip warn">Promise now due</span> · <span class="chip warn">Booked callback missed</span> a callback was booked and not made – do it first · <span class="chip good">Updated from the latest calls</span> re-judged on the newest conversation · <span class="chip bad">Staged Not Interested – fix</span>.</p>
 </section>
 {''.join(caller_section(o, P[o], M) for o in owners)}
 

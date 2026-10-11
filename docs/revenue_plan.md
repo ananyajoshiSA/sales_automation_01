@@ -55,8 +55,15 @@ scores, calls by hour, calls to review), then the method, every validation check
 ```bash
 python -m analytics.nightly_plan "Team Elite Calling" --leader "Shivangi Sahu" [--tier-b-cap 12]
 python -m analytics.nightly_plan "US Bookkeeping Accounting-Sana" "US accounting counselors - Sana" \
-    --leader "Sana Ali" --since 2026-09-01 --sheet-cap 80
+    --leader "Sana Ali" --since 2026-09-01 --sheet-cap 80 --no-inbound --course account \
+    --bot-calls data/bot_calls.json --bot-campaign acc
 ```
+
+For bootcamp teams, discovery is done by the AI voice agent (TimePay) or a counsellor before a closer calls.
+`scripts/fetch_bot_calls.py leads.json data/bot_calls.json` looks up the bot's calls for each lead by phone
+(read-only); the plan shows the bot's latest discovery and the callers' own notes (LeadSquared "Conversation
+Summary") as "Discovery so far", and new leads the bot already discovered come first with a closer's opening.
+`--no-inbound` is for a team that takes no incoming calls (no Tier M); `--course` leaves out other courses.
 
 Several groups are planned as one team. `--since` widens the window: every lead with a conversation since that
 day is tiered and every lead created since then without a real conversation is a new lead (F). `--sheet-cap`

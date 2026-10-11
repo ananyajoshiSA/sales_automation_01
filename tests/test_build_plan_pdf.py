@@ -24,3 +24,13 @@ def test_pdf_takes_team_day_and_window_from_meta(tmp_path):
     assert "<h2>Lead Er</h2>" not in doc  # the leader gets no caller section
     for old in ("Elite", "Shivangi", "Shaziya", "Wednesday", "Friday", "8 Oct"):
         assert old not in doc
+
+
+def test_team_without_inbound_gets_no_missed_call_steps_and_sees_discovery(tmp_path):
+    plan = {"Ravi K": [row("A", discovery="Bot, 5 Oct (Full Conversion, 5 min): CA Inter, wants US clients."), row("B")]}
+    (tmp_path / "plan.json").write_text(json.dumps(plan))
+    (tmp_path / "meta.json").write_text(json.dumps({"team": "Team Test", "inbound": False}))
+    build(str(tmp_path / "plan.json"), str(tmp_path / "out.html"), str(tmp_path / "meta.json"))
+    doc = (tmp_path / "out.html").read_text()
+    assert "missed call" not in doc.lower() and "inbound" not in doc.lower()
+    assert "Discovery so far:</b> Bot, 5 Oct" in doc

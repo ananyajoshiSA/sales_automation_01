@@ -11,10 +11,15 @@ its tier_chances.json with --chances and the measured rates replace them.
 
     python -m analytics.nightly_plan "Team Elite Calling" --out exports/plans [--date 2026-10-09]
         [--snapshot data/snap.json] [--chances exports/tier_chances.json] [--leader "Name"] [--target 4]
-        [--tier-b-cap 12] [--days 15] [--since 2026-09-01] [--sheet-cap 80]
+        [--tier-b-cap 12] [--days 15] [--since 2026-09-01] [--sheet-cap 80] [--no-inbound] [--course accounting]
+        [--bot-calls data/bot_calls.json --bot-campaign acc]
 
 --since widens the window: every lead with a conversation since that day is tiered and every lead created
 since then with no real conversation yet is a new lead (F). Revive (R) still means 15+ quiet days.
+--no-inbound is for a team that takes no incoming calls (no Tier M). --course keeps leads whose enquired course
+matches (blank kept). --bot-calls (scripts/fetch_bot_calls.py) adds the AI voice agent's discovery, and each
+lead's own discovery notes (Conversation Summary) are shown too, so a closer does not repeat discovery; a new
+lead the bot already discovered goes to the top of the new leads.
 
 Tier rules (no human read; the lead review can still override by editing the plan JSON):
   A  a real conversation in the last 7 days and a strong signal: asked for the payment link or said
@@ -44,6 +49,7 @@ from analytics.team_report import IST, utc
 # (call_plan.REVIEWED_PROB), C from the middle of its 2-8% nurture range. Not measured.
 DEFAULT_CHANCE = {"A": 35, "B": 15, "C": 5}
 FRESH_DAYS = 7
+MIN_NOTES = 40  # shorter "Conversation Summary" entries are "cnp", "na", "call later" and the like
 CALLBACK_DAYS = 7  # a booked callback missed in the last week is flagged; older ones are just overdue
 NEXT_ACTION = {
     "A": "Close on this call: say the amount, offer the EMI split, send the payment link while on the line, "
@@ -104,12 +110,29 @@ def _why(r: dict) -> str:
     return "; ".join(bits) + "."
 
 
+def discovery_text(lead: dict, bot_calls: list[dict], bot_campaign: str | None = None) -> tuple[str, str]:
+    """(what discovery found so far, IST date of the bot's latest discovery or "") for one lead."""
+    bots = [c for c in bot_calls if c.get("summary") and (not bot_campaign or re.search(bot_campaign, c.get("campaign") or "", re.I))]
+    parts, when = [], ""
+    if bots:
+        c = bots[0]
+        when = datetime.strptime(c["start_ist"][:10], "%Y-%m-%d").strftime("%-d %b")
+        parts.append(f"Bot, {when} ({c.get('outcome') or 'no outcome'}, {round(c['secs'] / 60)} min): {c['summary'][:420]}")
+    notes = re.sub(r"\s+", " ", lead.get("mx_Conversation_Summary") or "").strip()
+    if len(notes) >= MIN_NOTES:
+        parts.append(f"Caller's notes: {notes[:320]}")
+    return "\n".join(parts), when
+
+
 def build_plan(snap: dict, plan_date: str, days: int = 15, chances: dict | None = None, leaders=(),
                target: int = 4, tier_b_cap: int | None = None, carry: list[dict] | None = None,
-               since: str | None = None, sheet_cap: int | None = None) -> dict:
+               since: str | None = None, sheet_cap: int | None = None, inbound: bool = True,
+               course: str | None = None, bot_calls: dict | None = None, bot_campaign: str | None = None) -> dict:
     chances = {**DEFAULT_CHANCE, **(chances or {})}
     team = sorted(_name(u) for u in snap["users"])
-    leads = {l["ProspectID"]: l for l in snap["leads"]}
+    on_course = lambda c: not course or not c or bool(re.search(course, c, re.I))  # noqa: E731
+    leads = {l["ProspectID"]: l for l in snap["leads"] if on_course(l.get("mx_Enquired_Course"))}
+    found = {lid: discovery_text(l, (bot_calls or {}).get(lid, []), bot_campaign) for lid, l in leads.items()}
     day = datetime.strptime(plan_date, "%Y-%m-%d").replace(tzinfo=IST)
     start = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=IST) if since else None
     window = max(days, -(-(datetime.fromisoformat(snap["fetched_at"]) - start).total_seconds() // 86400)) if start else days
@@ -124,7 +147,8 @@ def build_plan(snap: dict, plan_date: str, days: int = 15, chances: dict | None 
             picked.setdefault(c["lead_id"], []).append(t)
         if c.get("status") == "Answered" and (c.get("duration") or 0) >= REAL_CONVERSATION_SECS:
             real.add(c["lead_id"])
-    cands = [r for r in build_timelines(snap, int(window)) if r["owner"] in team and r["stage"] not in CLOSED_STAGES]
+    cands = [r for r in build_timelines(snap, int(window))
+             if r["owner"] in team and r["stage"] not in CLOSED_STAGES and r["lead_id"] in leads]
     tiered = []
     for r in cands:
         if tier := rule_tier(r):
@@ -143,15 +167,17 @@ def build_plan(snap: dict, plan_date: str, days: int = 15, chances: dict | None 
         if (l.get("OwnerIdName") in team and created and fresh_from <= created < day
                 and lid not in real and l.get("ProspectStage") not in DEAD_STAGES | CLOSED_STAGES):
             n = calls.get(lid, {}).get("dials", 0)
+            bot = found[lid][1]
             first.append({"owner": l["OwnerIdName"], "lead_id": lid, "name": _name(l), "source": l.get("Source") or "",
-                          "rank": -(5 * min(n, 12) + (day - created).days),  # least tried, then newest, first
+                          "bot_discovery": bot,  # bot-discovered first, then least tried, then newest
+                          "rank": (1000 if bot else 0) - (5 * min(n, 12) + (day - created).days),
                           "created_ist": created.astimezone(IST).strftime("%d %b %H:%M"),
                           "dials": n, "answered_calls": calls.get(lid, {}).get("answered", 0),
                           "course": l.get("mx_Enquired_Course") or "", "phone": l.get("Phone"), "stage": l.get("ProspectStage") or ""})
 
     revive = []
     for s in lost_leads(snap, days)["stale_open"]:
-        if s["over_cap"] or s["owner"] not in team:
+        if s["over_cap"] or s["owner"] not in team or s["lead_id"] not in leads:
             continue
         l = leads[s["lead_id"]]
         last = s["last_real_conversation_ist"] or s["last_called_ist"]
@@ -163,7 +189,8 @@ def build_plan(snap: dict, plan_date: str, days: int = 15, chances: dict | None 
 
     return {
         "team": snap.get("group") or "Team", "date_label": day.strftime("%a %-d %b %Y"), "plan_date": plan_date,
-        "since": since, "fetched_at": snap.get("fetched_at"),
+        "since": since, "fetched_at": snap.get("fetched_at"), "inbound": inbound,
+        "discovery": {lid: text for lid, (text, _) in found.items() if text},
         "owner_order": [o for o in team if o not in leaders] + [o for o in team if o in leaders],
         "targets": {o: 0 for o in leaders}, "default_target": target, "tier_b_cap": tier_b_cap, "sheet_cap": sheet_cap,
         "chances": {t: v for t, v in chances.items() if t in TIERS},
@@ -191,6 +218,10 @@ def main():
     ap.add_argument("--leader", action="append", default=[], help="team leader(s): no personal target")
     ap.add_argument("--target", type=int, default=4)
     ap.add_argument("--tier-b-cap", type=int)
+    ap.add_argument("--no-inbound", action="store_true", help="the team takes no incoming calls: no Tier M")
+    ap.add_argument("--course", help="regex on the enquired course; other courses are left out (blank kept)")
+    ap.add_argument("--bot-calls", help="scripts/fetch_bot_calls.py output: the AI voice agent's discovery per lead")
+    ap.add_argument("--bot-campaign", help="regex on the bot campaign name to use, e.g. the team's course")
     ap.add_argument("--sheet-cap", type=int, help="most leads per sheet; extra F, R and C leads go to the Backlog sheet")
     a = ap.parse_args()
     plan_date = a.date or (datetime.now(timezone.utc).astimezone(IST) + timedelta(days=1)).strftime("%Y-%m-%d")
@@ -208,7 +239,8 @@ def main():
     stem = f"call_plan_{slug('_'.join(a.team))}_"
     earlier = sorted(p for p in glob.glob(os.path.join(a.out, stem + "*.xlsx")) if p < os.path.join(a.out, stem + plan_date))[-3:]
     plan = build_plan(snap, plan_date, a.days, load_chances(a.chances), a.leader, a.target, a.tier_b_cap, read_carry(earlier), a.since,
-                      a.sheet_cap)
+                      a.sheet_cap, not a.no_inbound, a.course,
+                      json.load(open(a.bot_calls)) if a.bot_calls else None, a.bot_campaign)
     out = os.path.join(a.out, f"{stem}{plan_date}.xlsx")
     by_owner = write_workbook(plan, out)
     print(f"{plan['team']} plan for {plan['date_label']}: {out}"
