@@ -223,7 +223,7 @@ def cmd_pipeline_build(a):
     snap = _snap(p)
     F = pipeline.fresh_outcomes(snap, a.date, pipeline.fresh(snap, a.date), rws)
     res = pipeline.build(rws, a.date, now_ist().strftime("%a %-d %b %H:%M"), (last or {}).get("leads", {}), p["out"], a.team, F,
-                         flow_sections(snap, a.date, a.date, "today, " + datetime.strptime(a.date, "%Y-%m-%d").strftime("%a %-d %b")))
+                         flow_sections(snap, a.date, a.date, datetime.strptime(a.date, "%Y-%m-%d").strftime("%a %-d %b") + " (today)"))
     inc = pipeline.included(rws)
     print(f"pipeline -> {state.save(pipeline.to_state(a.date, inc), a.state_dir, 'pipeline_')}; {res['pdf']}")
     S = res["summary"]
