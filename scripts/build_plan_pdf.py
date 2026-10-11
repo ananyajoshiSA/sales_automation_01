@@ -212,6 +212,8 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
     missed = sum(1 for r in all_rows if r.get("missed_unreturned"))
     carried = sum(1 for r in all_rows if r.get("callback_missed"))
     day, nxt, target, inb = M["day"], M["next_day"], M["target"], M["inbound"]
+    cols = "MABFRC" if inb else "ABFRC"  # no Tier M for a team without incoming calls
+    heads = "".join(f"<th>{k}</th>" for k in cols)
     who = f"for {html.escape(M['leader'])}, Team Leader" if M["leader"] else "for the team leader"
     programs = ", ".join(map(html.escape, M["programs"])) or "every program on the A lists"
     dialer = (f" Place one test call on each line used by {', '.join(map(html.escape, M['dialer_check']))} "
@@ -226,13 +228,13 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
         for tname in teams:
             rs = [r for o in owners if M["subteams"].get(o, "Other") == tname for r in P[o]]
             subteam_rows += (f"<tr><td><b>{html.escape(tname)}</b></td><td>{sum(M['subteams'].get(o, 'Other') == tname for o in owners)}</td>"
-                             + "".join(f"<td>{sum(r['tier'] == k for r in rs)}</td>" for k in "MABFRC")
+                             + "".join(f"<td>{sum(r['tier'] == k for r in rs)}</td>" for k in cols)
                              + f"<td>{len(rs)}</td><td><b>{sum(tomorrow([r]) for r in rs):.1f}</b></td><td>{sum(r['prob_3d'] for r in rs) / 100:.1f}</td></tr>")
     month_end = [(o, r) for o in owners for r in P[o] if r.get("month_end_due")]
     ni = [(o, r) for o in owners for r in P[o] if r["tier"] in "AB" and r.get("stage") == "Not Interested"]
 
     summary_rows = "".join(
-        f"<tr><td><b>{html.escape(o)}</b></td>" + "".join(f"<td>{sum(1 for r in P[o] if r['tier'] == k)}</td>" for k in "MABFRC")
+        f"<tr><td><b>{html.escape(o)}</b></td>" + "".join(f"<td>{sum(1 for r in P[o] if r['tier'] == k)}</td>" for k in cols)
         + f"<td>{len(P[o])}</td><td><b>{tomorrow(P[o]):.1f}</b></td><td>{sum(r['prob_3d'] for r in P[o]) / 100:.1f}</td>"
         + (f"<td>{sum(1 for r in P[o] if r.get('missed_unreturned'))}</td>" if inb else "") + "</tr>" for o in owners)
     me_rows = "".join(f"<tr><td>{html.escape(o)}</td><td>{name(r)}</td><td>{esc(r.get('why'), 220)}</td></tr>" for o, r in month_end)
@@ -281,12 +283,12 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
 <h2>1. The target and where enrolments will come from</h2>
 <p>The goal is <b>{target} enrolments per caller</b> {day}, {target * len(owners)} across the {len(owners)} callers. Every lead on the sheets has an estimated chance of enrolling within 3 days, judged by reading its call summaries and checking them against LeadSquared activity. Adding these up gives a realistic picture:</p>
 <table>
-<thead><tr><th>Caller</th><th>M</th><th>A</th><th>B</th><th>F</th><th>R</th><th>C</th><th>Leads</th><th>Likely {day}</th><th>3-day pipeline</th>{'<th>Missed calls to return</th>' if inb else ''}</tr></thead>
+<thead><tr><th>Caller</th>{heads}<th>Leads</th><th>Likely {day}</th><th>3-day pipeline</th>{'<th>Missed calls to return</th>' if inb else ''}</tr></thead>
 <tbody>{summary_rows}
-<tr><td><b>Team</b></td><td><b>{T['M']}</b></td><td><b>{T['A']}</b></td><td><b>{T['B']}</b></td><td><b>{T['F']}</b></td><td><b>{T['R']}</b></td><td><b>{T['C']}</b></td><td><b>{len(all_rows)}</b></td><td><b>{team_tom:.1f}</b></td><td><b>{team_p3:.1f}</b></td>{f'<td><b>{missed}</b></td>' if inb else ''}</tr>
+<tr><td><b>Team</b></td>{''.join(f"<td><b>{T[k]}</b></td>" for k in cols)}<td><b>{len(all_rows)}</b></td><td><b>{team_tom:.1f}</b></td><td><b>{team_p3:.1f}</b></td>{f'<td><b>{missed}</b></td>' if inb else ''}</tr>
 </tbody></table>
 {f"""<h3>By team</h3>
-<table><thead><tr><th>Team</th><th>Callers</th><th>M</th><th>A</th><th>B</th><th>F</th><th>R</th><th>C</th><th>Leads</th><th>Likely {day}</th><th>3-day pipeline</th></tr></thead><tbody>{subteam_rows}</tbody></table>""" if subteam_rows else ''}
+<table><thead><tr><th>Team</th><th>Callers</th>{heads}<th>Leads</th><th>Likely {day}</th><th>3-day pipeline</th></tr></thead><tbody>{subteam_rows}</tbody></table>""" if subteam_rows else ''}
 <div class="warnbox"><p><b>What this means.</b> On current leads, about {team_tom / max(len(owners), 1):.1f} enrolments per caller are likely {day} and about {team_p3 / max(len(owners), 1):.1f} per caller over three days. {target} {day} is possible only if every Tier A closes on the first or second call, and Tier B leads are pushed for a token or seat block on the call rather than "thinking about it".</p></div>
 <h3>Where each caller's enrolments come from</h3>
 <ol>

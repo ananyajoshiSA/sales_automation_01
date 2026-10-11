@@ -32,5 +32,5 @@ def test_team_without_inbound_gets_no_missed_call_steps_and_sees_discovery(tmp_p
     (tmp_path / "meta.json").write_text(json.dumps({"team": "Team Test", "inbound": False}))
     build(str(tmp_path / "plan.json"), str(tmp_path / "out.html"), str(tmp_path / "meta.json"))
     doc = (tmp_path / "out.html").read_text()
-    assert "missed call" not in doc.lower() and "inbound" not in doc.lower()
+    assert "missed call" not in doc.lower() and "inbound" not in doc.lower() and "<th>M</th>" not in doc
     assert "Discovery so far:</b> Bot, 5 Oct" in doc
