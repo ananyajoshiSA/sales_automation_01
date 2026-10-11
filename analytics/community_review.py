@@ -422,7 +422,7 @@ whether it was a sales problem or a lead problem, and where payments can still c
 <div><b>{_fmt(f_me['open_%_mature'], '%')}</b><span>still open after 30+ days ({SHORT[other]}: {_fmt(f_other['open_%_mature'], '%')})</span></div>
 <div><b>{len(rd)}</b><span>unpaid leads allocated since {esc(data['read_from'])}, each read in full with its calls</span></div>
 <div><b>{100 * owners['Caller'] / n:.0f}%</b><span>of them did not pay mainly because of how they were handled</span></div>
-<div><b>{expect['Paid already - check'] + expect['By 31 Oct']}</b><span>may have paid already or are expected to pay by 31 Oct</span></div>
+<div><b>{expect['Paid already - check']} + {expect['By 31 Oct']}</b><span>show signs of having paid (finance to confirm) + expected to pay by 31 Oct</span></div>
 </div>
 <p class="note">Data: LeadSquared stages, calls, notes and owner changes as of {esc(data['as_of_ist'])} IST, and the recorded
 calls of every unpaid lead read. Collected means the stage reached Collections done or Course Enrolled; LeadSquared holds no
