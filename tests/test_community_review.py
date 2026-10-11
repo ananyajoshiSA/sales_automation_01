@@ -46,3 +46,26 @@ def test_check_reading(tmp_path):
     (folder / "batch_01.jsonl").write_text(batch.read_text())
     (folder / "read_01.jsonl").write_text(read.read_text())
     assert cr.load_readings(str(tmp_path / "reading"))["a"]["cause_owner"] == "Lead"
+
+
+def test_reports_render_for_both_teams_and_the_community_team(tmp_path):
+    def v(lid, team, outcome, month="2026-08", caller="Asha Rao"):
+        return {"lead_id": lid, "team": team, "caller": caller, "outcome": outcome, "month": month, "booked_ist": f"{month}-03 12:00",
+                "booked_day": "Mon", "stage": "Call Back Later", "allocated_by": "Pratik Sarkar", "mature": True,
+                "closure_stage": False, "hrs_handover_to_team_dial": 2.0, "team_dialled_24h": True, "connected_72h": True,
+                "real_convs": 1, "days_to_collect": 2.0 if outcome == "collected" else None, "inbound_unreturned_days": 0,
+                "max_dials_one_day": 1, "first_talk_min": 4.0}
+    reading = {"what_happened": "w", "why_not_paid": "no card", "community_note": "Expected Rs 3,000 a month",
+               "primary_cause": "Community: booked without understanding the balance or terms", "contributing": [],
+               "savable": "Maybe", "expect_payment": "In Nov or Dec", "counselling": "Good"}
+    data = {"as_of_ist": "2026-10-11 11:14", "stats_from": "2026-05-01", "read_from": "2026-08-01",
+            "views": [v("a", "Elite Changemakers", "open"), v("b", "Elite Changemakers", "collected"),
+                      v("c", "Team Puja Malik (DSV+Women AI)", "lost", caller="Ravi Das")],
+            "readings": {"a": {**reading, "cause_owner": "Community team"},
+                         "c": {**reading, "primary_cause": "Caller: not called or counselled in time", "cause_owner": "Caller"}}}
+    names = {"a": {"name": "Malti Jain Jain"}}
+    page = cr.team_html("Elite Changemakers", data, names, {"actions": [{"title": "Return calls.", "text": "Same day."}]})
+    assert "for Mayur Sachdeva" in page and "Malti Jain<" in page and "Return calls." in page
+    assert "Community team: 1 leads" in page and "50.0%" in page
+    page = cr.community_html(data, names, {"summary": [{"title": "Fit.", "text": "Check payment route at booking."}]})
+    assert "For the community team" in page and "Expected Rs 3,000 a month" in page and "Pratik Sarkar" in page

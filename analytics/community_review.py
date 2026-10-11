@@ -16,6 +16,11 @@ collection teams separately and gives the community team its own view.
 
     python -m analytics.community_review data/coll_d11 exports/community_review 2026-05-01 2026-08-01 transcripts.jsonl
     python -m analytics.community_review check <round folder>/read_01.jsonl <round folder>/batch_01.jsonl
+    python -m analytics.community_review report exports/community_review data/coll_d11/contacts.json recommendations.json
+
+``report`` writes three PDFs: one per collection team and one for the community team. ``recommendations.json`` holds the
+written conclusions per report ({team: {"verdict", "why", "actions"}, "community": {"summary", "community_actions",
+"teams"}}, each a list of {"title", "text"}), drawn from the numbers and the readings.
 """
 
 from __future__ import annotations
@@ -28,7 +33,9 @@ from datetime import datetime, timedelta
 
 from analytics.bootcamp_collections import _data, build, median, pct
 from analytics.collection_audit import _load, dossier, flags, transcript_excerpts
+from analytics.collection_plan import EXTRA_CSS, TEAM_LEADERS, TEAM_TITLE, clean_name, esc, render_pdf
 from integrations.timeutil import IST, utc
+from scripts.build_plan_pdf import CSS
 
 MATURE = timedelta(days=30)
 CLOSURE_STAGES = {"follow up for closure", "loan pending"}
@@ -271,7 +278,269 @@ def main(data_dir: str, out_dir: str, stats_from: str, read_from: str, transcrip
     print(f"to read: {len(to_read)}, read: {len(to_read) - len(unread)}")
 
 
+# ----------------------------------------------------------------------------------------------- reports
+
+TEAMS = ("Elite Changemakers", "Team Puja Malik (DSV+Women AI)")
+SHORT = {"Elite Changemakers": "Mayur's team", "Team Puja Malik (DSV+Women AI)": "Pooja's team"}
+OWNER_CLASS = {"Lead": "B", "Caller": "A", "Process": "F", "Community team": "R", "Too early": "C"}
+REVIEW_CSS = """
+.leads td { font-size: 8.2pt; } .leads td.num { width: 14pt; } .leads td.lead { width: 17%; }
+.tier-A td { background: #fdeceb; } .tier-B td { background: #f4f7fc; } .tier-F td { background: #fbf8f0; }
+.tier-R td { background: #f3eaf7; } .tier-C td { background: #f2f2f2; }
+.band-h { margin-top: 14pt; padding: 5pt 9pt; border-radius: 4pt; color: #fff; background: #1f4e46; font-weight: bold; }
+.num-r { text-align: right; }
+"""
+FUNNEL_ROWS = (
+    ("Leads allocated", "allocated", ""), ("Allocated 30+ days ago", "mature", ""),
+    ("Collected (of leads allocated 30+ days ago)", "collected_%_mature", "%"),
+    ("Still open after 30+ days", "open_%_mature", "%"), ("Lost or deferred (30+ days)", "lost_%_mature", "%"),
+    ("First dial by the collection team within 24 h", "team_dialled_24h_%", "%"),
+    ("Median hours from hand-over to first dial", "median_hrs_to_team_dial", " h"),
+    ("Reached within 72 h", "reached_72h_%", "%"), ("Had a real conversation (2 min+)", "real_conv_%", "%"),
+    ("Median days from allocation to payment", "median_days_to_collect", " days"),
+    ("A call from the lead not returned the same day", "unreturned_call_%", "%"),
+    ("Dialled 5+ times in one day", "dialled_5plus_a_day_%", "%"),
+    ("First answered call under 2 minutes", "first_talk_under_2min_%", "%"),
+)
+
+
+def _fmt(x, unit: str) -> str:
+    return "–" if x is None else f"{x}{unit}"
+
+
+def owner_table(readings: list[dict]) -> str:
+    n = len(readings)
+    owners = Counter(r["cause_owner"] for r in readings)
+    savable = Counter((r["cause_owner"], r["savable"]) for r in readings)
+    rows = "".join(f"<tr><td><b>{esc(o)}</b></td><td>{owners[o]}</td><td>{100 * owners[o] / n:.0f}%</td>"
+                   f"<td>{savable[(o, SAVABLE[0])]}</td><td>{savable[(o, SAVABLE[1])]}</td></tr>" for o in OWNERS if owners[o])
+    return (f"<table><thead><tr><th>Whose problem</th><th>Leads</th><th>Share</th><th>Savable with better handling</th>"
+            f"<th>Maybe savable</th></tr></thead><tbody>{rows}<tr><td><b>All unpaid leads read</b></td><td>{n}</td><td>100%</td>"
+            f"<td>{sum(r['savable'] == SAVABLE[0] for r in readings)}</td><td>{sum(r['savable'] == SAVABLE[1] for r in readings)}</td>"
+            f"</tr></tbody></table>")
+
+
+def cause_table(readings: list[dict]) -> str:
+    c = Counter(r["primary_cause"] for r in readings)
+    part = Counter(x for r in readings for x in r.get("contributing") or [])
+    rows = "".join(f"<tr><td>{esc(k)}</td><td>{c[k]}</td><td>{part[k]}</td></tr>" for k in CAUSES if c[k] or part[k])
+    return (f"<table><thead><tr><th>Cause</th><th>Main cause</th><th>Also played a part</th></tr></thead><tbody>{rows}</tbody></table>")
+
+
+def funnel_table(fs: dict[str, dict]) -> str:
+    heads = "".join(f"<th>{esc(k)}</th>" for k in fs)
+    rows = "".join(f"<tr><td>{esc(label)}</td>" + "".join(f"<td>{_fmt(f[key], unit)}</td>" for f in fs.values()) + "</tr>"
+                   for label, key, unit in FUNNEL_ROWS)
+    return f"<table><thead><tr><th></th>{heads}</tr></thead><tbody>{rows}</tbody></table>"
+
+
+def monthly_table(views: list[dict]) -> str:
+    months = sorted({v["month"] for v in views})
+    rows = []
+    for m in months:
+        cells = []
+        for t in TEAMS:
+            f = funnel([v for v in views if v["team"] == t and v["month"] == m])
+            cells.append(f"<td>{f['allocated']}</td><td>{_fmt(f['collected_%_mature'], '%')}</td><td>{_fmt(f['open_%_mature'], '%')}</td>"
+                         f"<td>{_fmt(f['team_dialled_24h_%'], '%')}</td>")
+        rows.append(f"<tr><td><b>{m}</b></td>{''.join(cells)}</tr>")
+    sub = "<th>Allocated</th><th>Collected*</th><th>Still open*</th><th>Dialled in 24 h</th>"
+    return ("<table><thead><tr><th rowspan='2'>Month allocated</th>" + "".join(f"<th colspan='4'>{SHORT[t]}</th>" for t in TEAMS)
+            + f"</tr><tr>{sub * len(TEAMS)}</tr></thead><tbody>{''.join(rows)}</tbody></table>"
+            "<p class='note'>* Of leads allocated 30+ days ago; blank for the current month.</p>")
+
+
+def caller_table(views: list[dict], readings: dict[str, dict]) -> str:
+    by = {}
+    for v in views:
+        by.setdefault(v["caller"], []).append(v)
+    rows = []
+    for c in sorted(by, key=lambda c: -len(by[c])):
+        vs = by[c]
+        f = funnel(vs)
+        rd = [readings[v["lead_id"]] for v in vs if v["lead_id"] in readings]
+        caller_owned = sum(r["cause_owner"] == "Caller" for r in rd)
+        no_counsel = sum(r["counselling"] == "None" for r in rd)
+        rows.append(f"<tr><td><b>{esc(c)}</b></td><td>{f['allocated']}</td><td>{_fmt(f['collected_%_mature'], '%')}</td>"
+                    f"<td>{_fmt(f['open_%_mature'], '%')}</td><td>{_fmt(f['median_hrs_to_team_dial'], '')}</td>"
+                    f"<td>{_fmt(f['reached_72h_%'], '%')}</td><td>{_fmt(f['unreturned_call_%'], '%')}</td>"
+                    f"<td>{len(rd)}</td><td>{caller_owned}</td><td>{no_counsel}</td>"
+                    f"<td>{sum(r['savable'] == SAVABLE[0] for r in rd)}</td></tr>")
+    return ("<table><thead><tr><th>Caller</th><th>Allocated since May</th><th>Collected*</th><th>Still open*</th>"
+            "<th>Median hours to first dial</th><th>Reached in 72 h</th><th>Lead's call not returned</th>"
+            "<th>Unpaid leads read (Aug–Oct)</th><th>Caller was the main cause</th><th>Never counselled</th>"
+            f"<th>Savable with better handling</th></tr></thead><tbody>{''.join(rows)}</tbody></table>"
+            "<p class='note'>* Of leads allocated 30+ days ago. Callers with few leads swing a lot; read their leads, not the "
+            "percentage. Unpaid leads are credited to the caller they settled with in the first 24 h.</p>")
+
+
+def lead_rows(items: list[tuple[dict, dict]], names: dict[str, dict], with_team: bool = False) -> str:
+    out = []
+    for i, (v, r) in enumerate(items, 1):
+        team = f" · {esc(SHORT.get(v['team'], v['team']))}" if with_team else ""
+        out.append(f"""<tr class="tier-{OWNER_CLASS[r['cause_owner']]}"><td class="num">{i}</td>
+<td class="lead"><b>{esc(clean_name(names.get(v['lead_id'], {}).get('name', ''))) or 'Unnamed lead'}</b>
+<div class="sub">{esc(v['caller'])}{team}</div><div class="sub">allocated {esc(v['booked_ist'][:10])} · {esc(v['outcome'])} · {esc(v['stage'])}</div></td>
+<td>{esc(r['what_happened'], 340)}</td><td>{esc(r['why_not_paid'], 240)}<div class="sub"><b>{esc(r['primary_cause'])}</b></div></td>
+<td>{esc(r['savable'])}<div class="sub">Expect: {esc(r['expect_payment'])} · Counselling: {esc(r['counselling'])}</div></td></tr>""")
+    return ("<table class='leads'><thead><tr><th>#</th><th>Lead</th><th>What happened</th><th>Why it has not paid</th>"
+            f"<th>Savable / expected</th></tr></thead><tbody>{''.join(out)}</tbody></table>")
+
+
+def _bullets(items: list[dict]) -> str:
+    return "<ul>" + "".join(f"<li><b>{esc(x['title'])}</b> {esc(x['text'])}</li>" for x in items) + "</ul>" if items else ""
+
+
+def team_html(team: str, data: dict, names: dict, recs: dict) -> str:
+    views = [v for v in data["views"] if v["team"] in TEAMS]
+    mine = [v for v in views if v["team"] == team]
+    readings = data["readings"]
+    read = [(v, readings[v["lead_id"]]) for v in mine if v["lead_id"] in readings]
+    rd = [r for _, r in read]
+    other = next(t for t in TEAMS if t != team)
+    f_me, f_other = funnel(mine), funnel([v for v in views if v["team"] == other])
+    owners = Counter(r["cause_owner"] for r in rd)
+    expect = Counter(r["expect_payment"] for r in rd)
+    n = len(rd) or 1
+    leader = TEAM_LEADERS.get(team, "the team leader")
+    title = TEAM_TITLE.get(team, team)
+    expected = [(v, r) for v, r in read if r["expect_payment"] in EXPECT[:3]]
+    expected.sort(key=lambda x: (EXPECT.index(x[1]["expect_payment"]), x[0]["caller"]))
+    groups = "".join(
+        f'<div class="band-h">{esc(o)}: {owners[o]} leads</div>' + lead_rows(
+            sorted([(v, r) for v, r in read if r["cause_owner"] == o], key=lambda x: (x[1]["primary_cause"], x[0]["caller"])), names)
+        for o in OWNERS if owners[o])
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>{esc(title)} – community collections review</title>
+<style>{CSS}{EXTRA_CSS}{REVIEW_CSS}</style></head><body>
+<div class="cover"><div class="band"><div class="eyebrow">{esc(title)} · for {esc(leader)}</div>
+<h1>Community collections review</h1>
+<p>What happened to every community lead the team was given since {esc(data['stats_from'][:7])}, why payments did not come in,
+whether it was a sales problem or a lead problem, and where payments can still come from.</p></div>
+<div><div class="kpis">
+<div><b>{f_me['allocated']}</b><span>community leads allocated since {esc(data['stats_from'])}</span></div>
+<div><b>{_fmt(f_me['collected_%_mature'], '%')}</b><span>collected, of leads allocated 30+ days ago ({SHORT[other]}: {_fmt(f_other['collected_%_mature'], '%')})</span></div>
+<div><b>{_fmt(f_me['open_%_mature'], '%')}</b><span>still open after 30+ days ({SHORT[other]}: {_fmt(f_other['open_%_mature'], '%')})</span></div>
+<div><b>{len(rd)}</b><span>unpaid leads allocated since {esc(data['read_from'])}, each read in full with its calls</span></div>
+<div><b>{100 * owners['Caller'] / n:.0f}%</b><span>of them did not pay mainly because of how they were handled</span></div>
+<div><b>{expect['Paid already - check'] + expect['By 31 Oct']}</b><span>may have paid already or are expected to pay by 31 Oct</span></div>
+</div>
+<p class="note">Data: LeadSquared stages, calls, notes and owner changes as of {esc(data['as_of_ist'])} IST, and the recorded
+calls of every unpaid lead read. Collected means the stage reached Collections done or Course Enrolled; LeadSquared holds no
+payment amounts yet. A lead belongs to the collection caller it settled with in the first 24 hours after allocation.</p></div></div>
+
+<section><h2>1. Sales problem or lead problem?</h2>
+<p>Each unpaid lead allocated since {esc(data['read_from'])} was read in full (history, notes and every recorded call) and given
+one main reason it has not paid, and who owns that reason.</p>
+{owner_table(rd)}
+{_bullets(recs.get('verdict', []))}</section>
+
+<section><h2>2. How the team performs against {esc(SHORT[other])}</h2>
+{funnel_table({SHORT[team]: f_me, SHORT[other]: f_other})}
+<h3>Month by month</h3>{monthly_table(views)}
+<p class="note">The two teams record stages differently ({SHORT[team]} moves {_fmt(f_me['closure_stage_%'], '%')} of leads to a closure
+stage, {SHORT[other]} {_fmt(f_other['closure_stage_%'], '%')}), so stage-based measures are not compared.</p></section>
+
+<section><h2>3. Why payments did not come in</h2>{cause_table(rd)}
+<h3>Counselling on unpaid leads</h3><table><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in Counter(r['counselling'] for r in rd).most_common())}</tbody></table>
+{_bullets(recs.get('why', []))}</section>
+
+<section><h2>4. Callers</h2>{caller_table(mine, readings)}</section>
+
+<section><h2>5. Where payments can still come from</h2>
+<table><thead><tr><th>Expected</th><th>Leads</th></tr></thead><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{expect[k]}</td></tr>" for k in EXPECT)}</tbody></table>
+<p>The leads that may have paid already or are expected to pay by December:</p>{lead_rows(expected, names)}</section>
+
+<section><h2>6. What to do differently</h2>{_bullets(recs.get('actions', []))}</section>
+
+<section><h2>Appendix: every unpaid lead since {esc(data['read_from'])}, by whose problem it is</h2>{groups}</section>
+</body></html>"""
+
+
+def community_html(data: dict, names: dict, recs: dict) -> str:
+    views = [v for v in data["views"] if v["team"] in TEAMS]
+    readings = data["readings"]
+    read = [(v, readings[v["lead_id"]]) for v in views if v["lead_id"] in readings]
+    rd = [r for _, r in read]
+    fs = {SHORT[t]: funnel([v for v in views if v["team"] == t]) for t in TEAMS}
+    by_team = {t: [r for v, r in read if v["team"] == t] for t in TEAMS}
+    alloc = Counter(v["allocated_by"] for v in data["views"]).most_common(6)
+    days = Counter(v["booked_day"] for v in data["views"])
+    months = sorted({v["month"] for v in views})
+    vol = "".join(f"<tr><td>{m}</td>" + "".join(f"<td>{sum(1 for v in views if v['month'] == m and v['team'] == t)}</td>" for t in TEAMS)
+                  + "</tr>" for m in months)
+    owners_by_team = "".join(
+        f"<tr><td><b>{esc(o)}</b></td>" + "".join(f"<td>{sum(r['cause_owner'] == o for r in by_team[t])} "
+                                                  f"({100 * sum(r['cause_owner'] == o for r in by_team[t]) / max(1, len(by_team[t])):.0f}%)</td>"
+                                                  for t in TEAMS) + "</tr>" for o in OWNERS)
+    community = sorted([(v, r) for v, r in read if r["cause_owner"] == "Community team"
+                        or (r["community_note"].strip().lower() not in ("none", "none.", ""))],
+                       key=lambda x: (x[1]["cause_owner"] != "Community team", x[0]["booked_ist"]))
+    lead_side = Counter(r["primary_cause"] for r in rd if r["cause_owner"] in ("Lead", "Community team"))
+    note_rows = "".join(
+        f"<tr class='tier-{OWNER_CLASS[r['cause_owner']]}'><td>{i}</td><td><b>{esc(clean_name(names.get(v['lead_id'], {}).get('name', '')))}</b>"
+        f"<div class='sub'>{esc(SHORT[v['team']])} · allocated {esc(v['booked_ist'][:10])}</div></td>"
+        f"<td>{esc(r['community_note'], 220)}</td><td>{esc(r['primary_cause'])}</td></tr>"
+        for i, (v, r) in enumerate(community, 1))
+    return f"""<!doctype html><html><head><meta charset="utf-8"><title>Community leads after hand-over – review</title>
+<style>{CSS}{EXTRA_CSS}{REVIEW_CSS}</style></head><body>
+<div class="cover"><div class="band"><div class="eyebrow">For the community team</div>
+<h1>Community leads<br>after hand-over</h1>
+<p>What happened to the community leads handed to the two collection teams since {esc(data['stats_from'][:7])}, why many have not
+paid the balance, which reasons sit with the lead or with how leads come in, and how the two teams compare.</p></div>
+<div><div class="kpis">
+<div><b>{len(views)}</b><span>community leads handed to the two collection teams since {esc(data['stats_from'])}</span></div>
+<div><b>{_fmt(fs[SHORT[TEAMS[0]]]['collected_%_mature'], '%')} / {_fmt(fs[SHORT[TEAMS[1]]]['collected_%_mature'], '%')}</b><span>collected, of leads handed over 30+ days ago ({SHORT[TEAMS[0]]} / {SHORT[TEAMS[1]]})</span></div>
+<div><b>{len(rd)}</b><span>unpaid leads handed over since {esc(data['read_from'])}, each read in full with its calls</span></div>
+<div><b>{100 * sum(r['cause_owner'] == 'Lead' for r in rd) / max(1, len(rd)):.0f}%</b><span>did not pay mainly for the lead's own reasons</span></div>
+<div><b>{100 * sum(r['cause_owner'] == 'Community team' for r in rd) / max(1, len(rd)):.0f}%</b><span>did not pay mainly because of how they came in (fit, what they understood at booking)</span></div>
+<div><b>{100 * sum(r['cause_owner'] == 'Caller' for r in rd) / max(1, len(rd)):.0f}%</b><span>did not pay mainly because of the collection team's handling</span></div>
+</div>
+<p class="note">Data: LeadSquared as of {esc(data['as_of_ist'])} IST and the recorded calls of every unpaid lead. A lead is credited
+to the collection caller it settled with in the first 24 hours after hand-over.</p></div></div>
+
+<section><h2>1. Summary for the community team</h2>{_bullets(recs.get('summary', []))}</section>
+
+<section><h2>2. Why community leads have not paid</h2>
+<table><thead><tr><th>Whose problem</th>{''.join(f"<th>{SHORT[t]}</th>" for t in TEAMS)}</tr></thead><tbody>{owners_by_team}</tbody></table>
+{cause_table(rd)}
+<h3>The lead's side, in detail</h3><table><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in lead_side.most_common())}</tbody></table></section>
+
+<section><h2>3. What the community team can change</h2>{_bullets(recs.get('community_actions', []))}
+<h3>Leads where how they came in mattered ({len(community)})</h3>
+<table class="leads"><thead><tr><th>#</th><th>Lead</th><th>What the community team should know</th><th>Main cause</th></tr></thead>
+<tbody>{note_rows}</tbody></table></section>
+
+<section><h2>4. How the two collection teams perform</h2>{funnel_table(fs)}
+<h3>Month by month</h3>{monthly_table(views)}{_bullets(recs.get('teams', []))}</section>
+
+<section><h2>5. Hand-over</h2>
+<table><thead><tr><th>Month handed over</th>{''.join(f"<th>{SHORT[t]}</th>" for t in TEAMS)}</tr></thead><tbody>{vol}</tbody></table>
+<div class="two"><div><h3>Who handed leads over</h3><table><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in alloc)}</tbody></table></div>
+<div><h3>Day of hand-over</h3><table><tbody>{''.join(f"<tr><td>{d}</td><td>{days[d]}</td></tr>" for d in ('Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat', 'Sun'))}</tbody></table></div></div>
+<p class="note">The hand-over time is when the stage was set to Booking fees received and the lead assigned to a collection caller;
+the time between a lead's payment and its hand-over is not visible until payment data is connected.</p></section>
+</body></html>"""
+
+
+def report(out_dir: str, contacts_path: str, recs_path: str) -> None:
+    data = json.load(open(os.path.join(out_dir, "review_data.json")))
+    data["readings"] = load_readings(os.path.join(out_dir, "reading"))
+    names = json.load(open(contacts_path))["leads"]
+    recs = json.load(open(recs_path)) if recs_path and os.path.exists(recs_path) else {}
+    pages = [(f"{('Elite' if t.startswith('Elite') else 'Puja_Malik')}_community_review", team_html(t, data, names, recs.get(t, {})))
+             for t in TEAMS]
+    pages.append(("Community_team_review", community_html(data, names, recs.get("community", {}))))
+    for slug, page in pages:
+        path = os.path.join(out_dir, f"{slug}.html")
+        open(path, "w", encoding="utf-8").write(page)
+        made = render_pdf(path, path.replace(".html", ".pdf"))
+        print(path.replace(".html", ".pdf") if made else path)
+
+
 if __name__ == "__main__":
+    if sys.argv[1:2] == ["report"]:
+        report(*sys.argv[2:5])
+        sys.exit(0)
     if sys.argv[1:2] == ["check"]:
         found = check_reading(sys.argv[2], sys.argv[3])
         print("\n".join(found) or "ok")
