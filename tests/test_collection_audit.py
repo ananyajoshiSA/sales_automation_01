@@ -159,3 +159,16 @@ def test_new_bookings_outlook_counts_weeks_left_in_the_month():
     # median volume 4 (sorted [2, 4] -> index 1); this weekend 4 - 1 = 3 x 50%, then 4 x 25%, 4 x 25%
     assert o["expected"] == round(3 * 0.5 + 4 * 0.25 + 4 * 0.25, 1)
     assert timedelta(days=45) < now - utc("2026-07-06 05:00:00") < timedelta(days=150)
+
+
+def test_long_dossier_keeps_its_start_and_its_end():
+    from analytics.collection_audit import DOSSIER_LINES, dossier
+    booked = utc("2026-08-01 05:00:00")
+    acts = [stage("2026-08-01 05:00:00", "Booking fees received")]
+    acts += [call(f"2026-08-{d:02d} 0{h}:00:00") for d in range(2, 31) for h in range(1, 5)]
+    view = {"kind": "Community", "course": "Community", "booked_ist": "2026-08-01 10:30", "days_since_booking": 40,
+            "caller": "Asha Rao", "team": "T", "owner": "Asha Rao", "stage": "Call Back Later"}
+    text = dossier({"mx_Course_Fees": ""}, view, acts, booked, utc("2026-09-10 05:00:00"))
+    lines = text.split("\n")
+    assert len(lines) == DOSSIER_LINES + 2 and "events in between left out" in text
+    assert "01 Aug" in lines[1] and "02 Aug Sun 06:30" in text and "30 Aug" in lines[-1]

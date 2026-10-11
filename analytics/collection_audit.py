@@ -52,6 +52,7 @@ from analytics.lead_priority import strip_html
 from integrations.timeutil import IST, utc
 
 SNAPSHOT_DAYS = (2, 5, 10, 17, 25, 35)
+DOSSIER_LINES = 90
 HORIZONS = (3, 14, 21, 45)   # 21: from a 10 Oct pull to the end of the month
 MIN_CELL = 30
 Z90 = 1.645
@@ -251,7 +252,10 @@ def dossier(lead: dict, view: dict, acts: list[dict], booked: datetime, now: dat
     head = (f"{view['kind']} | {view['course']} | booked {view['booked_ist']} IST ({view['days_since_booking']:.0f} days ago) | "
             f"caller {view['caller']} ({view['team']}) | owner now {view['owner']} | stage now {view['stage']} | "
             f"course fee on lead: {lead.get('mx_Course_Fees') or 'not set'}")
-    return head + "\n" + "\n".join(lines[-40:])
+    if len(lines) > DOSSIER_LINES:
+        keep = DOSSIER_LINES // 3       # the start (hand-over, first calls) matters as much as the latest events
+        lines = lines[:keep] + [f"... {len(lines) - DOSSIER_LINES} events in between left out ..."] + lines[-(DOSSIER_LINES - keep):]
+    return head + "\n" + "\n".join(lines)
 
 
 def _load(data_dir: str) -> tuple[dict, list[dict], dict[str, list]]:
