@@ -65,6 +65,10 @@ For bootcamp teams, discovery is done by the AI voice agent (TimePay) or a couns
 Summary") as "Discovery so far", and new leads the bot already discovered come first with a closer's opening.
 `--no-inbound` is for a team that takes no incoming calls (no Tier M); `--course` leaves out other courses.
 
+`python scripts/build_focus_list.py rows.json exports/plans/focus --meta meta.json` cuts the plan to the team
+leader's focus list: every Tier A lead, Tier B at 15%+, and Tier B at 12%+ whose promised date has come, as a
+workbook with day-by-day outcome columns and a short page to print as PDF.
+
 Several groups are planned as one team. `--since` widens the window: every lead with a conversation since that
 day is tiered and every lead created since then without a real conversation is a new lead (F). `--sheet-cap`
 keeps each sheet to a day's work: M, P, A, B and promises now due always stay; the other F, R and C leads go to
