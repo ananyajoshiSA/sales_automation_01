@@ -22,9 +22,15 @@ branch) and holds **salted hashes of lead IDs only** (with owner, tier, chance, 
 python3 -m venv .venv && .venv/bin/pip install -q -r requirements-dev.txt
 D=$(TZ=Asia/Kolkata date +%F)
 .venv/bin/python -c "from analytics.daily_plan import state; state.checkout()"
-.venv/bin/python -m analytics.daily_plan fetch $D            # ~20 min: team snapshot (4 days back) + enrolled leads
+.venv/bin/python -m analytics.daily_plan fetch $D            # ~1 min: team snapshot (4 days back) + enrolled leads
 .venv/bin/python -m analytics.daily_plan prepare $D          # transcripts (≤10 numbers/request, ≤9 requests/run), dossiers, batches
 ```
+
+`fetch` and `status` reuse the newest earlier pull in `data/daily/` that covers the window (last night's
+pipeline fetch, the morning snapshot, a status pull): they read only activities edited since 2 hours before that
+pull, and keep the stage history of leads whose first enrolment is already known. The lead list is always read
+in full (about 45 s). On 11 Oct the incremental pull matched a full pull call for call. Add `--full` to read
+everything again (about 20 min), for example after a gap of several days or if a number looks wrong.
 
 `prepare` prints `previous_day` and the batch files (`data/daily/$D/reads/batch_*.txt`).
 

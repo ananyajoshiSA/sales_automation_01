@@ -237,3 +237,77 @@ def test_fresh_leads_allocated_today_and_what_they_produced():
     assert (r["allocated"], r["reassigned"], r["dialled"], r["reached"], r["followup"]) == (1, 1, 1, 0, 0)
     assert [g["lead_id"] for g in F["good"]] == ["L1", "L3"] and F["good"][0]["followup"] == "Mon 12 Oct 18:00"
     assert "Fresh leads allocated Sat 10 Oct" in pipeline.fresh_html(F, "Sat 10 Oct")
+
+
+class _FakeLSQ:
+    """Just enough of LeadSquaredClient for the incremental fetches."""
+
+    def __init__(self, acts=None, enrolled=None):
+        self.acts, self.enrolled, self.reads, self.histories = acts or {}, enrolled or [], [], []
+
+    def get_users_in_group(self, group):
+        return [{"ID": "u1", "FirstName": "Asha", "LastName": "K"}]
+
+    def iter_leads_by_group(self, group, columns=None):
+        return iter([{"ProspectID": "L1"}, {"ProspectID": "L2"}])
+
+    def iter_activities_started(self, ev, d0, d1, edited_since=None):
+        self.reads.append((ev, edited_since))
+        return iter(self.acts.get(ev, []))
+
+    def iter_leads(self, *a, **k):
+        return iter(self.enrolled)
+
+    def get_lead_activities(self, lid, **k):
+        self.histories.append(lid)
+        return {"ProspectActivities": []}
+
+
+def _act(aid, lead, created, modified):
+    return {"ProspectActivityId": aid, "RelatedProspectId": lead, "ActivityEvent": 22, "CreatedOn": created, "ModifiedOn": modified,
+            "Owner": "u1", "ActivityEvent_Note": ""}
+
+
+def test_incremental_snapshot_reuses_old_rows_and_takes_fresh_edits(monkeypatch, tmp_path):
+    import scripts.fetch_team_data as ftd
+    from integrations.timeutil import utc as _utc
+
+    prev = {"group": "Team X", "start": "2026-10-07", "end": "2026-10-10", "fetched_at": "2026-10-10T16:00:00+00:00",
+            "calls": [{"activity_id": "a1", "lead_id": "L1", "user_id": "u1", "start_utc": "2026-10-08 05:00:00", "modified_utc": "old"},
+                      {"activity_id": "a2", "lead_id": "L1", "user_id": "u1", "start_utc": "2026-10-10 15:00:00", "modified_utc": "old"},
+                      {"activity_id": "gone", "lead_id": "L1", "user_id": "u1", "start_utc": "2026-10-06 05:00:00", "modified_utc": "old"}],
+            "payments": [], "zip_activities": []}
+    fake = _FakeLSQ({22: [_act("a2", "L1", "2026-10-10 15:00:00", "2026-10-10 15:05:00"), _act("a3", "L2", "2026-10-11 04:00:00", "2026-10-11 04:01:00")]})
+    monkeypatch.setattr(ftd, "LeadSquaredClient", lambda: fake)
+    monkeypatch.setattr(ftd, "now_utc", lambda: _utc("2026-10-11 05:00:00"))
+    out = tmp_path / "snap.json"
+    ftd.main("Team X", "2026-10-07", "2026-10-11", str(out), prev)
+    got = {c["activity_id"]: c["modified_utc"] for c in json.load(open(out))["calls"]}
+    assert got == {"a1": "old", "a2": "2026-10-10 15:05:00", "a3": "2026-10-11 04:01:00"}                 # a2's later edit wins; the out-of-window row is dropped
+    assert {s for _, s in fake.reads} == {_utc("2026-10-10 14:00:00")}   # edits read from 2 h before the last pull
+    assert ftd.reusable(prev, "Team X", "2026-10-06") is None         # the old pull doesn't cover the new start
+    assert ftd.reusable(prev, "Team Y", "2026-10-08") is None
+
+
+def test_enrolled_reuses_known_first_enrolments(tmp_path):
+    from analytics.daily_plan import fetch
+
+    leads = [{"ProspectID": p, "ModifiedOn": "2026-10-11 04:00:00"} for p in ("L1", "L2", "L3")]
+    cache = {"L1": {"ProspectID": "L1", "first_enrolled": "2026-09-01 05:00:00", "history": [{"x": 1}]},
+             "L2": {"ProspectID": "L2", "first_enrolled": None, "history": []}}
+    fake = _FakeLSQ(enrolled=leads)
+    fetch.enrolled("2026-10-10", str(tmp_path / "e.json"), client=fake, cache=cache)
+    rows = {r["ProspectID"]: r for r in json.load(open(tmp_path / "e.json"))}
+    assert fake.histories == ["L2", "L3"] and rows["L1"]["history"] == [{"x": 1}]
+
+
+def test_latest_snapshot_picks_the_newest_pull(tmp_path):
+    from analytics.daily_plan import fetch
+
+    for day, name, t in (("2026-10-10", "snap.json", "2026-10-10T17:00:00+00:00"), ("2026-10-11", "snap.json", "2026-10-11T03:30:00+00:00"),
+                         ("2026-10-11", "status_1345.json", "2026-10-11T08:15:00+00:00")):
+        (tmp_path / day).mkdir(exist_ok=True)
+        json.dump({"group": "T", "start": day, "end": day, "fetched_at": t, "users": []}, open(tmp_path / day / name, "w"))
+    json.dump([], open(tmp_path / "2026-10-11" / "status_1345_enrolled.json", "w"))
+    assert fetch.latest_snapshot(str(tmp_path)).endswith("status_1345.json")
+    assert fetch.latest_snapshot(str(tmp_path), start="2026-10-10").endswith("2026-10-10/snap.json")   # the status pull starts too late

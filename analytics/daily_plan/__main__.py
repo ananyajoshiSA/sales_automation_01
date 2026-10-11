@@ -1,6 +1,6 @@
 """Daily plan pipeline. Runbook (what Claude does between the steps): docs/daily_plan.md.
 
-    python -m analytics.daily_plan fetch   2026-10-12            # snapshot (4 days back) + enrolled leads
+    python -m analytics.daily_plan fetch   2026-10-12 [--full]   # snapshot (4 days back) + enrolled leads, reusing the last pull
     python -m analytics.daily_plan prepare 2026-10-12            # transcripts, dossiers, reading batches
     #   ... Claude reads every batch -> data/daily/<date>/reads/out_*.jsonl, writes narrative.json ...
     python -m analytics.daily_plan build   2026-10-12 [--mail]   # rows, review, workbook, PDF, state
@@ -39,9 +39,11 @@ def cmd_fetch(a):
 
     p = paths(a.date)
     os.makedirs(p["dir"], exist_ok=True)
-    fetch.snapshot(a.date, a.days_back, p["snap"], a.team)
-    since = (datetime.strptime(a.date, "%Y-%m-%d").toordinal() - a.days_back)
-    fetch.enrolled(datetime.fromordinal(since).strftime("%Y-%m-%d"), p["enrolled"])
+    since = datetime.fromordinal(datetime.strptime(a.date, "%Y-%m-%d").toordinal() - a.days_back).strftime("%Y-%m-%d")
+    prev = None if a.full else fetch.latest_snapshot(start=since)
+    cache = {} if a.full else fetch.cached_enrolled()
+    fetch.snapshot(a.date, a.days_back, p["snap"], a.team, prev)
+    fetch.enrolled(since, p["enrolled"], cache=cache)
 
 
 def cmd_prepare(a):
@@ -119,8 +121,8 @@ def cmd_status(a):
         from analytics.daily_plan import fetch
 
         os.makedirs(p["dir"], exist_ok=True)
-        fetch.snapshot(a.date, 0, snap_path, a.team)
-        fetch.enrolled(a.date, enr_path)
+        fetch.snapshot(a.date, 0, snap_path, a.team, None if a.full else fetch.latest_snapshot(start=a.date))
+        fetch.enrolled(a.date, enr_path, cache={} if a.full else fetch.cached_enrolled())
     else:
         snap_path, enr_path = a.snapshot or p["snap"], a.enrolled or p["enrolled"]
     snap = Snap(load_snapshots([snap_path]))
@@ -209,11 +211,12 @@ def main(argv=None):
     ap.add_argument("--state-dir", default="plan_state")
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch"); f.add_argument("date"); f.add_argument("--days-back", type=int, default=4)
+    f.add_argument("--full", action="store_true", help="ignore earlier pulls and read everything again")
     pr = sub.add_parser("prepare"); pr.add_argument("date"); pr.add_argument("--pause", type=int, default=60)
     pr.add_argument("--batches", type=int, default=8); pr.add_argument("--no-transcripts", action="store_true")
     b = sub.add_parser("build"); b.add_argument("date"); b.add_argument("--mail", action="store_true"); b.add_argument("--publish-state", action="store_true")
     s = sub.add_parser("status"); s.add_argument("date"); s.add_argument("--mail", action="store_true"); s.add_argument("--no-fetch", action="store_true")
-    s.add_argument("--snapshot"); s.add_argument("--enrolled")
+    s.add_argument("--snapshot"); s.add_argument("--enrolled"); s.add_argument("--full", action="store_true")
     pp = sub.add_parser("pipeline-prepare"); pp.add_argument("date"); pp.add_argument("--pause", type=int, default=60)
     pb = sub.add_parser("pipeline-build"); pb.add_argument("date"); pb.add_argument("--mail", action="store_true"); pb.add_argument("--publish-state", action="store_true")
     a = ap.parse_args(argv)
