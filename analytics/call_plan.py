@@ -8,6 +8,9 @@ Inputs (JSON):
   first      - fresh leads with no real conversation yet (analytics.fresh_leads rows)
   stages     - {lead_id: current stage} refreshed just before building (drops leads enrolled/closed since)
   tier_b_cap - optional: most Tier B leads per caller; extras move to the least-loaded callers
+  sheet_cap  - optional: most leads on a caller's sheet; F, R and C leads past it go to the Backlog sheet in
+               order (M, P, A, B and promises now due always stay), so a long lead window still gives a sheet one
+               day can finish
   team, date_label, targets, default_target - optional sheet titles and per-caller targets
   carry      - optional: earlier call-plan workbooks; leads marked "Link sent", "Token paid" or "EMI docs
                pending" there and not paid come back as Tier P ("link sent, not paid")
@@ -97,7 +100,7 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
             "next_action": "Discovery: background, goal, timeline; pitch the matching program; book a fixed "
                            "callback or send the fee sheet on WhatsApp.",
             "best_time": "anytime", "objection_to_prepare": "", "phone": f.get("phone"), "stage": f["stage"],
-            "last_conv": "", "source_list": "fresh",
+            "last_conv": "", "source_list": "fresh", "rank": f.get("rank", 0),
         }
 
     per_owner_revive: dict[str, int] = {}
@@ -149,7 +152,8 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
             "month_end_due": (prev or {}).get("month_end_due", False),
             "why": f"Called us {c['inbound_missed_unreturned']} time(s) and nobody called back. "
                    + ((prev or {}).get("why") or ""),
-            "opening_line": "Hi, this is <name> from LawSikho. You tried to reach us, sorry we missed you. How can I help?",
+            "opening_line": (prev or {}).get("opening_line") or "Hi, this is <name> from LawSikho. You tried to reach us, "
+                            "sorry we missed you. How can I help?",
             "next_action": (prev or {}).get("next_action") or "Find out why they called; if it's the fee or the batch, answer "
                            "on the call and send the payment link.",
             "best_time": (prev or {}).get("best_time", ""), "objection_to_prepare": (prev or {}).get("objection_to_prepare", ""),
@@ -166,12 +170,13 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         r["missed_unreturned"] = c.get("inbound_missed_unreturned", 0)
         if r["stage"] in CLOSED_STAGES:
             continue
-        if not (r.get("opening_line") or "").strip():
+        r["opening_line"] = (r.get("opening_line") or "").replace("<name>", r["owner"].split()[0])
+        if not r["opening_line"].strip():
             r["opening_line"] = (f"Hi, this is {r['owner'].split()[0]} from LawSikho — we spoke recently about "
                                  f"{r.get('course') or 'our programs'}. Is now a good time for two minutes?")
-        # a missed call from the lead that nobody returned jumps the queue within its tier
+        # a missed call from the lead that nobody returned jumps the queue within its tier; "rank" breaks ties
         r["sort"] = (TIER_ORDER[r["tier"]], -int(bool(r["missed_unreturned"])), -int(r.get("month_end_due") or 0),
-                     -int(r["prob_3d"]))
+                     -int(r["prob_3d"]), -float(r.get("rank") or 0))
         by_owner.setdefault(r["owner"], []).append(r)
     for o in by_owner:
         by_owner[o].sort(key=lambda r: r["sort"])
@@ -179,6 +184,46 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         targets, default = plan.get("targets", {}), plan.get("default_target", DEFAULT_TARGET)
         rebalance(by_owner, [o for o in plan.get("owner_order", by_owner) if targets.get(o, default)], plan["tier_b_cap"])
     return by_owner
+
+
+def split_backlog(by_owner: dict[str, list[dict]], cap: int) -> dict[str, list[dict]]:
+    """Cut each sheet to ``cap`` leads by moving its last F, R and C leads to a backlog; returns the backlog.
+    A lead whose promised callback or decision date has come (``month_end_due``) always stays."""
+    backlog: dict[str, list[dict]] = {}
+    stays = lambda r: r["tier"] in "MPAB" or bool(r.get("month_end_due"))  # noqa: E731
+    for o, rows in by_owner.items():
+        room = max(cap - sum(map(stays, rows)), 0)
+        rest = [r for r in rows if not stays(r)]
+        if len(rest) > room:
+            backlog[o] = rest[room:]
+            by_owner[o] = [r for r in rows if stays(r)] + rest[:room]
+            by_owner[o].sort(key=lambda r: r["sort"])
+    return backlog
+
+
+def backlog_sheet(wb, backlog: dict[str, list[dict]], owners: list[str]) -> None:
+    ws = wb.create_sheet("Backlog")
+    ws["A1"] = "Backlog — leads that did not fit on today's sheets, in call order"
+    ws["A1"].font = Font(name=FONT, bold=True, size=14)
+    ws["A2"] = ("Nothing here is dropped: tomorrow's plan is rebuilt from fresh data and pulls these in as the hot leads "
+                "close. A caller who finishes their sheet early continues here, top to bottom.")
+    ws["A2"].font = Font(name=FONT, italic=True, size=9, color="555555")
+    heads = [("Caller", 20), ("#", 5), ("Tier", 22), ("Lead", 24), ("Phone", 15), ("Course", 28), ("Stage", 18),
+             ("Why this lead", 60), ("Last conversation", 16), ("Lead ID", 38)]
+    _hdr(ws, 4, [h for h, _ in heads], [w for _, w in heads])
+    rr = 5
+    for o in owners:
+        for i, r in enumerate(backlog.get(o, []), 1):
+            vals = [o, i, TIER_LABEL[r["tier"]], r["name"], r.get("phone") or "", r.get("course", ""), r.get("stage", ""),
+                    r.get("why", ""), r.get("last_conv", ""), r["lead_id"]]
+            for c, v in enumerate(vals, 1):
+                cell = ws.cell(row=rr, column=c, value=v)
+                cell.font = Font(name=FONT, size=9)
+                cell.fill = PatternFill("solid", fgColor=TIER_FILL[r["tier"]])
+                cell.border = BORDER
+            rr += 1
+    ws.freeze_panes = "B5"
+    ws.auto_filter.ref = f"A4:{get_column_letter(len(heads))}{max(rr - 1, 4)}"
 
 
 def rebalance(by_owner: dict[str, list[dict]], callers: list[str], cap: int) -> list[tuple[str, str, str]]:
@@ -403,7 +448,7 @@ def summary_sheet(wb, owners, ranges, team="Team", day="tomorrow", targets=None,
     ws.freeze_panes = "B5"
 
 
-def guide_sheet(wb, team="Team", day="tomorrow"):
+def guide_sheet(wb, team="Team", day="tomorrow", since=None):
     ws = wb.active
     ws.title = "How to use"
     lines = [
@@ -413,8 +458,9 @@ def guide_sheet(wb, team="Team", day="tomorrow"):
         ("One sheet per caller, leads in call order. M = return the lead's missed call, P = payment link sent and not "
          "paid, A = can close today, B = hot follow-up, F = new lead still needing a first real conversation, "
          "R = open-stage lead gone quiet (check if alive, else move it out), C = nurture (WhatsApp + one call).", None),
-        ("Leads come from: every open lead with a real conversation in the last 15 days, unpaid links from earlier "
-         "sheets, new leads from the last 7 days, open-stage leads gone quiet, and missed calls never returned.", None),
+        (f"Leads come from: every open lead with a real conversation {f'since {since}' if since else 'in the last 15 days'}, "
+         f"unpaid links from earlier sheets, new leads {f'since {since}' if since else 'from the last 7 days'}, open-stage "
+         "leads gone quiet, and missed calls never returned. Leads that did not fit on a sheet are on the Backlog sheet.", None),
         ("'Est. chance' is the estimated chance of enrollment within 3 days from reading each lead's call "
          "summaries and LeadSquared history. Zip intent was cross-checked, not trusted on its own.", None),
         ("", None),
@@ -461,15 +507,19 @@ def guide_sheet(wb, team="Team", day="tomorrow"):
 def write_workbook(plan: dict, out: str) -> dict[str, list[dict]]:
     """Build the workbook (and a JSON copy of the rows next to it); returns the rows per caller."""
     by_owner = build_rows(plan)
+    backlog = split_backlog(by_owner, plan["sheet_cap"]) if plan.get("sheet_cap") else {}
     owners = [o for o in plan["owner_order"] if by_owner.get(o)]
     wb = Workbook()
     team, day = plan.get("team", "Team"), plan.get("date_label", "tomorrow")
-    guide_sheet(wb, team, day)
+    guide_sheet(wb, team, day, plan.get("since"))
     ranges = {}
     for o in owners:
         _, f, l = caller_sheet(wb, o, by_owner[o], day)
         ranges[o] = (f, l)
     summary_sheet(wb, owners, ranges, team, day, plan.get("targets"), plan.get("default_target", DEFAULT_TARGET))
+    if backlog:
+        backlog_sheet(wb, backlog, owners)
+        json.dump(backlog, open(out.replace(".xlsx", "_backlog.json"), "w"), indent=1, default=str)
     wb.save(out)
     by_owner = {o: by_owner[o] for o in owners}
     json.dump(by_owner, open(out.replace(".xlsx", ".json"), "w"), indent=1, default=str)

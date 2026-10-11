@@ -1,0 +1,26 @@
+import json
+
+from scripts.build_plan_pdf import build
+
+
+def row(tier, **kw):
+    return {"lead_id": f"{tier}1", "name": "Asha Rao", "tier": tier, "prob_3d": 35 if tier == "A" else 5, "course": "US CPA",
+            "stage": "Follow Up For Closure", "why": "Asked for the fee.", "opening_line": "Hi Asha", "next_action": "Send the link.",
+            "best_time": "18:00–21:00", **kw}
+
+
+def test_pdf_takes_team_day_and_window_from_meta(tmp_path):
+    plan = {"Ravi K": [row("A", missed_unreturned=1, callback_missed=True), row("B"), row("F")], "Lead Er": [row("C")]}
+    meta = {"team": "Team Test", "leader": "Lead Er", "date_label": "Monday 12 October 2026", "day": "Monday",
+            "next_day": "Tuesday", "window": "1 Sep – 11 Oct 2026", "new_window": "1 Sep – 11 Oct", "target": 3,
+            "subteams": {"Ravi K": "Sub-team One"}, "unblock": ["Fix the CPA fee sheet."]}
+    (tmp_path / "plan.json").write_text(json.dumps(plan))
+    (tmp_path / "meta.json").write_text(json.dumps(meta))
+    build(str(tmp_path / "plan.json"), str(tmp_path / "out.html"), str(tmp_path / "meta.json"))
+    doc = (tmp_path / "out.html").read_text()
+    assert "Team Test" in doc and "Monday 12 October 2026" in doc and "1 Sep – 11 Oct 2026" in doc
+    assert "target 3)" in doc and "Sub-team One" in doc and "Fix the CPA fee sheet." in doc
+    assert "Booked callback missed" in doc and "Missed call from lead" in doc
+    assert "<h2>Lead Er</h2>" not in doc  # the leader gets no caller section
+    for old in ("Elite", "Shivangi", "Shaziya", "Wednesday", "Friday", "8 Oct"):
+        assert old not in doc

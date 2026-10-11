@@ -13,8 +13,9 @@ from __future__ import annotations
 
 import os
 import time
+from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Iterator, Mapping
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 import requests
 
@@ -345,6 +346,8 @@ class LeadSquaredClient:
         to_dt: datetime,
         margin: timedelta = EDIT_MARGIN,
         now: datetime | None = None,
+        workers: int = 1,
+        keep: Callable[[dict], bool] | None = None,
     ) -> Iterator[dict]:
         """Every activity of one type created (for a call: started) in ``[from_dt, to_dt]``.
 
@@ -354,23 +357,46 @@ class LeadSquaredClient:
         repeats. An activity with a missing or unreadable ``CreatedOn`` is kept if it was edited in the
         window, so the caller can count it. Windows are read one page at a time (``_iter_unpaged``)
         because paging through a large result skips a few rows.
+
+        ``workers`` > 1 reads that many days at once (the account logs ~25,000 calls a day, so a
+        6-week window takes hours one day at a time). ``keep`` filters inside each worker, so only the
+        rows the caller wants are held in memory. Rows still come out in day order.
         """
         stop = min(to_dt + margin, now or now_utc())
-        seen: set = set()
+        windows = []
         day = from_dt
         while day <= stop:
             end = min(day + timedelta(days=1), stop)
-            for a in self._iter_unpaged(activity_event, day, end):
+            windows.append((day, end))
+            if end >= stop:
+                break
+            day = end
+
+        def read(window: tuple[datetime, datetime], client: LeadSquaredClient = self) -> list[dict]:
+            out = []
+            for a in client._iter_unpaged(activity_event, *window):
+                t = utc(a.get("CreatedOn")) or utc(a.get("ModifiedOn"))
+                if t and from_dt <= t <= to_dt and (keep is None or keep(a)):
+                    out.append(a)
+            return out
+
+        if workers > 1:
+            with ThreadPoolExecutor(workers) as pool:
+                batches: Iterable[list[dict]] = list(pool.map(lambda w: read(w, self.clone()), windows))
+        else:
+            batches = map(read, windows)
+        seen: set = set()
+        for batch in batches:
+            for a in batch:
                 key = a.get("ProspectActivityId") or a.get("Id")
                 if key and key in seen:
                     continue
-                t = utc(a.get("CreatedOn")) or utc(a.get("ModifiedOn"))
-                if t and from_dt <= t <= to_dt:
-                    seen.add(key)
-                    yield a
-            if end >= stop:
-                return
-            day = end
+                seen.add(key)
+                yield a
+
+    def clone(self) -> LeadSquaredClient:
+        """A client with the same settings and its own HTTP session, for use from another thread."""
+        return LeadSquaredClient(self.access_key, self.secret_key, self.host, self.timeout, self.max_retries)
 
     def _iter_unpaged(self, activity_event: int, from_dt: datetime, to_dt: datetime,
                       page_size: int = 1000) -> Iterator[dict]:
