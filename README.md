@@ -167,8 +167,21 @@ shows leads, first-time enrollments, calling activity, lagging callers, dialer i
 call quality. Setup, limits and definitions: [dashboard/README.md](dashboard/README.md).
 History is loaded with `scripts/d1_backfill.py`.
 
+## Email a report on request
+
+In the conversation that made a report, type `/email-report` or say "email this report". The
+[email-report skill](.claude/skills/email-report/SKILL.md) runs `scripts/email_report.py`, which sends the
+finished PDF, Excel or CSV file to a Google Apps Script mailer ([email_report/](email_report/)) in your
+Workspace account. The mailer emails it once to the approved recipients. Nothing is sent when a report is
+generated. Setup, step by step: [docs/email_report.md](docs/email_report.md).
+
+| Variable | Description |
+|---|---|
+| `REPORT_EMAIL_URL`, `REPORT_EMAIL_TOKEN` | The mailer's web app `/exec` address and its upload token |
+
 ## Tests
 
 ```bash
 .venv/bin/python -m pytest
+node --test email_report/code.test.mjs   # the mailer, against fake Google services
 ```
