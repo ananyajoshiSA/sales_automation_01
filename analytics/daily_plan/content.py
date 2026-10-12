@@ -141,9 +141,10 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
                                                      "Every A/B call ends with the link sent while the lead is on the line."]})
     pri = priority(rows, today, N.get("priority_overrides"))
     S = rows["by_owner"]
-    conv = sum(x.get("conv", 0) for x in q.values())
-    ask = sum(x.get("full_ask_made", 0) for x in q.values())
-    link = sum(x.get("link_sent_on_call", 0) for x in q.values())
+    qc = [v for n, v in q.items() if n in st["callers"]]  # team callers only (not an AI bot a reader named)
+    conv = sum(x.get("conv", 0) for x in qc)
+    ask = sum(x.get("full_ask_made", 0) for x in qc)
+    link = sum(x.get("link_sent_on_call", 0) for x in qc)
     enr = facts["enrollments"]
     confirmed = enr
     sb = facts.get("stats_before") or {}

@@ -358,3 +358,9 @@ def test_enrolled_cache_reads_every_pull_of_recent_days(tmp_path):
     got = fetch.cached_enrolled(str(tmp_path), days=2)
     assert sorted(got) == ["A", "B", "C", "D", "E", "F"]          # all of the last two days, nothing older
     assert os.path.isdir(tmp_path / "month")
+
+
+def test_a_lead_asking_for_another_day_is_not_due_today():
+    sheet = {"L1": {"owner": "Asha K", "tier": "A", "group": 5}, "L3": {"owner": "Asha K", "tier": "A", "group": 1}}
+    T = day_stats(snap([]), "2026-10-10", sheet)["team"]
+    assert T["a_total"] == 1 and T["a_not_tried"] == ["L3"]

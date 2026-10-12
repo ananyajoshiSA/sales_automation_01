@@ -72,7 +72,9 @@ def day_stats(snap: Snap, date: str, sheet: dict[str, dict] | None = None, until
             redial[k][0] += 1
             redial[k][1] += b["status"] == "Answered"
     # plan adherence on the A list
-    a_all = [lid for lid, s in sheet.items() if s["tier"] in "AP" or s.get("verify")]
+    # a lead who asked to be called on another day (priority group 5) is not due today
+    due = {lid: s for lid, s in sheet.items() if s.get("group") != 5}
+    a_all = [lid for lid, s in due.items() if s["tier"] in "AP" or s.get("verify")]
     first_unans = redial15 = 0
     unreached_a = []
     for lid in a_all:
@@ -85,7 +87,7 @@ def day_stats(snap: Snap, date: str, sheet: dict[str, dict] | None = None, until
             unreached_a.append(lid)
     inb = [c for c in day if c["direction"] == "inbound"]
     before16 = [c for c in team_out if _hour(c) < 16]
-    b_all = [lid for lid, s in sheet.items() if s["tier"] == "B"]
+    b_all = [lid for lid, s in due.items() if s["tier"] == "B"]
     team = {
         "dials": len(team_out), "answered": sum(c["status"] == "Answered" for c in team_out),
         "answer_pct": round(100 * sum(c["status"] == "Answered" for c in team_out) / len(team_out)) if team_out else 0,
