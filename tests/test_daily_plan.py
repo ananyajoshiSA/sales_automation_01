@@ -137,7 +137,7 @@ def test_status_lists_untouched_tried_and_unreturned():
 
 
 def test_mailer_needs_settings_and_sends_attachments(tmp_path, monkeypatch):
-    for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD"):
+    for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "MAIL_RELAY_URL", "MAIL_RELAY_KEY"):
         monkeypatch.delenv(k, raising=False)
     assert mailer.send("s", "<p>h</p>", "t", ["a@x.in"]) is False
     monkeypatch.setenv("SMTP_HOST", "smtp.x.in"); monkeypatch.setenv("SMTP_USER", "r@x.in"); monkeypatch.setenv("SMTP_PASSWORD", "p")
@@ -364,3 +364,37 @@ def test_a_lead_asking_for_another_day_is_not_due_today():
     sheet = {"L1": {"owner": "Asha K", "tier": "A", "group": 5}, "L3": {"owner": "Asha K", "tier": "A", "group": 1}}
     T = day_stats(snap([]), "2026-10-10", sheet)["team"]
     assert T["a_total"] == 1 and T["a_not_tried"] == ["L3"]
+
+
+def test_shareable_copy_has_no_phone_numbers_or_caller_lists():
+    from analytics.daily_plan import share
+
+    html = ("<html><body><h1>Plan</h1><td>+91-9876543210</td><td>9123456789</td><td>+91-900004053400</td><td>2026-10-12 18:30</td>"
+            "<h2>9. Team overview</h2><td>+91-9000000001</td></body></html>")
+    out = share.shareable(html)
+    assert "9876543210" not in out and "9123456789" not in out and "9000000001" not in out
+    assert "900004053400" not in out and "2026-10-12 18:30" in out and "Team overview" not in out
+    assert share.lean("<style>x</style><td class='bad' style='a:b'>Lead1</td>\n <td>2</td>") == "<td>Lead1</td><td>2</td>"
+    assert share.lean("<td>A <span class=small>(reassigned)</span></td><td>B</td>") == "<td>A <span>(reassigned)</span></td><td>B</td>"
+
+
+def test_mail_relay_sends_the_real_files(tmp_path, monkeypatch):
+    import base64
+    monkeypatch.setenv("MAIL_RELAY_URL", "https://script.google.com/macros/s/abc/exec")
+    monkeypatch.setenv("MAIL_RELAY_KEY", "k")
+    f = tmp_path / "plan.pdf"; f.write_bytes(b"%PDF-1.4 full report")
+    calls = []
+
+    class R:
+        status_code, text = 200, "ok 5"
+
+    def post(url, json, timeout):
+        calls.append((url, json))
+        return R()
+
+    assert mailer.send("Plan", "<p>h</p>", "t", [], [str(f)], post=post)
+    url, body = calls[0]
+    assert body["key"] == "k" and body["to"] == [] and body["attachments"][0]["filename"] == "plan.pdf"
+    assert base64.b64decode(body["attachments"][0]["content"]) == b"%PDF-1.4 full report"
+    R.text = "forbidden"
+    assert not mailer.send("Plan", "<p>h</p>", "t", [], [str(f)], post=post)

@@ -5,6 +5,7 @@
     #   ... Claude reads every batch -> data/daily/<date>/reads/out_*.jsonl, writes narrative.json ...
     python -m analytics.daily_plan build   2026-10-12 [--mail]   # rows, review, workbook, PDF, state
     python -m analytics.daily_plan status  2026-10-12 [--mail]   # 14:00 / 17:00 status check (fetches today)
+    python -m analytics.daily_plan share exports/daily/<date>/<report>.html   # copy without phone numbers for email/Drive
     python -m analytics.daily_plan fetch-month 2026-10-12        # month-to-date snapshot for the month lead flow (pipeline-prepare runs it)
     python -m analytics.daily_plan fetch 2026-10-12 --days-back 3 && python -m analytics.daily_plan pipeline-prepare 2026-10-12
     #   ... Claude reads every batch -> data/daily/<date>/pipeline/reads/out_*.jsonl ...
@@ -61,6 +62,14 @@ def flow_sections(snap: Snap, day: str, today: str, day_label: str) -> str:
     if cold:
         H.append(f"<h3>This month's leads never reached ({len(cold)}): never dialled first, then oldest</h3>" + leadflow.lead_table(cold, limit=80))
     return "".join(H)
+
+
+def cmd_share(a):
+    from analytics.daily_plan import share
+
+    for h in a.html:
+        out = share.write(h, a.doc)
+        print(f"{out} ({os.path.getsize(out) // 1024} KB)")
 
 
 def month_path(date: str) -> str:
@@ -141,15 +150,17 @@ def cmd_build(a):
         state.publish(a.state_dir, a.date)
     if a.mail:
         RV = C["review"]
-        body = (f"<p>{RV['headline']}</p><p>Today's plan and the review of {RV['day_label']} are attached. "
-                f"{len(C['priority'])} leads on {a.leader.split()[0]}'s priority list.</p>")
+        summary = "<h3>Scorecard</h3><table border=1 cellpadding=4 style='border-collapse:collapse'>" + "".join(
+            f"<tr><td>{r[0]}</td><td>{r[2]}</td></tr>" for r in RV["scorecard"]) + "</table>"
+        top = "".join(f"<li>{p['name']} ({p['owner'].split()[0]}, {p['chance']}%, check by {p['check_by']})</li>" for p in C["priority"][:5])
+        body = (f"<p>{RV['headline']}</p>{summary}<h3>{a.leader.split()[0]}'s priority list: {len(C['priority'])} leads, top 5</h3><ol>{top}</ol>"
+                f"<p>The full plan (PDF) and the call sheets (workbook) are attached.</p>")
         mailer.send(f"{a.team}: plan for {C['day_label']} + review of {RV['day_label']}", body,
                     f"{a.team}: plan for {C['day_label']} and review of {RV['day_label']} attached.", mailer.recipients("REPORT_TO"),
                     [stem + ".pdf", stem + ".xlsx"])
-        summary = "<h3>Scorecard</h3><table border=1 cellpadding=4>" + "".join(
-            f"<tr><td>{r[0]}</td><td>{r[2]}</td></tr>" for r in RV["scorecard"]) + "</table>"
-        mailer.send(f"{a.team}: {RV['day_label']} summary", f"<p>{RV['headline']}</p>{summary}", "See the HTML version.",
-                    mailer.recipients("REPORT_TO_SUMMARY"))
+        if mailer.recipients("REPORT_TO_SUMMARY"):  # leadership copy without lead details, only when a list is set
+            mailer.send(f"{a.team}: {RV['day_label']} summary", f"<p>{RV['headline']}</p>{summary}", "See the HTML version.",
+                        mailer.recipients("REPORT_TO_SUMMARY"))
 
 
 def cmd_status(a):
@@ -260,11 +271,12 @@ def main(argv=None):
     b = sub.add_parser("build"); b.add_argument("date"); b.add_argument("--mail", action="store_true"); b.add_argument("--publish-state", action="store_true")
     s = sub.add_parser("status"); s.add_argument("date"); s.add_argument("--mail", action="store_true"); s.add_argument("--no-fetch", action="store_true")
     s.add_argument("--snapshot"); s.add_argument("--enrolled"); s.add_argument("--full", action="store_true")
+    sh = sub.add_parser("share"); sh.add_argument("html", nargs="+"); sh.add_argument("--doc", action="store_true")
     fm = sub.add_parser("fetch-month"); fm.add_argument("date"); fm.add_argument("--full", action="store_true")
     pp = sub.add_parser("pipeline-prepare"); pp.add_argument("date"); pp.add_argument("--pause", type=int, default=60)
     pb = sub.add_parser("pipeline-build"); pb.add_argument("date"); pb.add_argument("--mail", action="store_true"); pb.add_argument("--publish-state", action="store_true")
     a = ap.parse_args(argv)
-    {"fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
+    {"share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
      "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build}[a.cmd](a)
 
 

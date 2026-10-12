@@ -126,3 +126,12 @@ was reached, and its disposition (LeadSquared stage) now, by lead type: **High P
   (`data/daily/month/<YYYY-MM>.json`) first; `fetch-month <date> --full` rebuilds it.
 - Leads not yet given to a caller are not in the team's lead list, so they are not counted.
 
+## Email with the reports attached
+
+Cloud sessions cannot reach SMTP ports, so the reports go out through a small Gmail relay: an Apps Script web app in
+the sender's Google account (`docs/mail_relay.gs`, setup steps at the top of the file). The code posts the email and
+the PDF/workbook to it; the script sends them from that Gmail account, only to the addresses listed in the script.
+Set `MAIL_RELAY_URL` and `MAIL_RELAY_KEY` in the cloud environment settings; every `--mail` run (morning build,
+status checks, nightly pipeline) then attaches the full report as built. Without them, `--mail` says so and sends
+nothing. SMTP settings still work where port 587 is open.
+

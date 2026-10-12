@@ -1,17 +1,24 @@
-"""Email the reports. Sends only when SMTP settings are in the environment; otherwise says so and does nothing.
+"""Email the reports, with the PDF and workbook attached. Sends only when a mail route is configured; otherwise says so.
 
-    SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASSWORD, SMTP_FROM (defaults to SMTP_USER)
+Route 1, the Gmail relay (docs/mail_relay.gs, an Apps Script web app in the sender's Google account; works where SMTP
+ports are blocked, as in the cloud sessions): MAIL_RELAY_URL and MAIL_RELAY_KEY. The relay holds the recipient list,
+so REPORT_TO may be left empty; if set, the relay only sends to addresses on its own list.
+Route 2, SMTP: SMTP_HOST, SMTP_PORT (587), SMTP_USER, SMTP_PASSWORD, SMTP_FROM (defaults to SMTP_USER).
+
     REPORT_TO           full reports with lead phone numbers (team leader, callers), comma-separated
     REPORT_TO_SUMMARY   summary only, no attachments and no lead details (leadership), comma-separated
 """
 
 from __future__ import annotations
 
+import base64
 import mimetypes
 import os
 import smtplib
 import sys
 from email.message import EmailMessage
+
+import requests
 
 
 def recipients(var: str) -> list[str]:
@@ -34,12 +41,29 @@ def build_message(subject: str, html: str, text: str, to: list[str], attachments
     return m
 
 
-def send(subject: str, html: str, text: str, to: list[str], attachments=(), smtp_factory=smtplib.SMTP) -> bool:
+def relay_configured() -> bool:
+    return bool(os.environ.get("MAIL_RELAY_URL") and os.environ.get("MAIL_RELAY_KEY"))
+
+
+def send_relay(subject: str, html: str, text: str, to: list[str], attachments=(), post=requests.post) -> bool:
+    """Hand the message and its files to the Gmail relay, which sends it from the owner's Gmail."""
+    files = [{"filename": os.path.basename(p), "mimeType": mimetypes.guess_type(p)[0] or "application/octet-stream",
+              "content": base64.b64encode(open(p, "rb").read()).decode()} for p in attachments]
+    r = post(os.environ["MAIL_RELAY_URL"], json={"key": os.environ["MAIL_RELAY_KEY"], "to": to, "subject": subject,
+                                                  "html": html, "text": text, "attachments": files}, timeout=120)
+    ok = r.status_code == 200 and r.text.strip().startswith("ok")
+    print(f"mail: '{subject}' {'sent via the Gmail relay' if ok else 'NOT sent, relay said: ' + r.text.strip()[:120]}", file=sys.stderr)
+    return ok
+
+
+def send(subject: str, html: str, text: str, to: list[str], attachments=(), smtp_factory=smtplib.SMTP, post=requests.post) -> bool:
+    if relay_configured():  # the relay keeps its own recipient list, so an empty ``to`` is fine
+        return send_relay(subject, html, text, to, attachments, post)
     if not to:
         print(f"mail: no recipients for '{subject}', not sent", file=sys.stderr)
         return False
     if not configured():
-        print(f"mail: SMTP settings missing, '{subject}' not sent", file=sys.stderr)
+        print(f"mail: no mail route set (MAIL_RELAY_URL/KEY or SMTP settings), '{subject}' not sent", file=sys.stderr)
         return False
     msg = build_message(subject, html, text, to, attachments)
     with smtp_factory(os.environ["SMTP_HOST"], int(os.environ.get("SMTP_PORT") or 587), timeout=60) as s:
