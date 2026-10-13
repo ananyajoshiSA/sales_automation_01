@@ -49,6 +49,8 @@ def enrollments(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list
         r = reads.get(l["ProspectID"], {})
         if r.get("status") == "bootcamp":  # Rs 10 bootcamp registration staged as Course Enrolled: not an enrollment
             continue
+        if r.get("status") == "already_student" or (r.get("paid_on") and r["paid_on"] < day):
+            continue  # an existing student re-tagged, or a lead who paid before ``day``: a stage fix, not that day's enrollment
         out.append({"lead_id": l["ProspectID"], "name": ((l.get("FirstName") or "") + " " + (l.get("LastName") or "")).strip() or "Unnamed",
                     "owner": l.get("OwnerIdName"), "at": t.strftime("%H:%M"), "by": by, "comment": comment, "how": "Course Enrolled",
                     "evidence": r.get("payment_evidence") or comment or ""})

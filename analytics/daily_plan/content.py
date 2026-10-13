@@ -127,8 +127,10 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     pl = pd.strftime("%A")
     st, q, T = facts["stats"], facts["quality"], facts["stats"]["team"]
     callers = sorted(st["callers"], key=lambda n: (-st["callers"][n]["dials"], n))
-    paid_by = {}  # the previous day's enrollments only; rows["paid"] also holds leads who enrolled long ago
-    for e in facts["enrollments"]:
+    # the previous day's enrollments only, less the ones the review found to be record fixes (N["not_enrollments"])
+    confirmed = [e for e in facts["enrollments"] if e["lead_id"] not in set(N.get("not_enrollments", []))]
+    paid_by = {}
+    for e in confirmed:
         paid_by.setdefault(e["owner"], []).append(e.get("name") or "")
     fb_n = N.get("feedback", {})
     feedback = []
@@ -145,8 +147,6 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     conv = sum(x.get("conv", 0) for x in qc)
     ask = sum(x.get("full_ask_made", 0) for x in qc)
     link = sum(x.get("link_sent_on_call", 0) for x in qc)
-    enr = facts["enrollments"]
-    confirmed = enr
     sb = facts.get("stats_before") or {}
     TB = sb.get("team", {}) if sb else {}
     M = facts["missed"]

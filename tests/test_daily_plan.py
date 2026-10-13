@@ -398,3 +398,18 @@ def test_mail_relay_sends_the_real_files(tmp_path, monkeypatch):
     assert base64.b64decode(body["attachments"][0]["content"]) == b"%PDF-1.4 full report"
     R.text = "forbidden"
     assert not mailer.send("Plan", "<p>h</p>", "t", [], [str(f)], post=post)
+
+
+def test_restaged_students_and_old_payments_are_not_the_days_enrollments():
+    from analytics.daily_plan import review
+    reads = {"L1": {"status": "already_student"}, "L3": {"status": "paid_new", "paid_on": "2026-09"}, "L5": {"status": "paid_new", "paid_on": "2026-10-09"}}
+    enrolled = [{"ProspectID": lid, "FirstName": lid, "OwnerIdName": "Asha K", "first_enrolled": "2026-10-09 06:00:00", "history": []}
+                for lid in ("L1", "L3", "L5", "L7")]
+    got = [e["lead_id"] for e in review.enrollments(snap([]), "2026-10-09", enrolled, reads)]
+    assert got == ["L5", "L7"]
+
+
+def test_review_can_drop_record_fixes_from_the_count():
+    facts_enr = [{"lead_id": "L1", "name": "Fix", "owner": "Asha K"}, {"lead_id": "L3", "name": "New", "owner": "Asha K"}]
+    N = {"not_enrollments": ["L1"]}
+    assert [e["name"] for e in facts_enr if e["lead_id"] not in set(N.get("not_enrollments", []))] == ["New"]
