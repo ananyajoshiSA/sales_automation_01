@@ -215,6 +215,15 @@ def html_doc(rows: list[dict], meta: dict, team: str) -> str:
         reasons[r.get("reject_reason") or "low chance"] = reasons.get(r.get("reject_reason") or "low chance", 0) + 1
     H.append("<h2>Why leads were rejected</h2><table><tr><th>Reason</th><th>Leads</th></tr>"
              + "".join(f"<tr><td>{e(k)}</td><td>{v}</td></tr>" for k, v in sorted(reasons.items(), key=lambda kv: -kv[1])[:15]) + "</table>")
+    fix = [(k, [r for r in rej if r.get("reject_reason") == k]) for k in ("already enrolled or paid", "existing student", "do not call")]
+    if any(rs for _, rs in fix):
+        H.append("<h2>Records to fix in LeadSquared (not sales calls)</h2><table><tr><th>What</th><th>Leads</th></tr>")
+        for k, rs in fix:
+            if rs:
+                H.append(f"<tr><td>{e(k)} ({len(rs)})</td><td>" + "; ".join(
+                    f"{e(r.get('name') or '?')} ({e((r.get('owner') or '?').split()[0])})" for r in rs[:60]) + "</td></tr>")
+        H.append("</table><p class='small'>Paid or existing students: move to Course Enrolled or send to support. "
+                 "Do not call: mark the lead so neither callers nor the AI campaigns dial it.</p>")
     H.append("<h2 style='page-break-before:always'>The revival list, most likely first</h2>"
              "<table><tr><th style='width:2%'>#</th><th style='width:11%'>Lead · caller</th><th style='width:9%'>Course · fee</th>"
              "<th style='width:7%'>Chance · stage reached</th><th style='width:22%'>What happened</th><th style='width:13%'>Why it stalled</th>"
