@@ -9,7 +9,8 @@ left out falls back to a neutral default, so the PDF is never tied to one team o
   workbook, target (enrolments per caller), subteams ({caller: team}), programs ([...]),
   inbound (false: the team takes no incoming calls, so no missed-call steps), dialer_check ([callers]), unblock ([...]), notes ([...]), rebalance (text; default: computed),
   objections ([[objection, answer], ...]; default: the general playbook),
-  focus (true: open with the team leader's focus list from scripts/build_focus_list.py)
+  focus (true: open with the team leader's focus list from scripts/build_focus_list.py),
+  yesterday (text: how the previous plan went, shown on the cover)
 
     python scripts/build_plan_pdf.py exports/plans/call_plan_Team_2026-10-12.json out.html [--meta meta.json]
     chrome --headless --print-to-pdf=out.pdf out.html
@@ -162,7 +163,7 @@ td.t { white-space: nowrap; font-weight: bold; color: #123f36; }
 
 DEFAULT_META = {"team": "Team", "leader": "", "date_label": "tomorrow", "day": "tomorrow", "next_day": "the next day",
                 "window": "the last 15 days", "pulled": "", "new_window": "the last 7 days", "workbook": "the workbook",
-                "target": 4, "inbound": True, "subteams": {}, "programs": [], "dialer_check": [], "unblock": [], "notes": [], "rebalance": "", "objections": [], "focus": False,
+                "target": 4, "inbound": True, "subteams": {}, "programs": [], "dialer_check": [], "unblock": [], "notes": [], "rebalance": "", "objections": [], "focus": False, "yesterday": "",
                 "reading": "Every lead was tiered by rule from its calls, stage and Zipteams notes; the opening line, ask and "
                            "objection are the standard ones for its tier.",
                 "zip_check": "It only sees one call, so the tier also weighs calls from the lead, long calls, the stage and "
@@ -265,6 +266,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
       <div><b>≈{team_tom:.0f}</b><span>enrolments likely {day} if every A and B is worked (target {target * len(owners)})</span></div>
       <div><b>≈{team_p3:.0f}</b><span>enrolments in the 3-day pipeline</span></div>
     </div>
+    {f'<div class="warnbox"><p><b>How the last plan went.</b> {html.escape(M["yesterday"])}</p></div>' if M["yesterday"] else ''}
     <h3>Contents</h3>
     {f'<p><b>Start here:</b> the {len(focus)} leads that can enrol {day} or {nxt}.</p>' if focus else ''}
     <ol class="toc">
