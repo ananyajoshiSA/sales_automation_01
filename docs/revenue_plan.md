@@ -54,7 +54,26 @@ scores, calls by hour, calls to review), then the method, every validation check
 
 ```bash
 python -m analytics.nightly_plan "Team Elite Calling" --leader "Shivangi Sahu" [--tier-b-cap 12]
+python -m analytics.nightly_plan "US Bookkeeping Accounting-Sana" "US accounting counselors - Sana" \
+    --leader "Sana Ali" --since 2026-09-01 --sheet-cap 80 --no-inbound --course account \
+    --bot-calls data/bot_calls.json --bot-campaign acc
 ```
+
+For bootcamp teams, discovery is done by the AI voice agent (TimePay) or a counsellor before a closer calls.
+`scripts/fetch_bot_calls.py leads.json data/bot_calls.json` looks up the bot's calls for each lead by phone
+(read-only); the plan shows the bot's latest discovery and the callers' own notes (LeadSquared "Conversation
+Summary") as "Discovery so far", and new leads the bot already discovered come first with a closer's opening.
+`--no-inbound` is for a team that takes no incoming calls (no Tier M); `--course` leaves out other courses.
+
+`python scripts/build_focus_list.py rows.json exports/plans/focus --meta meta.json` cuts the plan to the team
+leader's focus list: every Tier A lead, Tier B at 15%+, and Tier B at 12%+ whose promised date has come, as a
+workbook with day-by-day outcome columns and a short page to print as PDF.
+
+Several groups are planned as one team. `--since` widens the window: every lead with a conversation since that
+day is tiered and every lead created since then without a real conversation is a new lead (F). `--sheet-cap`
+keeps each sheet to a day's work: M, P, A, B and promises now due always stay; the other F, R and C leads go to
+a Backlog sheet in call order. Within a tier, leads are ranked (the lead score for tiered leads; for new leads,
+the least-dialled and newest first), and each lead's best time is the slot in which it answered most often.
 
 This writes `exports/plans/call_plan_{team}_{date}.xlsx`: one sheet per caller, plus a team summary
 that updates as callers fill in their sheets. Leads are ordered by tier:
@@ -90,5 +109,7 @@ last caller who spoke to the lead, not to whoever owns it today.
   source is connected.
 - **The average fee per enrolment is not set**, so no rupee figures are shown. Set it with
   `--avg-fee` or `REVENUE_AVG_FEE_INR`.
-- **The narrative plan PDF is a one-off for 8 Oct.** `scripts/build_plan_pdf.py` was written for
-  that date. The nightly job builds the workbook only.
+- **The narrative plan PDF needs a short meta file.** `scripts/build_plan_pdf.py rows.json out.html --meta meta.json`
+  renders any team's plan (team, leader, day, window, team leader's to-dos, objection playbook; see its docstring).
+  The nightly job builds the workbook only. Opening lines, asks and objections per lead come from a lead review
+  (Claude reading each hot lead's notes); without one, each tier's standard lines are used.

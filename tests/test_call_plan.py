@@ -26,6 +26,8 @@ def test_missed_call_from_lead_becomes_tier_m_and_goes_first():
     rows = build_rows(p)["Asha K"]
     assert [r["lead_id"] for r in rows] == ["L3", "L1", "L2"]  # within M, the higher chance first
     assert rows[0]["tier"] == rows[1]["tier"] == "M" and "Called us 2 time(s)" in rows[1]["why"]
+    assert rows[0]["opening_line"] == "hi"  # the reviewed line is kept
+    assert rows[1]["opening_line"].startswith("Hi, this is Asha from LawSikho")  # the caller's name, not <name>
 
 
 def test_link_sent_not_paid_carried_from_yesterdays_workbook(tmp_path):
@@ -73,3 +75,20 @@ def test_tier_b_cap_moves_lowest_ranked_extras_to_least_loaded_caller():
     ravi = [r["lead_id"] for r in rows["Ravi S"]]
     assert asha == ["A1", "B0", "B1", "B2"] and sorted(ravi) == ["B3", "B4"]
     assert all(r["owner"] == "Ravi S" and r["why"].startswith("Moved from Asha K") for r in rows["Ravi S"])
+
+
+def test_sheet_cap_keeps_hot_leads_and_moves_the_rest_to_the_backlog(tmp_path):
+    p = plan(candidates=[cand(x) for x in ("A1", "B1", "C1", "C2", "C3")],
+             tiered=[tiered("A1", "A"), tiered("B1", "B"), tiered("C1", "C"), {**tiered("C2", "C"), "rank": 9},
+                     tiered("C3", "C")], sheet_cap=3)
+    out = str(tmp_path / "plan.xlsx")
+    rows = call_plan.write_workbook(p, out)["Asha K"]
+    assert [r["lead_id"] for r in rows] == ["A1", "B1", "C2"]  # the best-ranked C keeps the last place
+    wb = load_workbook(out)
+    assert "Backlog" in wb.sheetnames
+    assert sorted(wb["Backlog"].cell(row=r, column=10).value for r in (5, 6)) == ["C1", "C3"]
+    p = plan(candidates=[cand(f"B{i}") for i in range(4)], tiered=[tiered(f"B{i}", "B") for i in range(4)], sheet_cap=2)
+    assert len(build_rows(p)["Asha K"]) == 4 and call_plan.split_backlog(build_rows(p), 2) == {}  # B never cut
+    p = plan(candidates=[cand("C1"), cand("C2")], tiered=[tiered("C1", "C", prob=9), {**tiered("C2", "C"), "month_end_due": True}])
+    rows = build_rows(p)
+    assert [r["lead_id"] for r in call_plan.split_backlog(rows, 1)["Asha K"]] == ["C1"]  # the due promise stays
