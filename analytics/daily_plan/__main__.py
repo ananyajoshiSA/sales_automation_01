@@ -5,6 +5,8 @@
     #   ... Claude reads every batch -> data/daily/<date>/reads/out_*.jsonl, writes narrative.json ...
     python -m analytics.daily_plan build   2026-10-12 [--mail]   # rows, review, workbook, PDF, state
     python -m analytics.daily_plan status  2026-10-12 [--mail]   # 14:00 / 17:00 status check (fetches today)
+    python -m analytics.daily_plan revival-prepare 2026-10-13 --start 2026-07-01 --end 2026-09-20   # older leads to revive
+    python -m analytics.daily_plan revival-build 2026-10-13 [--publish-state]
     python -m analytics.daily_plan share exports/daily/<date>/<report>.html   # copy without phone numbers for email/Drive
     python -m analytics.daily_plan fetch-month 2026-10-12        # month-to-date snapshot for the month lead flow (pipeline-prepare runs it)
     python -m analytics.daily_plan fetch 2026-10-12 --days-back 3 && python -m analytics.daily_plan pipeline-prepare 2026-10-12
@@ -191,6 +193,58 @@ def cmd_status(a):
                     mailer.recipients("REPORT_TO"), [stem + ".pdf"])
 
 
+def cmd_revival_prepare(a):
+    """Full history of the period's leads, shortlist of those with a real conversation, transcripts, dossiers, batches."""
+    from analytics.daily_plan import revival
+
+    p = paths(a.date)
+    d = os.path.join(p["dir"], "revival")
+    os.makedirs(os.path.join(d, "reads"), exist_ok=True)
+    base = json.load(open(p["snap"]))
+    ids = revival.pool(Snap(base), a.start, a.end)
+    print(f"pool: {len(ids)} leads created {a.start} to {a.end}", file=sys.stderr)
+    hist = revival.history(ids, os.path.join(d, "history.jsonl"))
+    raw = revival.snapshot(base, {k: hist[k] for k in ids})
+    json.dump(raw, open(os.path.join(d, "snap.json"), "w"))
+    snap = Snap(raw)
+    short = revival.shortlist(snap, ids)
+    nums = revival.numbers(snap, short)
+    tx = transcripts.fetch(nums, os.path.join(d, "tx"), pause=a.pause)
+    have, missing = transcripts.coverage(tx, nums)
+    index = dossiers.build(snap, a.date, set(short), {}, tx, os.path.join(d, "dossiers"))
+    files = []
+    for k, b in enumerate(revival.batches(index)):
+        f = os.path.join(d, "reads", f"batch_{k}.txt")
+        open(f, "w").write("\n".join(os.path.join(d, "dossiers", f"{x['lead_id']}.txt") for x in b) + "\n")
+        files.append(f)
+    info = {"date": a.date, "period": f"{a.start} to {a.end}", "pool": len(ids), "talked": len(short), "dossiers": len(index),
+            "batches": files, "transcript_numbers": len(nums), "with_transcript": have, "without_transcript": missing}
+    json.dump(info, open(os.path.join(d, "prepare.json"), "w"), indent=1)
+    print(json.dumps({k: v for k, v in info.items() if k != "batches"} | {"batches": len(files)}, indent=1))
+
+
+def cmd_revival_build(a):
+    from analytics.daily_plan import revival
+
+    p = paths(a.date)
+    d = os.path.join(p["dir"], "revival")
+    info = json.load(open(os.path.join(d, "prepare.json")))
+    rows = revival.load(os.path.join(d, "reads"))
+    s, e = info["period"].split(" to ")
+    period = f"{datetime.strptime(s, '%Y-%m-%d'):%-d %b} to {datetime.strptime(e, '%Y-%m-%d'):%-d %b %Y}"
+    meta = {"period": period, "built": now_ist().strftime("%a %-d %b %H:%M"), "pool": info["pool"], "talked": info["talked"]}
+    os.makedirs(p["out"], exist_ok=True)
+    stem = os.path.join(p["out"], "Elite_revival_list")
+    pdf.render(revival.html_doc(rows, meta, a.team), stem + ".html", stem + ".pdf")
+    revival.workbook(rows, stem + ".xlsx")
+    keep = revival.ranked(rows)
+    print(f"revival: {len(rows)} read, {len(keep)} to revive -> {stem}.pdf")
+    path = state.save(revival.to_state(a.date, rows), a.state_dir, "revival_")
+    print(f"state -> {path}")
+    if a.publish_state:
+        state.publish(a.state_dir, f"revival {a.date}")
+
+
 def cmd_pipeline_prepare(a):
     p = paths(a.date)
     d = os.path.join(p["dir"], "pipeline")
@@ -271,12 +325,15 @@ def main(argv=None):
     b = sub.add_parser("build"); b.add_argument("date"); b.add_argument("--mail", action="store_true"); b.add_argument("--publish-state", action="store_true")
     s = sub.add_parser("status"); s.add_argument("date"); s.add_argument("--mail", action="store_true"); s.add_argument("--no-fetch", action="store_true")
     s.add_argument("--snapshot"); s.add_argument("--enrolled"); s.add_argument("--full", action="store_true")
+    rp = sub.add_parser("revival-prepare"); rp.add_argument("date"); rp.add_argument("--start", required=True); rp.add_argument("--end", required=True)
+    rp.add_argument("--pause", type=int, default=60)
+    rb = sub.add_parser("revival-build"); rb.add_argument("date"); rb.add_argument("--publish-state", action="store_true")
     sh = sub.add_parser("share"); sh.add_argument("html", nargs="+"); sh.add_argument("--doc", action="store_true")
     fm = sub.add_parser("fetch-month"); fm.add_argument("date"); fm.add_argument("--full", action="store_true")
     pp = sub.add_parser("pipeline-prepare"); pp.add_argument("date"); pp.add_argument("--pause", type=int, default=60)
     pb = sub.add_parser("pipeline-build"); pb.add_argument("date"); pb.add_argument("--mail", action="store_true"); pb.add_argument("--publish-state", action="store_true")
     a = ap.parse_args(argv)
-    {"share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
+    {"revival-prepare": cmd_revival_prepare, "revival-build": cmd_revival_build, "share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
      "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build}[a.cmd](a)
 
 

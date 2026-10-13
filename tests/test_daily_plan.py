@@ -413,3 +413,36 @@ def test_review_can_drop_record_fixes_from_the_count():
     facts_enr = [{"lead_id": "L1", "name": "Fix", "owner": "Asha K"}, {"lead_id": "L3", "name": "New", "owner": "Asha K"}]
     N = {"not_enrollments": ["L1"]}
     assert [e["name"] for e in facts_enr if e["lead_id"] not in set(N.get("not_enrollments", []))] == ["New"]
+
+
+def test_revival_pool_history_shortlist_and_ranking(tmp_path):
+    from analytics.daily_plan import revival
+
+    leads = [dict(l, CreatedOn="2026-08-05 05:00:00") for l in LEADS]
+    leads[1] = dict(leads[1], ProspectStage="Course Enrolled")
+    s = snap([], leads=leads)
+    ids = revival.pool(s, "2026-07-01", "2026-09-20")
+    assert "L2" not in ids and "L1" in ids
+
+    class C:
+        def get_lead_activities(self, lid, row_count=200):
+            note = "Status{=}Answered{next}Duration{=}300{next}UserId{=}u1"
+            acts = [{"Id": f"a{lid}", "EventCode": 22, "CreatedOn": "2026-08-06 05:00:00", "RelatedProspectId": lid,
+                     "ActivityFields": {"ActivityEvent_Note": note, "Owner": "u1"}},
+                    {"Id": f"e{lid}", "EventCode": 2001, "CreatedOn": "2026-08-06 05:00:00", "RelatedProspectId": lid}]
+            return {"ProspectActivities": acts if lid == "L1" else []}
+
+    hist = revival.history(["L1", "L3"], str(tmp_path / "h.jsonl"), workers=2, client=C())
+    assert len(hist["L1"]) == 1 and hist["L3"] == []
+    again = revival.history(["L1", "L3"], str(tmp_path / "h.jsonl"), client=None)  # resumes from the cache, no client needed
+    assert again.keys() == hist.keys()
+    rs = Snap(revival.snapshot({"users": USERS, "fetched_at": "2026-10-13T02:00:00+00:00", "leads": leads}, hist), leader="Tara L")
+    assert revival.shortlist(rs, ["L1", "L3"]) == ["L1"]
+    rows = [{"lead_id": "a", "revive": True, "revival_chance": 12, "last_real_talk_date": "2026-08-01"},
+            {"lead_id": "b", "revive": True, "revival_chance": 25},
+            {"lead_id": "c", "revive": True, "revival_chance": 12, "last_real_talk_date": "2026-09-01"},
+            {"lead_id": "d", "revive": False, "revival_chance": 0, "reject_reason": "not interested"}]
+    assert [r["lead_id"] for r in revival.ranked(rows)] == ["b", "c", "a"]
+    assert revival.band(25) == "High" and revival.band(4) == "Reject"
+    assert "L" not in json.dumps(revival.to_state("2026-10-13", [{**r, "lead_id": "L1"} for r in rows[:1]])["leads"])
+    assert len(revival.batches([{"owner": "A", "lead_id": str(i), "size": 1000} for i in range(65)])) == 3
