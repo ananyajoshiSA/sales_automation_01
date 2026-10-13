@@ -8,14 +8,22 @@ member or made to a lead the team owns, by when they started, including calls ed
 Given an earlier snapshot of the same team that starts on or before ``start``, only activities edited since
 shortly before that snapshot was taken are read; its other rows are reused. Leads and users are always read
 in full. A lead that joined the team since then brings only its newer calls.
+
+If LeadSquared refuses the company-wide activity endpoint (it answered 403 from 13 Oct 2026), the team leads
+active since the read start are read one by one instead. That route misses only calls a team member made to a
+lead another team owns.
 """
 
 import json
+import os
 import sys
 from datetime import datetime, timedelta
 
+from analytics.daily_plan import revival
 from analytics.zip_calls import ZIP_LATE_WINDOW
-from integrations.leadsquared import PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, parse_activity_note, parse_phone_call
+from integrations.leadsquared import (
+    PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, LeadSquaredError, parse_activity_note, parse_phone_call,
+)
 from integrations.timeutil import ist_day_start, now_utc, utc
 
 REFRESH_OVERLAP = timedelta(hours=2)  # re-read edits from a little before the earlier snapshot was taken
@@ -32,6 +40,7 @@ LEAD_COLUMNS = [
 ]
 PAYMENT_SUCCESS = 213
 ZIP_EVENTS = (236, 237)
+ACTIVITY_DATES = ("ProspectActivityDate_Max", "mx_Last_Called_Date_DT", "ModifiedOn")
 
 
 def log(*a):
@@ -53,6 +62,63 @@ def _merge(old: list[dict], new: list[dict], key: str, keep) -> list[dict]:
     return list(rows.values())
 
 
+def bulk_reads(c, d0, last, zip_to, since, user_ids, lead_ids):
+    """Calls, payments and Zip notes from the company-wide activity endpoint."""
+    calls, payments, zip_acts = [], [], []
+    for ev in (PHONE_OUTBOUND, PHONE_INBOUND):
+        n = kept = 0
+        for a in c.iter_activities_started(ev, d0, last, edited_since=since):
+            n += 1
+            call = parse_phone_call(a)
+            if call["user_id"] in user_ids or call["lead_id"] in lead_ids:
+                calls.append(call)
+                kept += 1
+        log(f"event {ev}: {n} total, {kept} kept")
+    for ev, sink in ((PAYMENT_SUCCESS, payments),) + tuple((z, zip_acts) for z in ZIP_EVENTS):
+        to = last if ev == PAYMENT_SUCCESS else zip_to
+        for a in c.iter_activities_started(ev, d0, to, edited_since=since):
+            if a.get("RelatedProspectId") in lead_ids:
+                a["note"] = parse_activity_note(a.get("ActivityEvent_Note"))
+                sink.append(a)
+    return calls, payments, zip_acts
+
+
+def active_since(leads: list[dict], t: datetime) -> list[str]:
+    """Team leads with any activity or edit at or after ``t``."""
+    def touched(l):
+        return any((u := utc(l.get(k))) is not None and u >= t for k in ACTIVITY_DATES)
+
+    return [l["ProspectID"] for l in leads if touched(l)]
+
+
+def per_lead_reads(c, leads, users, d0, last, zip_to, since, cache):
+    """The same rows read lead by lead, for the team leads active since the read start."""
+    ids = active_since(leads, since or d0)
+    log(f"{len(ids)} team leads active since {(since or d0).isoformat()}")
+    if os.path.exists(cache):
+        os.remove(cache)  # histories change between runs: never reuse an earlier run's
+    hist = revival.history(ids, cache, client=c, codes=(PHONE_OUTBOUND, PHONE_INBOUND, PAYMENT_SUCCESS) + ZIP_EVENTS)
+    os.remove(cache)
+    names = {u["ID"]: f"{u.get('FirstName') or ''} {u.get('LastName') or ''}".strip() for u in users}
+    calls, payments, zip_acts = [], [], []
+    for lid, acts in hist.items():
+        for a in acts:
+            a["RelatedProspectId"] = a.get("RelatedProspectId") or lid
+            t, ev = utc(a.get("CreatedOn")), a["ActivityEvent"]
+            if t is None or t < d0:
+                continue
+            if ev in (PHONE_OUTBOUND, PHONE_INBOUND) and t <= last:
+                call = parse_phone_call(a)
+                call["caller"] = call["caller"] or names.get(call["user_id"])  # these rows carry no creator name
+                calls.append(call)
+            elif ev == PAYMENT_SUCCESS and t <= last:
+                payments.append({**a, "note": parse_activity_note(a.get("ActivityEvent_Note"))})
+            elif ev in ZIP_EVENTS and t <= zip_to:
+                zip_acts.append({**a, "note": parse_activity_note(a.get("ActivityEvent_Note"))})
+    log(f"per-lead: {len(calls)} calls")
+    return calls, payments, zip_acts
+
+
 def main(group, start, end, out, prev=None):
     c = LeadSquaredClient()
     d0 = ist_day_start(start)
@@ -70,24 +136,17 @@ def main(group, start, end, out, prev=None):
     lead_ids = {l["ProspectID"] for l in leads}
     log(f"{len(leads)} team-owned leads")
 
-    calls, payments, zip_acts = [], [], []
     last = d1 - timedelta(seconds=1)
-    for ev in (PHONE_OUTBOUND, PHONE_INBOUND):
-        n = kept = 0
-        for a in c.iter_activities_started(ev, d0, last, edited_since=since):
-            n += 1
-            call = parse_phone_call(a)
-            if call["user_id"] in user_ids or call["lead_id"] in lead_ids:
-                calls.append(call)
-                kept += 1
-        log(f"event {ev}: {n} total, {kept} kept")
     zip_to = min(last + ZIP_LATE_WINDOW, now_utc())  # a call ending after midnight
-    for ev, sink in ((PAYMENT_SUCCESS, payments),) + tuple((z, zip_acts) for z in ZIP_EVENTS):
-        to = last if ev == PAYMENT_SUCCESS else zip_to
-        for a in c.iter_activities_started(ev, d0, to, edited_since=since):
-            if a.get("RelatedProspectId") in lead_ids:
-                a["note"] = parse_activity_note(a.get("ActivityEvent_Note"))
-                sink.append(a)
+    try:
+        calls, payments, zip_acts = bulk_reads(c, d0, last, zip_to, since, user_ids, lead_ids)
+        source = "bulk"
+    except LeadSquaredError as e:
+        if e.status_code != 403:
+            raise
+        log("bulk activity endpoint refused (403): reading active team leads one by one")
+        calls, payments, zip_acts = per_lead_reads(c, leads, users, d0, last, zip_to, since, out + ".hist.jsonl")
+        source = "per-lead fallback"
     if since:
         def started(t, hi):
             u = utc(t)
@@ -106,7 +165,7 @@ def main(group, start, end, out, prev=None):
             "group": group, "start": start, "end": end,
             "fetched_at": now_utc().isoformat(),
             "users": users, "leads": leads, "calls": calls,
-            "payments": payments, "zip_activities": zip_acts,
+            "payments": payments, "zip_activities": zip_acts, "source": source,
         },
         open(out, "w"),
     )

@@ -46,7 +46,8 @@ def _flat(a: dict) -> dict:
             "ActivityEvent_Note": f.get("ActivityEvent_Note")}
 
 
-def history(lead_ids: list[str], cache: str, workers: int = 6, client: LeadSquaredClient | None = None) -> dict:
+def history(lead_ids: list[str], cache: str, workers: int = 6, client: LeadSquaredClient | None = None,
+            codes: tuple = CALLS + (ZIP,)) -> dict:
     """{lead_id: [activity rows]} for every lead, one request each; resumable through the JSONL ``cache``."""
     done = {}
     if os.path.exists(cache):
@@ -69,7 +70,7 @@ def history(lead_ids: list[str], cache: str, workers: int = 6, client: LeadSquar
                 last[0] = time.monotonic()
             try:
                 r = c.get_lead_activities(lid, row_count=200) or {}
-                return lid, [_flat(a) for a in r.get("ProspectActivities") or [] if a.get("EventCode") in CALLS + (ZIP,)]
+                return lid, [_flat(a) for a in r.get("ProspectActivities") or [] if a.get("EventCode") in codes]
             except Exception as e:  # noqa: BLE001 - a 429 or a dropped connection: back off and try again
                 if attempt == 4:
                     raise

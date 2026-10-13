@@ -292,6 +292,40 @@ def test_incremental_snapshot_reuses_old_rows_and_takes_fresh_edits(monkeypatch,
     assert ftd.reusable(prev, "Team Y", "2026-10-08") is None
 
 
+def test_snapshot_falls_back_to_per_lead_reads_when_bulk_is_refused(monkeypatch, tmp_path):
+    import scripts.fetch_team_data as ftd
+    from analytics.daily_plan import revival
+    from integrations.leadsquared import LeadSquaredError
+    from integrations.timeutil import utc as _utc
+
+    class Refused(_FakeLSQ):
+        def iter_leads_by_group(self, group, columns=None):
+            return iter([{"ProspectID": "L1", "ProspectActivityDate_Max": "2026-10-13 06:00:00"},
+                         {"ProspectID": "L2", "ProspectActivityDate_Max": "2026-10-01 06:00:00", "ModifiedOn": "2026-10-02 06:00:00"}])
+
+        def iter_activities_started(self, *a, **k):
+            raise LeadSquaredError("Access Denied", status_code=403)
+
+        def get_lead_activities(self, lid, **k):
+            self.histories.append(lid)
+            row = lambda aid, ev, t: {"Id": aid, "EventCode": ev, "CreatedOn": t, "ModifiedOn": t,
+                                      "ActivityFields": {"Owner": "u1", "Status": "Answered", "Duration": "130"}}
+            return {"ProspectActivities": [row("today", 22, "2026-10-13 05:00:00"), row("old", 22, "2026-10-12 05:00:00"),
+                                           row("zip", 237, "2026-10-13 05:03:00"), row("email", 1, "2026-10-13 05:00:00")]}
+
+    fake = Refused()
+    monkeypatch.setattr(ftd, "LeadSquaredClient", lambda: fake)
+    monkeypatch.setattr(ftd, "now_utc", lambda: _utc("2026-10-13 08:00:00"))
+    monkeypatch.setattr(revival, "RATE", 1000)
+    out = tmp_path / "snap.json"
+    ftd.main("Team X", "2026-10-13", "2026-10-13", str(out))
+    snap = json.load(open(out))
+    assert fake.histories == ["L1"]                                         # only the lead active since the start is read
+    assert [(c["activity_id"], c["lead_id"], c["caller"]) for c in snap["calls"]] == [("today", "L1", "Asha K")]
+    assert [z["ProspectActivityId"] for z in snap["zip_activities"]] == ["zip"]
+    assert snap["source"] == "per-lead fallback" and not (tmp_path / "snap.json.hist.jsonl").exists()
+
+
 def test_enrolled_reuses_known_first_enrolments(tmp_path):
     from analytics.daily_plan import fetch
 
