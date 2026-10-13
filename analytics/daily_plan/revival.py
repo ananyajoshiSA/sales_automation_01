@@ -14,6 +14,8 @@ import html
 import json
 import os
 import sys
+import threading
+import time
 from concurrent.futures import ThreadPoolExecutor
 from datetime import datetime
 
@@ -22,6 +24,7 @@ from integrations.leadsquared import LeadSquaredClient, parse_activity_note, par
 
 SKIP_STAGES = CLOSED + ("Irrelevant lead", "Invalid")
 CALLS, ZIP = (21, 22), 237
+RATE = 5  # LeadSquared requests per second (its limit is 30 in 5 seconds)
 
 
 def pool(snap: Snap, start: str, end: str) -> list[str]:
@@ -54,11 +57,24 @@ def history(lead_ids: list[str], cache: str, workers: int = 6, client: LeadSquar
                 continue
             done[r["lead_id"]] = r["acts"]
     todo = [lid for lid in lead_ids if lid not in done]
-    c = client or LeadSquaredClient()
+    c = client or LeadSquaredClient() if todo else None
+    lock, last = threading.Lock(), [0.0]
 
     def one(lid):
-        r = c.get_lead_activities(lid, row_count=200) or {}
-        return lid, [_flat(a) for a in r.get("ProspectActivities") or [] if a.get("EventCode") in CALLS + (ZIP,)]
+        for attempt in range(5):
+            with lock:  # LeadSquared allows 30 calls in 5 seconds: stay under it whatever the thread count
+                wait = last[0] + 1 / RATE - time.monotonic()
+                if wait > 0:
+                    time.sleep(wait)
+                last[0] = time.monotonic()
+            try:
+                r = c.get_lead_activities(lid, row_count=200) or {}
+                return lid, [_flat(a) for a in r.get("ProspectActivities") or [] if a.get("EventCode") in CALLS + (ZIP,)]
+            except Exception as e:  # noqa: BLE001 - a 429 or a dropped connection: back off and try again
+                if attempt == 4:
+                    raise
+                print(f"history: {lid[:8]} retry after {type(e).__name__}", file=sys.stderr, flush=True)
+                time.sleep(5 * (attempt + 1))
 
     if os.path.exists(cache) and os.path.getsize(cache) and open(cache, "rb").read()[-1:] != b"\n":
         open(cache, "a").write("\n")  # never glue a new line onto one cut short
