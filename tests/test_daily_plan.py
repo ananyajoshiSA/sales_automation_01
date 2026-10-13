@@ -438,6 +438,9 @@ def test_revival_pool_history_shortlist_and_ranking(tmp_path):
     assert again.keys() == hist.keys()
     rs = Snap(revival.snapshot({"users": USERS, "fetched_at": "2026-10-13T02:00:00+00:00", "leads": leads}, hist), leader="Tara L")
     assert revival.shortlist(rs, ["L1", "L3"]) == ["L1"]
+    picked, skipped = revival.focus(rs, ["L1", "L3"], "2026-09-21")
+    assert picked == ["L1"] and skipped["no real conversation"] == 1
+    assert revival.focus(rs, ["L1"], "2026-08-01")[0] == []          # talked since then: already in the daily reports
     rows = [{"lead_id": "a", "revive": True, "revival_chance": 12, "last_real_talk_date": "2026-08-01"},
             {"lead_id": "b", "revive": True, "revival_chance": 25},
             {"lead_id": "c", "revive": True, "revival_chance": 12, "last_real_talk_date": "2026-09-01"},

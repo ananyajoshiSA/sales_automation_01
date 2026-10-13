@@ -110,6 +110,24 @@ def shortlist(snap: Snap, lead_ids: list[str]) -> list[str]:
     return out
 
 
+def focus(snap: Snap, lead_ids: list[str], since: str, ni_min_secs: int = 600) -> tuple[list[str], dict]:
+    """Leads to read: counselled, no real conversation since ``since`` (those are in the daily reports already), and,
+    for leads marked Not Interested, a call of at least ``ni_min_secs`` (long counselling is where wrong tags hide)."""
+    picked, skipped = [], {"no real conversation": 0, "real conversation since " + since + " (in the daily reports)": 0,
+                           "Not Interested after short calls only": 0}
+    for lid in lead_ids:
+        real = [c for c in snap.by_lead.get(lid, []) if c["status"] == "Answered" and (c.get("duration") or 0) >= REAL_SECS]
+        if not real:
+            skipped["no real conversation"] += 1
+        elif any(c["t"].strftime("%Y-%m-%d") >= since for c in real):
+            skipped["real conversation since " + since + " (in the daily reports)"] += 1
+        elif (snap.leads.get(lid) or {}).get("ProspectStage") == "Not Interested" and max(c["duration"] for c in real) < ni_min_secs:
+            skipped["Not Interested after short calls only"] += 1
+        else:
+            picked.append(lid)
+    return picked, skipped
+
+
 def numbers(snap: Snap, lead_ids: list[str]) -> list[str]:
     from integrations.transcripts import normalize_phone
 
@@ -182,10 +200,11 @@ def html_doc(rows: list[dict], meta: dict, team: str) -> str:
          f"<p class='small'>Built {e(meta['built'])} IST from each lead's full LeadSquared call history, Zipteams notes and call transcripts, "
          "every lead read by Claude. Chances are estimates of an enrollment within 30 days of a fresh call; they are not targets.</p>",
          f"<div class='box'><b>{meta['pool']:,}</b> leads were created in the period and are not enrolled, irrelevant or invalid. "
-         f"<b>{meta['talked']:,}</b> had at least one real conversation (2 min+) and were read in full. "
+         f"<b>{meta['talked']:,}</b> were counselled and left untouched since 21 Sep, and were read in full. "
          f"<b>{len(keep)}</b> can be revived: {len(by_band['High'])} high (20%+), {len(by_band['Medium'])} medium (10–19%), "
          f"{len(by_band['Low'])} low (5–9%). {len(rej)} were rejected. Expected enrollments if every one is called "
          f"(estimate): about {sum(int(r.get('revival_chance') or 0) for r in keep) / 100:.0f}.</div>",
+         ("<p class='small'>Not read: " + "; ".join(f"{v:,} {k}" for k, v in meta.get("skipped", {}).items()) + ".</p>") if meta.get("skipped") else "",
          "<h2>By caller</h2><table><tr><th>Caller</th><th>High</th><th>Medium</th><th>Low</th><th>Total</th></tr>"]
     for o in owners:
         n = [sum(1 for r in by_band[b] if (r.get("owner") or "?") == o) for b, _ in BANDS]

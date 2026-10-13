@@ -207,7 +207,7 @@ def cmd_revival_prepare(a):
     raw = revival.snapshot(base, {k: hist[k] for k in ids})
     json.dump(raw, open(os.path.join(d, "snap.json"), "w"))
     snap = Snap(raw)
-    short = revival.shortlist(snap, ids)
+    short, skipped = revival.focus(snap, ids, a.since)
     nums = revival.numbers(snap, short)
     tx = transcripts.fetch(nums, os.path.join(d, "tx"), pause=a.pause)
     have, missing = transcripts.coverage(tx, nums)
@@ -217,7 +217,7 @@ def cmd_revival_prepare(a):
         f = os.path.join(d, "reads", f"batch_{k}.txt")
         open(f, "w").write("\n".join(os.path.join(d, "dossiers", f"{x['lead_id']}.txt") for x in b) + "\n")
         files.append(f)
-    info = {"date": a.date, "period": f"{a.start} to {a.end}", "pool": len(ids), "talked": len(short), "dossiers": len(index),
+    info = {"date": a.date, "period": f"{a.start} to {a.end}", "pool": len(ids), "talked": len(short), "skipped": skipped, "dossiers": len(index),
             "batches": files, "transcript_numbers": len(nums), "with_transcript": have, "without_transcript": missing}
     json.dump(info, open(os.path.join(d, "prepare.json"), "w"), indent=1)
     print(json.dumps({k: v for k, v in info.items() if k != "batches"} | {"batches": len(files)}, indent=1))
@@ -232,7 +232,8 @@ def cmd_revival_build(a):
     rows = revival.load(os.path.join(d, "reads"))
     s, e = info["period"].split(" to ")
     period = f"{datetime.strptime(s, '%Y-%m-%d'):%-d %b} to {datetime.strptime(e, '%Y-%m-%d'):%-d %b %Y}"
-    meta = {"period": period, "built": now_ist().strftime("%a %-d %b %H:%M"), "pool": info["pool"], "talked": info["talked"]}
+    meta = {"period": period, "built": now_ist().strftime("%a %-d %b %H:%M"), "pool": info["pool"], "talked": info["talked"],
+            "skipped": info.get("skipped", {})}
     os.makedirs(p["out"], exist_ok=True)
     stem = os.path.join(p["out"], "Elite_revival_list")
     pdf.render(revival.html_doc(rows, meta, a.team), stem + ".html", stem + ".pdf")
@@ -326,6 +327,7 @@ def main(argv=None):
     s = sub.add_parser("status"); s.add_argument("date"); s.add_argument("--mail", action="store_true"); s.add_argument("--no-fetch", action="store_true")
     s.add_argument("--snapshot"); s.add_argument("--enrolled"); s.add_argument("--full", action="store_true")
     rp = sub.add_parser("revival-prepare"); rp.add_argument("date"); rp.add_argument("--start", required=True); rp.add_argument("--end", required=True)
+    rp.add_argument("--since", default="2026-09-21", help="leads with a real conversation from this day on are in the daily reports")
     rp.add_argument("--pause", type=int, default=60)
     rb = sub.add_parser("revival-build"); rb.add_argument("date"); rb.add_argument("--publish-state", action="store_true")
     sh = sub.add_parser("share"); sh.add_argument("html", nargs="+"); sh.add_argument("--doc", action="store_true")
