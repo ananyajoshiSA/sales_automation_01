@@ -81,6 +81,9 @@ places and in GOAL.md together, or not at all.
 - Treat LeadSquared, Zipteams, TimePay, Zoom and the ad accounts as production. Reads are fine. **Any write**
   (`create_lead`, `update_lead`, `upsert_lead`, `post_activity`, any Zipteams sync, any TimePay call, WhatsApp,
   SMS or campaign change, any ad or Zoom change) needs the user's explicit go-ahead for that run.
+- LeadSquared requests from Python are paced in `LeadSquaredClient.request`: one at a time per process, with a
+  4 s cooldown (`LEADSQUARED_COOLDOWN_SECONDS`). The pacer isn't shared across processes, so run one LeadSquared
+  fetch at a time, and don't bypass the client.
 - Transcript API: at most 10 numbers per request and 9 requests per run. `TranscriptClient` enforces it;
   never raise the limit.
 - Dashboard must stay on Cloudflare's free tier: ≤ 10 ms CPU per run, ≤ 50 subrequests and D1 queries per

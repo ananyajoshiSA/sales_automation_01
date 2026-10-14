@@ -25,6 +25,16 @@ variables in the environment settings instead.
 | `LEADSQUARED_HOST` | API host, bare (`api-in21.leadsquared.com`) or full base URL; default `https://api-in21.leadsquared.com/v2/` |
 | `LEADSQUARED_ACCESS_KEY` | Access key (Settings → API and Webhooks) |
 | `LEADSQUARED_SECRET_KEY` | Secret key |
+| `LEADSQUARED_COOLDOWN_SECONDS` | Pause after each request before the next starts; default `4`, `0` = no pause. Must be a finite number, 0 or more |
+
+**Request pacing.** Every LeadSquared request from Python, retries included, goes through one pacer
+shared by all clients and threads in the process. Only one request is in flight at a time, and the
+next starts only after the cooldown has passed since the last one finished. A 429's `Retry-After`
+holds every caller. This spreads the work out to lower the peak load on LeadSquared. It doesn't cut
+the number of requests, so per-lead scans now take about 4 s per lead (1,000 leads is about 67 minutes),
+and the threads in `fetch_lead_histories.py` no longer run requests side by side. The pacer is per
+process: separate processes, other machines and the dashboard Worker don't share it, and nothing stops
+two fetch scripts running at once. **Run one Python LeadSquared fetch at a time.**
 
 ```python
 from integrations.leadsquared import LeadSquaredClient
