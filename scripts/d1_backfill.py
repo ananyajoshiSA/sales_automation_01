@@ -12,6 +12,8 @@ every ingest cursor to the start of the day after END, so the live cron carries 
 overlap (rows it had already counted from that day on are deleted). Backfill only complete days
 (END = yesterday); early morning is best, as the cron then has little of today to catch up on.
 Free tier: D1 allows 100,000 rows written per day; the script prints its estimate - split long ranges.
+Refused while Cloudflare is switched off (integrations/cloudflare.py, since 14 Oct 2026): its only use is
+loading the dashboard's D1 database, so it stops before reading LeadSquared.
 """
 
 from __future__ import annotations
@@ -24,6 +26,7 @@ from datetime import datetime, timedelta, timezone
 from analytics.definitions import team_of
 from analytics.enrolment_store import ScanStats, scan_since
 from analytics.team_report import zip_score
+from integrations import cloudflare
 from integrations.timeutil import IST
 from integrations.leadsquared import (
     PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, format_datetime, parse_phone_call,
@@ -75,6 +78,8 @@ def main() -> None:
     ap.add_argument("out", help="SQL file to write")
     ap.add_argument("--no-cursors", action="store_true", help="don't move the live ingest cursors")
     args = ap.parse_args()
+    if cloudflare.SWITCHED_OFF:
+        sys.exit(cloudflare.MESSAGE)
 
     d0 = datetime.strptime(args.start, "%Y-%m-%d").replace(tzinfo=IST)
     d1 = datetime.strptime(args.end, "%Y-%m-%d").replace(tzinfo=IST) + timedelta(days=1)

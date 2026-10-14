@@ -8,6 +8,7 @@ import pytest
 import responses
 
 from analytics.convintel import d1push, snapshot_html
+from integrations import cloudflare
 from analytics.convintel.d1push import (
     API, GO_AHEAD, MAX_STATEMENT_BYTES, compact, push, rows_estimate, split, statements, write_sql,
 )
@@ -187,8 +188,23 @@ def test_write_sql(tmp_path):
     assert text.count(";\n") == n == 3 and text.startswith("DELETE FROM ci_snapshot WHERE range_key = '7d';")
 
 
+@pytest.fixture
+def cloudflare_on(monkeypatch):
+    monkeypatch.setattr(cloudflare, "SWITCHED_OFF", False)
+
+
 @responses.activate
-def test_push_refuses_without_the_go_ahead(capsys):
+def test_push_refuses_while_cloudflare_is_switched_off(capsys):
+    with pytest.raises(cloudflare.CloudflareOff, match="switched off"):
+        push([snap()], "acc", "db", "tok-secret", yes=True)
+    with pytest.raises(SystemExit) as e:
+        d1push.main([str(FIXTURE), "--push", "--yes"])
+    assert str(e.value) == cloudflare.MESSAGE
+    assert len(responses.calls) == 0
+
+
+@responses.activate
+def test_push_refuses_without_the_go_ahead(capsys, cloudflare_on):
     with pytest.raises(PermissionError, match="go-ahead"):
         push([snap()], "acc", "db", "tok-secret", yes=False)
     with pytest.raises(SystemExit) as e:
@@ -198,7 +214,7 @@ def test_push_refuses_without_the_go_ahead(capsys):
 
 
 @responses.activate
-def test_push_refuses_over_the_row_cap(monkeypatch):
+def test_push_refuses_over_the_row_cap(monkeypatch, cloudflare_on):
     monkeypatch.setattr(d1push, "MAX_PUSH_ROWS", 2)
     with pytest.raises(ValueError, match="over the 2 cap"):
         push([snap()], "acc", "db", "tok-secret", yes=True)
@@ -206,7 +222,7 @@ def test_push_refuses_over_the_row_cap(monkeypatch):
 
 
 @responses.activate
-def test_push_posts_each_statement_and_counts_rows(capsys):
+def test_push_posts_each_statement_and_counts_rows(capsys, cloudflare_on):
     url = API.format(account="acc", database="db")
     responses.add(responses.POST, url, json={"success": True, "errors": [], "result": [{"meta": {"rows_written": 1}}]})
     stmts = statements([snap()])

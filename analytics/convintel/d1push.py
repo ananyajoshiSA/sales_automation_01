@@ -11,7 +11,7 @@ capped lists (calls, leads, opportunities, coverage gaps) from the end with fit(
 counts, so the page still says "showing N of M".
 
 Writing to the remote database changes what team leaders see, so it needs the user's go-ahead for each run
-(--push --yes). Snapshots holding transcript excerpts or phone numbers stay local and are refused; the command line
+(--push --yes). While Cloudflare is switched off (integrations/cloudflare.py, since 14 Oct 2026) --push is refused. Snapshots holding transcript excerpts or phone numbers stay local and are refused; the command line
 first replaces any phone number quoted in free text (a summary or reasoning from Claude's reading) with "[number removed]". The SQL
 file holds lead ids and caller names: write it under data/ (git-ignored) and delete it after loading.
 
@@ -28,6 +28,8 @@ import sys
 from pathlib import Path
 
 import requests
+
+from integrations import cloudflare
 
 MAX_STATEMENT_BYTES = 90_000
 MAX_PUSH_ROWS = 5_000
@@ -230,7 +232,9 @@ def push(snapshots: list[dict], account_id: str | None = None, database_id: str 
     """Run the statements against the remote D1 database through Cloudflare's HTTP API, one per request.
 
     Refuses unless ``yes`` (the user's go-ahead for this run) and when the push would write over MAX_PUSH_ROWS
-    rows. The token comes from CLOUDFLARE_API_TOKEN and is never printed."""
+    rows. The token comes from CLOUDFLARE_API_TOKEN and is never printed. Nothing is sent while Cloudflare is
+    switched off (``integrations.cloudflare``)."""
+    cloudflare.ensure_on()
     if not yes:
         raise PermissionError(GO_AHEAD)
     stmts = statements(snapshots)
@@ -295,8 +299,11 @@ def main(argv: list[str] | None = None) -> None:
     if a.sql:
         write_sql(a.sql, snaps)
         print(f"wrote {a.sql}; load it with: cd dashboard && npx wrangler d1 execute sales_dashboard --remote "
-              f"--file {os.path.relpath(a.sql, 'dashboard')}  (a remote write: needs the user's go-ahead)", file=sys.stderr)
+              f"--file {os.path.relpath(a.sql, 'dashboard')}  (a remote write: needs the user's go-ahead)"
+              + (f". {cloudflare.MESSAGE}" if cloudflare.SWITCHED_OFF else ""), file=sys.stderr)
     if a.push:
+        if cloudflare.SWITCHED_OFF:
+            sys.exit(cloudflare.MESSAGE)
         if not a.yes:
             sys.exit(GO_AHEAD)
         from integrations.env import load_dotenv

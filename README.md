@@ -174,6 +174,8 @@ is IST text; `leads_for_ist_days` handles both. A GrowthX "Paid" row is a bootca
 
 ## Live dashboard
 
+**Switched off, with all of Cloudflare, since 14 Oct 2026**: nothing deploys or writes there
+([dashboard/README.md](dashboard/README.md) says how to switch back on).
 [dashboard/](dashboard/) is a Cloudflare Worker (free tier) that pulls LeadSquared every minute and
 shows leads, first-time enrollments, calling activity, lagging callers, dialer issues and Zipteams
 call quality. Setup, limits and definitions: [dashboard/README.md](dashboard/README.md).

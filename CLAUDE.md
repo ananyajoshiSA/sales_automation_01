@@ -27,7 +27,7 @@ LeadSquared lead count.
 | `scripts/` | Bulk fetchers (IST date ranges → JSON/JSONL in `data/`), `d1_backfill.py`, `build_plan_pdf.py` |
 | `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`, `accountability` (who really assigned or transferred each lead, [docs/accountability.md](docs/accountability.md)), `enrolment_store` (first enrolments read from LeadSquared once and kept); shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
 | `analytics/convintel/` | Conversation intelligence (additive): every call inventoried with a status until its transcript is analysed, the 3-minute REAL_CALL rule (this module only), every transcript read by Claude itself (no model API, no keyword rules), possibly-not-real call flags, team analytics, dashboard snapshots. `python -m analytics.convintel status`. Guide: [docs/conversation_intelligence.md](docs/conversation_intelligence.md) |
-| `dashboard/` | Cloudflare Worker + D1 + static page; **switched off since 14 Oct 2026** (no cron, `DASHBOARD_OFF`), how to switch back on in [dashboard/README.md](dashboard/README.md) |
+| `dashboard/` | Cloudflare Worker + D1 + static page; **Cloudflare switched off completely since 14 Oct 2026** (no cron, `DASHBOARD_OFF`, no workers.dev URL, deploy scripts only print a notice, `integrations/cloudflare.py` blocks D1 pushes and the backfill), how to switch back on in [dashboard/README.md](dashboard/README.md) |
 | `tests/`, `dashboard/test/` | pytest (HTTP mocked with `responses`), vitest |
 
 ## Commands
