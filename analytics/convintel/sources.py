@@ -13,13 +13,13 @@ import os
 from datetime import datetime, timedelta
 from typing import Callable, Iterable, Iterator
 
-from analytics.definitions import ENROLLED
+from analytics.enrolment_store import scan_since
 from analytics.zip_calls import ZIP_LATE_WINDOW
 from integrations.leadsquared import PHONE_INBOUND, PHONE_OUTBOUND
 from integrations.leadsquared.client import format_datetime
 from integrations.timeutil import ist_day, ist_day_start, now_utc, utc
 
-ZIP_NOTES, PAYMENT_SUCCESS, STAGE_CHANGE = 237, 213, 3002
+ZIP_NOTES, PAYMENT_SUCCESS = 237, 213
 SOURCES_DIR = os.path.join("data", "convintel", "sources")
 LEAD_COLUMNS = ("ProspectID", "ProspectStage", "mx_Enquired_Course", "OwnerId", "OwnerIdName", "Score",
                 "mx_Next_follow_up_date")
@@ -70,14 +70,15 @@ def payments(client, d0: datetime, d1: datetime) -> list[dict]:
 
 def leads(client, ids: Iterable[str], columns: Iterable[str] = LEAD_COLUMNS) -> dict[str, dict]:
     """lead_id -> {"stage", "course", "owner_id", "owner_name", "score", "next_follow_up_utc"} for the given
-    leads, LEADS_PER_REQUEST at a time (Leads/Retrieve/ByIds)."""
+    leads, as many per request as the client allows (Leads/Retrieve/ByIds; 250 by default)."""
     ids, out = list(dict.fromkeys(i for i in ids if i)), {}
-    for i in range(0, len(ids), LEADS_PER_REQUEST):
-        chunk, page = ids[i:i + LEADS_PER_REQUEST], 1
+    per = getattr(client, "max_ids_per_bulk", None) or LEADS_PER_REQUEST
+    for i in range(0, len(ids), per):
+        chunk, page = ids[i:i + per], 1
         while True:
             r = client.request("POST", "LeadManagement.svc/Leads/Retrieve/ByIds", json={
                 "SearchParameters": {"LeadIds": chunk}, "Columns": {"Include_CSV": ",".join(columns)},
-                "Paging": {"PageIndex": page, "PageSize": LEADS_PER_REQUEST}}) or {}
+                "Paging": {"PageIndex": page, "PageSize": per}}) or {}
             rows = r.get("Leads") or []
             for l in rows:
                 score = l.get("Score")
@@ -86,7 +87,7 @@ def leads(client, ids: Iterable[str], columns: Iterable[str] = LEAD_COLUMNS) -> 
                     "owner_id": l.get("OwnerId"), "owner_name": (l.get("OwnerIdName") or "").strip() or None,
                     "score": int(float(score)) if score not in (None, "") else None,
                     "next_follow_up_utc": l.get("mx_Next_follow_up_date") or None}
-            if len(rows) < LEADS_PER_REQUEST or page * LEADS_PER_REQUEST >= int(r.get("RecordCount") or 0):
+            if len(rows) < per or page * per >= int(r.get("RecordCount") or 0):
                 break
             page += 1
     return out
@@ -95,20 +96,12 @@ def leads(client, ids: Iterable[str], columns: Iterable[str] = LEAD_COLUMNS) -> 
 def first_enrolments(client, d0: datetime, d1: datetime) -> list[dict]:
     """First-ever "Course Enrolled" stage changes in [d0, d1]: {"lead_id", "at_utc", "ist_day", "owner_id",
     "owner_name", "set_by"}. Leads now in the stage are read newest edit first; a lead first enrolled in the
-    window was edited then too, so the scan stops at the first lead last edited before d0."""
+    window was edited then too, so the scan stops at the first lead last edited before d0. First enrolments
+    already in ``analytics.enrolment_store`` aren't read again."""
     out = []
-    for l in client.iter_leads("ProspectStage", ENROLLED, columns=["ProspectID", "ModifiedOn", "OwnerId", "OwnerIdName"],
-                               sort_by="ModifiedOn", page_size=1000):
-        mod = utc(l.get("ModifiedOn"))
-        if mod and mod < d0:
-            break
-        hist = (client.get_lead_activities(l["ProspectID"], activity_event=STAGE_CHANGE, row_count=100) or {}).get(
-            "ProspectActivities") or []
-        firsts = sorted(((t, {d.get("Key"): d.get("Value") for d in h.get("Data") or []})
-                         for h in hist if (t := utc(h.get("CreatedOn")))), key=lambda x: x[0])
-        first = next(((t, d) for t, d in firsts if d.get("CurrentStage") == ENROLLED), None)
-        if first and d0 <= first[0] <= d1:
-            out.append({"lead_id": l["ProspectID"], "at_utc": format_datetime(first[0]), "ist_day": ist_day(first[0]),
+    for l, at, set_by in scan_since(client, d0, ["ProspectID", "ModifiedOn", "OwnerId", "OwnerIdName"]):
+        if at and d0 <= at <= d1:
+            out.append({"lead_id": l["ProspectID"], "at_utc": format_datetime(at), "ist_day": ist_day(at),
                         "owner_id": l.get("OwnerId"), "owner_name": (l.get("OwnerIdName") or "").strip() or None,
-                        "set_by": (first[1].get("CreatedBy") or "").strip() or None})
+                        "set_by": set_by})
     return out

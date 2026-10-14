@@ -22,6 +22,7 @@ from collections import defaultdict
 from datetime import datetime, timedelta, timezone
 
 from analytics.definitions import team_of
+from analytics.enrolment_store import ScanStats, scan_since
 from analytics.team_report import zip_score
 from integrations.timeutil import IST
 from integrations.leadsquared import (
@@ -29,9 +30,7 @@ from integrations.leadsquared import (
 )
 
 REAL_CALL_SECS = 120
-ENROLLED = "Course Enrolled"
 ZIP_NOTES = 237
-STAGE_CHANGE = 3002
 MAX_STATEMENT = 90_000
 
 
@@ -162,19 +161,11 @@ def main() -> None:
     log(f"new leads: {sum(leads.values())}")
 
     # ---- first-time enrollments
-    enroll = []
-    for l in c.iter_leads("ProspectStage", ENROLLED, columns=["ProspectID", "ModifiedOn", "OwnerId"],
-                          sort_by="ModifiedOn", page_size=1000):
-        mod = utc(l.get("ModifiedOn"))
-        if mod and mod < d0:
-            break
-        hist = (c.get_lead_activities(l["ProspectID"], activity_event=STAGE_CHANGE, row_count=100) or {}).get("ProspectActivities") or []
-        firsts = sorted(((utc(h.get("CreatedOn")), {d.get("Key"): d.get("Value") for d in h.get("Data") or []})
-                         for h in hist if utc(h.get("CreatedOn"))), key=lambda x: x[0])
-        first = next(((t, d) for t, d in firsts if d.get("CurrentStage") == ENROLLED), None)
-        if first and d0 <= first[0] < d1:
-            enroll.append((l["ProspectID"], ist_day(first[0]), format_datetime(first[0]), l.get("OwnerId") or "",
-                           (first[1].get("CreatedBy") or "").strip()))
+    enroll, stats = [], ScanStats()
+    for l, at, set_by in scan_since(c, d0, ["ProspectID", "ModifiedOn", "OwnerId"], stats):
+        if at and d0 <= at < d1:
+            enroll.append((l["ProspectID"], ist_day(at), format_datetime(at), l.get("OwnerId") or "", set_by or ""))
+    log(str(stats))
     log(f"first-time enrollments: {len(enroll)}")
 
     # ---- SQL
