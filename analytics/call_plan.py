@@ -214,10 +214,13 @@ def ready_to_close(r: dict) -> bool:
 
 def handover(by_owner: dict[str, list[dict]], counsellors: list[str], closers: list[str],
              contact: dict[str, str] | None = None) -> dict[str, int]:
-    """Take the counsellors off the plan and hand their leads that are ready to close to closers, best first.
+    """Take the counsellors off the plan and hand their leads that are ready to close to closers, best first:
+    to the closer who last spoke to the lead, else hot leads to the closer with fewest hot leads and the rest evenly.
     The move is on the sheet only: change the owner in LeadSquared by hand. Returns {counsellor: leads kept back}."""
     contact = contact or {}
-    load = {c: sum(1 if r["tier"] in "MPAB" else 0.25 for r in by_owner.get(c, [])) for c in closers}
+    hot = lambda r: r["tier"] in "MPAB" or bool(r.get("month_end_due"))  # noqa: E731
+    load = {c: sum(map(hot, by_owner.get(c, []))) for c in closers}  # hot leads go where there are fewest
+    spread = {c: 0 for c in closers}  # the rest are shared out evenly
     kept = {}
     for o in counsellors:
         rows = sorted(by_owner.pop(o, []), key=lambda r: r["sort"])
@@ -225,8 +228,9 @@ def handover(by_owner: dict[str, list[dict]], counsellors: list[str], closers: l
         kept[o] = len(rows) - len(ready)
         first = o.split()[0]
         for r in ready:
-            to = contact.get(r["lead_id"]) if contact.get(r["lead_id"]) in load else min(closers, key=lambda c: load[c])
-            load[to] += 1 if r["tier"] in "MPAB" else 0.25
+            pool = load if hot(r) else spread
+            to = contact.get(r["lead_id"]) if contact.get(r["lead_id"]) in load else min(closers, key=lambda c: pool[c])
+            (load if hot(r) else spread)[to] += 1
             r["opening_line"] = (r.get("opening_line") or "").replace(f"this is {first} ", f"this is {to.split()[0]}, {first}'s colleague, ")
             r["why"] = f"Handover from {o} (counsellor); change the owner in LeadSquared. {r.get('why', '')}"
             r["handover_from"], r["owner"] = o, to

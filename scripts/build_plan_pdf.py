@@ -223,18 +223,19 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
     moved = [(o, r) for o in owners for r in P[o] if r.get("handover_from")]
     handover_html = ""
     if moved:
-        pairs = {}
-        for o, r in moved:
-            pairs.setdefault((r["handover_from"], o), []).append(r)
-        trs = "".join(f"<tr><td>{html.escape(f)}</td><td><b>{html.escape(t)}</b></td><td>{len(rs)}</td>"
-                      f"<td>{sum(r['tier'] in 'AB' for r in rs)}</td><td>{sum(bool(r.get('bot_done')) for r in rs)}</td></tr>"
-                      for (f, t), rs in sorted(pairs.items()))
+        froms = sorted({r["handover_from"] for _, r in moved})
+        tos = [o for o in owners if any(t == o for t, _ in moved)]
+        cell = lambda f, t: sum(1 for o, r in moved if o == t and r["handover_from"] == f) or ""  # noqa: E731
+        trs = "".join(f"<tr><td>{html.escape(f)}</td><td><b>{sum(r['handover_from'] == f for _, r in moved)}</b></td>"
+                      f"<td>{sum(r['handover_from'] == f and r['tier'] in 'AB' for _, r in moved)}</td>"
+                      + "".join(f"<td>{cell(f, t)}</td>" for t in tos) + "</tr>" for f in froms)
+        heads_to = "".join(f"<th>{html.escape(t.split()[0])}</th>" for t in tos)
         handover_html = (f"<h3>Leads handed over from the counsellors ({len(moved)})</h3><p>The counsellors do discovery and do not "
                          "close, so they are not on this plan. Their leads that are ready to close are on the closers' sheets: "
-                         "with the closer who already spoke to the lead, otherwise with the closer who has the lightest list. "
-                         "Change the owner in LeadSquared before 10:30 so the callbacks reach the right person.</p>"
-                         "<table><thead><tr><th>Counsellor</th><th>Closer</th><th>Leads</th><th>Hot (A, B)</th>"
-                         f"<th>Bot discovery done</th></tr></thead><tbody>{trs}</tbody></table>")
+                         "with the closer who already spoke to the lead, otherwise hot leads with the closer who has the fewest "
+                         "and the rest shared evenly. Change the owner in LeadSquared before 10:30 so callbacks reach the closer.</p>"
+                         f"<table><thead><tr><th>Counsellor</th><th>Leads</th><th>Hot (A, B)</th>{heads_to}</tr></thead>"
+                         f"<tbody>{trs}</tbody></table>")
     cols = "MABFRC" if inb else "ABFRC"  # no Tier M for a team without incoming calls
     heads = "".join(f"<th>{k}</th>" for k in cols)
     who = f"for {html.escape(M['leader'])}, Team Leader" if M["leader"] else "for the team leader"

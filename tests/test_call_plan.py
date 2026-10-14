@@ -113,3 +113,12 @@ def test_counsellors_leads_ready_to_close_go_to_closers():
     hot = next(r for r in rows["Ravi S"] if r["lead_id"] == "hot")
     assert hot["opening_line"].startswith("Hi Priya, this is Ravi, Gita's colleague, from LawSikho")
     assert hot["why"].startswith("Handover from Gita C (counsellor)")
+
+
+def test_handover_spreads_the_rest_evenly():
+    p = plan(owner_order=["Asha K", "Ravi S"], candidates=[cand("mine", owner="Asha K")], tiered=[tiered("mine", "B")],
+             first=[{"owner": "Gita C", "lead_id": f"n{i}", "name": "N", "source": "s", "created_ist": "x", "dials": 0,
+                     "answered_calls": 0, "bot_discovery": "5 Oct", "stage": "New Lead"} for i in range(4)],
+             handover={"from": ["Gita C"], "to": ["Asha K", "Ravi S"]})
+    rows = build_rows(p)
+    assert len(rows["Asha K"]) == 3 and len(rows["Ravi S"]) == 2  # 2 new leads each, not all to the lighter list
