@@ -26,15 +26,17 @@ variables in the environment settings instead.
 | `LEADSQUARED_ACCESS_KEY` | Access key (Settings → API and Webhooks) |
 | `LEADSQUARED_SECRET_KEY` | Secret key |
 | `LEADSQUARED_COOLDOWN_SECONDS` | Pause after each request before the next starts; default `4`, `0` = no pause. Must be a finite number, 0 or more |
+| `LEADSQUARED_MAX_REQUESTS_PER_HOUR`, `..._PER_DAY`, … | Optional budgets and other gate settings, all off or defaulted unless set: see [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md#settings) |
 
-**Request pacing.** Every LeadSquared request from Python, retries included, goes through one pacer
-shared by all clients and threads in the process. Only one request is in flight at a time, and the
-next starts only after the cooldown has passed since the last one finished. A 429's `Retry-After`
-holds every caller. This spreads the work out to lower the peak load on LeadSquared. It doesn't cut
-the number of requests, so per-lead scans now take about 4 s per lead (1,000 leads is about 67 minutes),
-and the threads in `fetch_lead_histories.py` no longer run requests side by side. The pacer is per
-process: separate processes, other machines and the dashboard Worker don't share it, and nothing stops
-two fetch scripts running at once. **Run one Python LeadSquared fetch at a time.**
+**Load control.** Every LeadSquared request from Python, retries included, goes through one gate shared by
+every thread and process on this machine (a SQLite file in `data/leadsquared/`). One request runs at a time,
+each starts 4 s after the last one finished, a 429's `Retry-After` holds everyone, and optional hourly and
+daily budgets can be set. When a wait would pass 5 minutes or a budget is used up, the request isn't sent and
+the client raises `AdmissionDeferred` with the next time it can go. Per-lead scans take about 4 s per lead
+(1,000 leads is about 67 minutes). First enrolments are stored once read, so overlapping report runs don't
+re-read them. Other machines and the dashboard Worker don't share the gate, so run LeadSquared fetches from
+one machine. Settings, deferral handling, gaps and rollback: [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md).
+`python -m integrations.leadsquared admission` shows the gate's state and budgets.
 
 ```python
 from integrations.leadsquared import LeadSquaredClient
