@@ -124,3 +124,14 @@ def test_tier_outcomes_measures_each_tier_and_needs_enough_leads(tmp_path):
     out = tmp_path / "tier_chances.json"
     out.write_text(json.dumps(r))
     assert load_chances(str(out)) == {"A": 50.0}
+
+
+def test_counsellor_comes_off_the_plan_and_the_last_closer_gets_the_lead():
+    snap = {**SNAP, "users": SNAP["users"] + [{"ID": "u3", "FirstName": "Gita", "LastName": "C"}],
+            "leads": [lead("hot", "Gita C", "Follow Up For Closure")],
+            "calls": [{**call("hot", "2026-10-06 06:00:00"), "user_id": "u1"}, {**call("hot", "2026-10-07 06:00:00"), "user_id": "u3"}]}
+    p = build_plan(snap, "2026-10-09", leaders=["Lead Er"], counsellors=["Gita C"])
+    assert p["owner_order"] == ["Asha K", "Lead Er"] and p["handover"] == {"from": ["Gita C"], "to": ["Asha K"]}
+    assert p["contact"] == {"hot": "Asha K"}  # the counsellor's later call does not count
+    rows = build_rows(p)
+    assert list(rows) == ["Asha K"] and rows["Asha K"][0]["handover_from"] == "Gita C"

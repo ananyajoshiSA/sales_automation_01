@@ -92,3 +92,24 @@ def test_sheet_cap_keeps_hot_leads_and_moves_the_rest_to_the_backlog(tmp_path):
     p = plan(candidates=[cand("C1"), cand("C2")], tiered=[tiered("C1", "C", prob=9), {**tiered("C2", "C"), "month_end_due": True}])
     rows = build_rows(p)
     assert [r["lead_id"] for r in call_plan.split_backlog(rows, 1)["Asha K"]] == ["C1"]  # the due promise stays
+
+
+def test_counsellors_leads_ready_to_close_go_to_closers():
+    p = plan(owner_order=["Asha K", "Ravi S"],
+             candidates=[cand(x, owner="Gita C") for x in ("hot", "due", "cold", "won")] + [cand("mine", owner="Asha K")],
+             tiered=[{**tiered("hot", "B", owner="Gita C"), "opening_line": "Hi Priya, this is Gita from LawSikho — about Friday."},
+                     {**tiered("due", "C", owner="Gita C"), "month_end_due": True}, tiered("cold", "C", owner="Gita C"),
+                     tiered("won", "C", owner="Gita C"), tiered("mine", "A")],
+             first=[{"owner": "Gita C", "lead_id": "bot", "name": "B", "source": "s", "created_ist": "x", "dials": 0,
+                     "answered_calls": 0, "bot_discovery": "5 Oct", "stage": "New Lead"},
+                    {"owner": "Gita C", "lead_id": "raw", "name": "R", "source": "s", "created_ist": "x", "dials": 0,
+                     "answered_calls": 0, "bot_discovery": "", "stage": "New Lead"}],
+             stages={"won": "Counselled lead"}, handover={"from": ["Gita C"], "to": ["Asha K", "Ravi S"]},
+             contact={"due": "Asha K"})
+    rows = build_rows(p)
+    assert "Gita C" not in rows
+    moved = {r["lead_id"]: r["owner"] for o in rows for r in rows[o] if r.get("handover_from") == "Gita C"}
+    assert set(moved) == {"hot", "due", "won", "bot"} and moved["due"] == "Asha K" and moved["hot"] == "Ravi S"
+    hot = next(r for r in rows["Ravi S"] if r["lead_id"] == "hot")
+    assert hot["opening_line"].startswith("Hi Priya, this is Ravi, Gita's colleague, from LawSikho")
+    assert hot["why"].startswith("Handover from Gita C (counsellor)")

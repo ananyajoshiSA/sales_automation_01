@@ -57,6 +57,8 @@ def flags(r):
         out.append('<span class="chip warn">Promise now due</span>')
     if r.get("callback_missed"):
         out.append('<span class="chip warn">Booked callback missed</span>')
+    if r.get("handover_from"):
+        out.append(f'<span class="chip good">From {html.escape(r["handover_from"].split()[0])} (counsellor)</span>')
     if r.get("changed") and not r["changed"].lower().startswith("unchanged"):
         out.append('<span class="chip good">Updated from the latest calls</span>')
     if r.get("stage") == "Not Interested":
@@ -218,6 +220,21 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
     if M["focus"]:
         from scripts.build_focus_list import focus_rows, focus_section  # imports this module: load it late
         focus = focus_rows(P, M["leader"])
+    moved = [(o, r) for o in owners for r in P[o] if r.get("handover_from")]
+    handover_html = ""
+    if moved:
+        pairs = {}
+        for o, r in moved:
+            pairs.setdefault((r["handover_from"], o), []).append(r)
+        trs = "".join(f"<tr><td>{html.escape(f)}</td><td><b>{html.escape(t)}</b></td><td>{len(rs)}</td>"
+                      f"<td>{sum(r['tier'] in 'AB' for r in rs)}</td><td>{sum(bool(r.get('bot_done')) for r in rs)}</td></tr>"
+                      for (f, t), rs in sorted(pairs.items()))
+        handover_html = (f"<h3>Leads handed over from the counsellors ({len(moved)})</h3><p>The counsellors do discovery and do not "
+                         "close, so they are not on this plan. Their leads that are ready to close are on the closers' sheets: "
+                         "with the closer who already spoke to the lead, otherwise with the closer who has the lightest list. "
+                         "Change the owner in LeadSquared before 10:30 so the callbacks reach the right person.</p>"
+                         "<table><thead><tr><th>Counsellor</th><th>Closer</th><th>Leads</th><th>Hot (A, B)</th>"
+                         f"<th>Bot discovery done</th></tr></thead><tbody>{trs}</tbody></table>")
     cols = "MABFRC" if inb else "ABFRC"  # no Tier M for a team without incoming calls
     heads = "".join(f"<th>{k}</th>" for k in cols)
     who = f"for {html.escape(M['leader'])}, Team Leader" if M["leader"] else "for the team leader"
@@ -307,6 +324,7 @@ def build(plan_path: str, out_path: str, meta_path: str | None = None) -> None:
   <li><b>Promises now due ({len(month_end)}):</b> leads who said they'd decide or pay by a date that has now come (section 11).</li>
   <li><b>New leads (F) and revive (R):</b> lower chance per lead (about 4–6%), but there are many. They feed the next two days' closes.</li>
 </ol>
+{handover_html}
 <h3>Rebalance before 10:00</h3>
 <p>{rebalance_note(P, owners, M)}</p>
 </section>

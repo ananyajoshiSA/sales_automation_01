@@ -15,6 +15,9 @@ Inputs (JSON):
   inbound    - optional, default true: false for a team that takes no incoming calls, so no lead becomes
                Tier M (a call from the lead stays a sign of interest in the reason, not a callback owed)
   discovery  - optional {lead_id: text}: what the bot's or a counsellor's discovery found, shown to the caller
+  handover   - optional {"from": [counsellors], "to": [closers]}: counsellors who only do discovery come off the
+               plan; their leads ready to close go to a closer (the one who already spoke to the lead, from
+               "contact" {lead_id: closer}, else the least loaded) and the rest stay with them, off the sheets
   carry      - optional: earlier call-plan workbooks; leads marked "Link sent", "Token paid" or "EMI docs
                pending" there and not paid come back as Tier P ("link sent, not paid")
 
@@ -109,7 +112,7 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
                             "Discovery: background, goal, timeline; pitch the matching program; book a fixed "
                             "callback or send the fee sheet on WhatsApp."),
             "best_time": "anytime", "objection_to_prepare": "", "phone": f.get("phone"), "stage": f["stage"],
-            "last_conv": "", "source_list": "fresh", "rank": f.get("rank", 0),
+            "last_conv": "", "source_list": "fresh", "rank": f.get("rank", 0), "bot_done": bool(bot),
         }
 
     per_owner_revive: dict[str, int] = {}
@@ -191,10 +194,46 @@ def build_rows(plan: dict) -> dict[str, list[dict]]:
         by_owner.setdefault(r["owner"], []).append(r)
     for o in by_owner:
         by_owner[o].sort(key=lambda r: r["sort"])
+    if plan.get("handover"):
+        handover(by_owner, plan["handover"]["from"], plan["handover"]["to"], plan.get("contact", {}))
     if plan.get("tier_b_cap"):
         targets, default = plan.get("targets", {}), plan.get("default_target", DEFAULT_TARGET)
         rebalance(by_owner, [o for o in plan.get("owner_order", by_owner) if targets.get(o, default)], plan["tier_b_cap"])
     return by_owner
+
+
+CLOSING_STAGES = frozenset({"Counselled lead", "Follow Up For Closure", "Roadmap Done", "Roadmap\xa0Done",
+                            "Booking fees received", "Opportunity Created"})
+
+
+def ready_to_close(r: dict) -> bool:
+    """A counsellor's lead a closer should take: hot, a promise due, discovery done by the bot, or counselled."""
+    return (r["tier"] in "MPAB" or bool(r.get("month_end_due")) or bool(r.get("bot_done"))
+            or r.get("stage") in CLOSING_STAGES)
+
+
+def handover(by_owner: dict[str, list[dict]], counsellors: list[str], closers: list[str],
+             contact: dict[str, str] | None = None) -> dict[str, int]:
+    """Take the counsellors off the plan and hand their leads that are ready to close to closers, best first.
+    The move is on the sheet only: change the owner in LeadSquared by hand. Returns {counsellor: leads kept back}."""
+    contact = contact or {}
+    load = {c: sum(1 if r["tier"] in "MPAB" else 0.25 for r in by_owner.get(c, [])) for c in closers}
+    kept = {}
+    for o in counsellors:
+        rows = sorted(by_owner.pop(o, []), key=lambda r: r["sort"])
+        ready = [r for r in rows if ready_to_close(r)]
+        kept[o] = len(rows) - len(ready)
+        first = o.split()[0]
+        for r in ready:
+            to = contact.get(r["lead_id"]) if contact.get(r["lead_id"]) in load else min(closers, key=lambda c: load[c])
+            load[to] += 1 if r["tier"] in "MPAB" else 0.25
+            r["opening_line"] = (r.get("opening_line") or "").replace(f"this is {first} ", f"this is {to.split()[0]}, {first}'s colleague, ")
+            r["why"] = f"Handover from {o} (counsellor); change the owner in LeadSquared. {r.get('why', '')}"
+            r["handover_from"], r["owner"] = o, to
+            by_owner.setdefault(to, []).append(r)
+    for o in by_owner:
+        by_owner[o].sort(key=lambda r: r["sort"])
+    return kept
 
 
 def split_backlog(by_owner: dict[str, list[dict]], cap: int) -> dict[str, list[dict]]:

@@ -36,3 +36,11 @@ def test_team_without_inbound_gets_no_missed_call_steps_and_sees_discovery(tmp_p
     doc = (tmp_path / "out.html").read_text()
     assert "missed call" not in doc.lower() and "inbound" not in doc.lower() and "<th>M</th>" not in doc
     assert "Discovery so far:</b> Bot, 5 Oct" in doc
+
+
+def test_handed_over_leads_are_flagged_and_counted(tmp_path):
+    plan = {"Ravi K": [row("A", handover_from="Gita C", bot_done=True), row("B")]}
+    (tmp_path / "plan.json").write_text(json.dumps(plan))
+    build(str(tmp_path / "plan.json"), str(tmp_path / "out.html"))
+    doc = (tmp_path / "out.html").read_text()
+    assert "Leads handed over from the counsellors (1)" in doc and "From Gita (counsellor)" in doc
