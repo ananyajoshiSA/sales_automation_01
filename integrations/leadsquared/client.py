@@ -7,34 +7,32 @@ Credentials are read from the environment, never hard-coded:
     LEADSQUARED_HOST        e.g. api-in21.leadsquared.com or https://api-in21.leadsquared.com/v2/
     LEADSQUARED_ACCESS_KEY
     LEADSQUARED_SECRET_KEY
-    LEADSQUARED_COOLDOWN_SECONDS   pause after each request before the next one starts; default 4, 0 = no
-                                   pause (requests still go one at a time)
 
-Every request (retries included) goes through one pacer shared by all clients and threads in this
-process: one HTTP attempt at a time, and the next starts only after the cooldown has passed since the
-last one finished. It spreads the work out to lower the peak load on LeadSquared; it doesn't reduce the
-number of requests. Separate processes, other machines and the dashboard Worker each pace themselves,
-so run one Python LeadSquared fetch at a time.
+Every HTTP attempt (retries included) first takes a slot from the shared admission gate
+(``admission.py``): one attempt at a time per LeadSquared account across the Python processes on this
+machine, a cooldown after each (default 4 s), optional request and record budgets, and Retry-After holds.
+It limits this integration's demand on LeadSquared; it doesn't cut the number of requests a job needs.
+Settings and limits: docs/leadsquared_load_control.md.
 """
 
 from __future__ import annotations
 
 import math
 import os
-import threading
 import time
-from contextlib import contextmanager
 from datetime import datetime, timedelta, timezone
 from email.utils import parsedate_to_datetime
 from typing import Any, Callable, Iterable, Iterator, Mapping
 
 import requests
 
+from integrations.leadsquared import admission as _admission
+from integrations.leadsquared.admission import (
+    AdmissionDeferred as _Deferred, CoordinatorUnavailable as _Unavailable, endpoint_category, requested_records,
+)
 from integrations.timeutil import EDIT_MARGIN, now_utc, utc
 
 DEFAULT_HOST = "https://api-in21.leadsquared.com/v2/"
-COOLDOWN_ENV = "LEADSQUARED_COOLDOWN_SECONDS"
-DEFAULT_COOLDOWN = 4.0
 
 
 def normalize_host(host: str) -> str:
@@ -54,6 +52,23 @@ class LeadSquaredError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
+
+
+class AdmissionDeferred(LeadSquaredError):
+    """Nothing was sent: a request budget is used up, or the wait for a slot would be too long.
+
+    ``next_eligible`` (UTC datetime, or None if no time is known) says when to try again; ``reason`` says why.
+    Jobs should stop, keep their checkpoint and report the deferral, not record the work as done.
+    """
+
+    def __init__(self, message: str, reason: str = "", next_eligible: datetime | None = None):
+        super().__init__(message)
+        self.reason = reason
+        self.next_eligible = next_eligible
+
+
+class CoordinatorUnavailable(LeadSquaredError):
+    """The shared admission store can't be used, so nothing was sent (there is no unpaced fallback)."""
 
 
 def to_attributes(fields: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -126,20 +141,6 @@ def format_datetime(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
-def cooldown_from_env() -> float:
-    """``LEADSQUARED_COOLDOWN_SECONDS`` (default 4): a finite number of seconds, 0 or more."""
-    raw = os.environ.get(COOLDOWN_ENV, "").strip()
-    if not raw:
-        return DEFAULT_COOLDOWN
-    try:
-        value = float(raw)
-    except ValueError:
-        value = math.nan
-    if not math.isfinite(value) or value < 0:
-        raise ValueError(f"{COOLDOWN_ENV} must be a finite number of seconds, 0 or more (got {raw!r})")
-    return value
-
-
 def retry_after_seconds(value: str | None, now_wall: Callable[[], float] = time.time) -> float | None:
     """Seconds to wait from a ``Retry-After`` header (whole seconds or an HTTP date); None if missing or malformed."""
     value = (value or "").strip()
@@ -156,70 +157,8 @@ def retry_after_seconds(value: str | None, now_wall: Callable[[], float] = time.
     return max(0.0, when.timestamp() - now_wall())
 
 
-class RequestPacer:
-    """One HTTP attempt at a time, each starting no sooner than ``cooldown`` seconds after the last one ended.
-
-    Times are ``time.monotonic()`` seconds. ``slot(not_before)`` waits for the later of the shared deadline
-    and the caller's own retry time, so the two waits overlap instead of adding up. A 429's Retry-After moves
-    the shared deadline (``hold_until``) for every caller. Deadlines only ever move later.
-    """
-
-    def __init__(self, cooldown: float, clock: Callable[[], float] = time.monotonic,
-                 sleep: Callable[[float], None] | None = None):
-        self.cooldown = cooldown
-        self._clock = clock
-        self._sleep = sleep or (lambda s: time.sleep(s))  # looked up per call so tests can patch time.sleep
-        self._cond = threading.Condition()
-        self._busy = False
-        self._next_start = -math.inf
-
-    def now(self) -> float:
-        return self._clock()
-
-    def hold_until(self, deadline: float) -> None:
-        with self._cond:
-            self._next_start = max(self._next_start, deadline)
-
-    def _acquire(self, not_before: float) -> None:
-        while True:
-            with self._cond:
-                while self._busy:
-                    self._cond.wait()
-                wait = max(self._next_start, not_before) - self._clock()
-                if wait <= 0:
-                    self._busy = True
-                    return
-            self._sleep(wait)  # outside the lock; the deadline is checked again afterwards
-
-    def _release(self) -> None:
-        with self._cond:
-            self._busy = False
-            self._next_start = max(self._next_start, self._clock() + self.cooldown)
-            self._cond.notify_all()
-
-    @contextmanager
-    def slot(self, not_before: float = -math.inf) -> Iterator[None]:
-        acquired = False
-        try:
-            self._acquire(not_before)
-            acquired = True
-            yield
-        finally:
-            if acquired:
-                self._release()
-
-
-_pacer: RequestPacer | None = None
-_pacer_lock = threading.Lock()
-
-
-def shared_pacer() -> RequestPacer:
-    """The process-wide pacer, made on first use with the cooldown from the environment, then kept."""
-    global _pacer
-    with _pacer_lock:
-        if _pacer is None:
-            _pacer = RequestPacer(cooldown_from_env())
-        return _pacer
+def _status_class(code: int) -> str:
+    return "429" if code == 429 else f"{code // 100}xx"
 
 
 def _is_api_error(resp: requests.Response) -> bool:
@@ -251,7 +190,12 @@ class LeadSquaredClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.session = session or requests.Session()
-        self.pacer = shared_pacer()  # created once per process; a new client never resets it
+        try:
+            # One gate per account, made once per process and shared by every client; never reset here.
+            self.admission = _admission.shared_admission(self.host, self.access_key)
+        except _admission.CoordinatorUnavailable as exc:
+            raise CoordinatorUnavailable(str(exc)) from exc
+        self.max_ids_per_bulk = self.admission.config.max_ids_per_bulk
 
     # ------------------------------------------------------------------ core
 
@@ -267,34 +211,51 @@ class LeadSquaredClient:
             query.update({k: v for k, v in params.items() if v is not None})
         url = self.host + path.lstrip("/")
 
-        retry_at = -math.inf  # a retry's own earliest start (monotonic); the pacer's deadline may be later
+        lead_ids = (json.get("SearchParameters") or {}).get("LeadIds") \
+            if isinstance(json, dict) and isinstance(json.get("SearchParameters"), dict) else None
+        if isinstance(lead_ids, list) and len(lead_ids) > self.max_ids_per_bulk:
+            raise ValueError(f"{len(lead_ids)} lead IDs in one request; send at most {self.max_ids_per_bulk} "
+                             "(LEADSQUARED_MAX_IDS_PER_BULK_REQUEST) per request")
+        category, records = endpoint_category(path), requested_records(json)
+        gate, clock = self.admission, _admission.wall_clock
+        retry_at = -math.inf  # a retry's own earliest start (wall clock); the gate's deadline may be later
         for attempt in range(self.max_retries + 1):
             failure = None
-            # Only the HTTP attempt holds the pacer: the body is read inside session.request (no streaming),
+            # The slot covers only the HTTP attempt: the body is read inside session.request (no streaming),
             # and parsing and retry waits happen outside it.
-            with self.pacer.slot(retry_at):
-                try:
-                    resp = self.session.request(
-                        method, url, params=query, json=json, timeout=self.timeout
-                    )
-                except requests.RequestException as exc:
-                    failure = exc
-                else:
-                    wait = retry_after_seconds(resp.headers.get("Retry-After"))
-                    if resp.status_code == 429 and wait is not None:
-                        # Moved before the slot is freed, so no other caller starts before LeadSquared allows.
-                        self.pacer.hold_until(self.pacer.now() + wait)
+            try:
+                with gate.slot(category, records, retry_at) as outcome:
+                    try:
+                        resp = self.session.request(
+                            method, url, params=query, json=json, timeout=self.timeout
+                        )
+                    except requests.RequestException as exc:
+                        failure = exc
+                        outcome["status"] = "network error"
+                    else:
+                        outcome["status"] = _status_class(resp.status_code)
+                        wait = retry_after_seconds(resp.headers.get("Retry-After"), clock)
+                        if resp.status_code == 429 and wait is not None:
+                            # Set before the slot is freed, so no other caller starts before LeadSquared allows.
+                            gate.hold_until(clock() + wait)
+            except _Deferred as exc:
+                raise AdmissionDeferred(str(exc), exc.reason, exc.next_eligible) from exc
+            except _Unavailable as exc:
+                raise CoordinatorUnavailable(str(exc)) from exc
             if failure is not None:
                 if attempt < self.max_retries:
-                    retry_at = self.pacer.now() + 2**attempt
+                    retry_at = clock() + 2**attempt
                     continue
-                raise LeadSquaredError(f"{method} {path} failed: {failure}") from failure
+                # requests puts the full URL, keys included, in its message: strip them and drop the chained
+                # exception so neither a log nor a traceback shows them.
+                text = str(failure).replace(self.access_key, "***").replace(self.secret_key, "***")
+                raise LeadSquaredError(f"{method} {path} failed: {text}") from None
 
             # 429 = rate limited, 5xx = transient server error. LeadSquared also uses
             # 500 for validation errors (JSON body with Status=Error) — don't retry those.
             if (resp.status_code == 429 or (resp.status_code >= 500 and not _is_api_error(resp))) \
                     and attempt < self.max_retries:
-                retry_at = self.pacer.now() + (2**attempt if wait is None else wait)
+                retry_at = clock() + (2**attempt if wait is None else wait)
                 continue
             break
 

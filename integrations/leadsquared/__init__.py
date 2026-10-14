@@ -1,6 +1,8 @@
 from .client import (
     PHONE_INBOUND,
     PHONE_OUTBOUND,
+    AdmissionDeferred,
+    CoordinatorUnavailable,
     LeadSquaredClient,
     LeadSquaredError,
     format_datetime,
@@ -12,6 +14,8 @@ from .client import (
 __all__ = [
     "PHONE_INBOUND",
     "PHONE_OUTBOUND",
+    "AdmissionDeferred",
+    "CoordinatorUnavailable",
     "LeadSquaredClient",
     "LeadSquaredError",
     "format_datetime",
