@@ -456,11 +456,18 @@ def lead_rows(items: list[tuple[dict, dict]], names: dict[str, dict], with_team:
         team = f" · {esc(SHORT.get(v['team'], v['team']))}" if with_team else ""
         out.append(f"""<tr class="tier-{OWNER_CLASS[r['cause_owner']]}"><td class="num">{i}</td>
 <td class="lead"><b>{esc(clean_name(names.get(v['lead_id'], {}).get('name', ''))) or 'Unnamed lead'}</b>
-<div class="sub">{esc(v['caller'])}{team}</div><div class="sub">allocated {esc(v['booked_ist'][:10])} · {esc(v['outcome'])} · {esc(v['stage'])}</div></td>
+<div class="sub">{esc(v['caller'])}{team}</div><div class="sub">allocated {esc(v['booked_ist'][:10])} · {esc(v['outcome'])} · {esc(v['stage'])}</div>
+<div class="sub">{len(r.get('calls_read') or [])} recorded calls read</div></td>
 <td>{esc(r['what_happened'], 340)}</td><td>{esc(r['why_not_paid'], 240)}<div class="sub"><b>{esc(r['primary_cause'])}</b></div></td>
 <td>{esc(r['savable'])}<div class="sub">Expect: {esc(r['expect_payment'])} · Counselling: {esc(r['counselling'])}</div></td></tr>""")
     return ("<table class='leads'><thead><tr><th>#</th><th>Lead</th><th>What happened</th><th>Why it has not paid</th>"
             f"<th>Savable / expected</th></tr></thead><tbody>{''.join(out)}</tbody></table>")
+
+
+def coverage(rd: list[dict]) -> str:
+    full = [r for r in rd if r.get("full")]
+    calls = sum(len(r.get("calls_read") or []) for r in full)
+    return f"{len(full)} of {len(rd)} unpaid leads were read with every recorded call since booking ({calls} calls, each listed)."
 
 
 def _bullets(items: list[dict]) -> str:
@@ -502,7 +509,8 @@ whether it was a sales problem or a lead problem, and where payments can still c
 </div>
 <p class="note">Data: LeadSquared stages, calls, notes and owner changes as of {esc(data['as_of_ist'])} IST, and the recorded
 calls of every unpaid lead read. Collected means the stage reached Collections done or Course Enrolled; LeadSquared holds no
-payment amounts yet. A lead belongs to the collection caller it settled with in the first 24 hours after allocation.</p></div></div>
+payment amounts yet. A lead belongs to the collection caller it settled with in the first 24 hours after allocation.
+{esc(coverage(rd))}</p></div></div>
 
 <section><h2>1. Sales problem or lead problem?</h2>
 <p>Each unpaid lead allocated since {esc(data['read_from'])} was read in full (history, notes and every recorded call) and given
@@ -572,7 +580,7 @@ paid the balance, which reasons sit with the lead or with how leads come in, and
 <div><b>{100 * sum(r['cause_owner'] == 'Caller' for r in rd) / max(1, len(rd)):.0f}%</b><span>did not pay mainly because of the collection team's handling</span></div>
 </div>
 <p class="note">Data: LeadSquared as of {esc(data['as_of_ist'])} IST and the recorded calls of every unpaid lead. A lead is credited
-to the collection caller it settled with in the first 24 hours after hand-over.</p></div></div>
+to the collection caller it settled with in the first 24 hours after hand-over. {esc(coverage(rd))}</p></div></div>
 
 <section><h2>1. Summary for the community team</h2>{_bullets(recs.get('summary', []))}</section>
 

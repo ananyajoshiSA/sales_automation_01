@@ -102,3 +102,9 @@ def test_full_batches_are_sized_by_text():
     item = lambda lid, size: {"lead_id": lid, "dossier": "", "transcripts": [{"text": "x" * size}]}  # noqa: E731
     out = cr.batches_by_size([item("a", 150_000), item("b", 120_000), item("c", 40_000), item("d", 50_000)], full=True)
     assert [[i["lead_id"] for i in b] for b in out] == [["a"], ["b", "d"], ["c"]]   # largest first
+
+
+def test_coverage_counts_only_full_readings():
+    from analytics.community_review import coverage
+    rd = [{"full": True, "calls_read": [{"n": 1}, {"n": 2}]}, {"full": False, "calls_read": [{"n": 1}]}, {"full": True}]
+    assert coverage(rd) == "2 of 3 unpaid leads were read with every recorded call since booking (2 calls, each listed)."
