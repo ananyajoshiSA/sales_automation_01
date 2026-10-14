@@ -426,7 +426,7 @@ def monthly_table(views: list[dict]) -> str:
             "<p class='note'>* Of leads allocated 30+ days ago; blank for the current month.</p>")
 
 
-def caller_table(views: list[dict], readings: dict[str, dict]) -> str:
+def caller_table(views: list[dict], readings: dict[str, dict], read_from: str) -> str:
     by = {}
     for v in views:
         by.setdefault(v["caller"], []).append(v)
@@ -434,7 +434,7 @@ def caller_table(views: list[dict], readings: dict[str, dict]) -> str:
     for c in sorted(by, key=lambda c: -len(by[c])):
         vs = by[c]
         f = funnel(vs)
-        rd = [readings[v["lead_id"]] for v in vs if v["lead_id"] in readings]
+        rd = [r for _, r in unpaid_reads(vs, readings, read_from)]
         caller_owned = sum(r["cause_owner"] == "Caller" for r in rd)
         no_counsel = sum(r["counselling"] == "None" for r in rd)
         rows.append(f"<tr><td><b>{esc(c)}</b></td><td>{f['allocated']}</td><td>{_fmt(f['collected_%_mature'], '%')}</td>"
@@ -464,6 +464,12 @@ def lead_rows(items: list[tuple[dict, dict]], names: dict[str, dict], with_team:
             f"<th>Savable / expected</th></tr></thead><tbody>{''.join(out)}</tbody></table>")
 
 
+def unpaid_reads(views: list[dict], readings: dict[str, dict], read_from: str) -> list[tuple[dict, dict]]:
+    """Readings of leads still unpaid and allocated since read_from; a lead read earlier and collected since is left out."""
+    return [(v, readings[v["lead_id"]]) for v in views
+            if v["lead_id"] in readings and v["outcome"] != "collected" and v["booked_ist"][:10] >= read_from]
+
+
 def coverage(rd: list[dict]) -> str:
     full = [r for r in rd if r.get("full")]
     calls = sum(len(r.get("calls_read") or []) for r in full)
@@ -478,7 +484,7 @@ def team_html(team: str, data: dict, names: dict, recs: dict) -> str:
     views = [v for v in data["views"] if v["team"] in TEAMS]
     mine = [v for v in views if v["team"] == team]
     readings = data["readings"]
-    read = [(v, readings[v["lead_id"]]) for v in mine if v["lead_id"] in readings]
+    read = unpaid_reads(mine, readings, data["read_from"])
     rd = [r for _, r in read]
     other = next(t for t in TEAMS if t != team)
     f_me, f_other = funnel(mine), funnel([v for v in views if v["team"] == other])
@@ -528,7 +534,7 @@ stage, {SHORT[other]} {_fmt(f_other['closure_stage_%'], '%')}), so stage-based m
 <h3>Counselling on unpaid leads</h3><table><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{v}</td></tr>" for k, v in Counter(r['counselling'] for r in rd).most_common())}</tbody></table>
 {_bullets(recs.get('why', []))}</section>
 
-<section><h2>4. Callers</h2>{caller_table(mine, readings)}</section>
+<section><h2>4. Callers</h2>{caller_table(mine, readings, data['read_from'])}</section>
 
 <section><h2>5. Where payments can still come from</h2>
 <table><thead><tr><th>Expected</th><th>Leads</th></tr></thead><tbody>{''.join(f"<tr><td>{esc(k)}</td><td>{expect[k]}</td></tr>" for k in EXPECT)}</tbody></table>
@@ -543,7 +549,7 @@ stage, {SHORT[other]} {_fmt(f_other['closure_stage_%'], '%')}), so stage-based m
 def community_html(data: dict, names: dict, recs: dict) -> str:
     views = [v for v in data["views"] if v["team"] in TEAMS]
     readings = data["readings"]
-    read = [(v, readings[v["lead_id"]]) for v in views if v["lead_id"] in readings]
+    read = unpaid_reads(views, readings, data["read_from"])
     rd = [r for _, r in read]
     fs = {SHORT[t]: funnel([v for v in views if v["team"] == t]) for t in TEAMS}
     by_team = {t: [r for v, r in read if v["team"] == t] for t in TEAMS}

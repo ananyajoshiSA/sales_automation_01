@@ -62,11 +62,13 @@ def test_reports_render_for_both_teams_and_the_community_team(tmp_path):
             "views": [v("a", "Elite Changemakers", "open"), v("b", "Elite Changemakers", "collected"),
                       v("c", "Team Puja Malik (DSV+Women AI)", "lost", caller="Ravi Das")],
             "readings": {"a": {**reading, "cause_owner": "Community team"},
+                         "b": {**reading, "primary_cause": "Lead: cannot afford it now", "cause_owner": "Lead"},  # read, collected since
                          "c": {**reading, "primary_cause": "Caller: not called or counselled in time", "cause_owner": "Caller"}}}
     names = {"a": {"name": "Malti Jain Jain"}}
     page = cr.team_html("Elite Changemakers", data, names, {"actions": [{"title": "Return calls.", "text": "Same day."}]})
     assert "for Mayur Sachdeva" in page and "Malti Jain<" in page and "Return calls." in page
     assert "Community team: 1 leads" in page and "50.0%" in page
+    assert "Lead: 1 leads" not in page
     page = cr.community_html(data, names, {"summary": [{"title": "Fit.", "text": "Check payment route at booking."}]})
     assert "For the community team" in page and "Expected Rs 3,000 a month" in page and "Pratik Sarkar" in page
 
