@@ -9,12 +9,15 @@ collection teams separately and gives the community team its own view.
   dial, reached within 72 hours, a real conversation (120 s+), a closure stage reached (Follow Up For Closure or Loan
   pending), collected; by team, allocation month and caller. Collection rates are compared on leads allocated 30+
   days ago, so young leads do not drag a team down.
-* **A reading of every unpaid lead allocated since ``read_from``:** its history and call transcripts read in full by
+* **A reading of every unpaid lead allocated since ``read_from``:** its history and call transcripts read by
   Claude in a Claude Code session (no model API), naming what happened, the primary reason it has not paid, who owns
   that reason (lead, caller, process, community team), whether better handling could have saved it, when payment can
-  still be expected, how well it was counselled, and anything the community team should know.
+  still be expected, how well it was counselled, and anything the community team should know. A ``full`` round
+  gives readers every recorded call since the booking (and the booking call before it) uncut, and each reading must
+  list every call it read with a one-line gist; the check rejects a reading that skips one, and a full reading
+  replaces any earlier one.
 
-    python -m analytics.community_review data/coll_d11 exports/community_review 2026-05-01 2026-08-01 transcripts.jsonl
+    python -m analytics.community_review data/coll_d11 exports/community_review 2026-05-01 2026-08-01 transcripts.jsonl [full]
     python -m analytics.community_review check <round folder>/read_01.jsonl <round folder>/batch_01.jsonl
     python -m analytics.community_review report exports/community_review data/coll_d11/contacts.json recommendations.json
 
@@ -40,6 +43,8 @@ from scripts.build_plan_pdf import CSS
 MATURE = timedelta(days=30)
 CLOSURE_STAGES = {"follow up for closure", "loan pending"}
 BATCH = 25
+FULL_BATCH_CHARS = 200_000   # a full round sizes batches by text read, not by lead count
+GIST = 160
 
 CAUSES = {
     "Lead: no way to pay (no card, income, credit, or over age)": "Lead",
@@ -168,8 +173,28 @@ def funnel(views: list[dict]) -> dict:
 
 # ----------------------------------------------------------------------------------------------- reading round
 
+def full_transcripts(calls: list[dict], booked: datetime) -> list[dict]:
+    """Every recorded call with text since two days before the booking, in full, oldest first, numbered; plus the
+    last recorded call before that (usually the booking conversation), marked as before hand-over."""
+    def at(c: dict) -> datetime | None:
+        try:
+            return datetime.fromisoformat(c["start_api"]) if c.get("start_api") else None
+        except ValueError:
+            return None
+    timed = sorted(((at(c), c) for c in calls if (c.get("transcript") or "").strip() and at(c)), key=lambda x: x[0])
+    start = booked - timedelta(days=2)
+    before = [x for x in timed if x[0] < start]
+    keep = before[-1:] + [x for x in timed if x[0] >= start]
+    return [{"n": i, "date": t.astimezone(IST).strftime("%d %b %Y"), "agent": c.get("agent") or "",
+             "minutes": round((c.get("duration") or 0) / 60, 1), "before_handover": t < start, "text": c["transcript"].strip()}
+            for i, (t, c) in enumerate(keep, 1)]
+
+
 def check_reading(read_path: str, batch_path: str) -> list[str]:
-    want = [json.loads(line)["lead_id"] for line in open(batch_path, encoding="utf-8") if line.strip()]
+    batch = [json.loads(line) for line in open(batch_path, encoding="utf-8") if line.strip()]
+    want = [b["lead_id"] for b in batch]
+    calls = {b["lead_id"]: [t["n"] for t in b.get("transcripts") or [] if "n" in t] for b in batch}
+    full = any(calls.values()) or any("n" in t for b in batch for t in b.get("transcripts") or [])
     problems, seen = [], Counter()
     for n, line in enumerate(open(read_path, encoding="utf-8"), 1):
         if not line.strip():
@@ -194,23 +219,70 @@ def check_reading(read_path: str, batch_path: str) -> list[str]:
         extra = r.get("contributing")
         if not isinstance(extra, list) or any(c not in CAUSES for c in extra):
             problems.append(f"line {n}: contributing must be a list of causes from the list")
+        if full and r.get("lead_id") in calls:
+            read = r.get("calls_read")
+            if not isinstance(read, list) or any(not isinstance(x, dict) for x in read):
+                problems.append(f"line {n}: calls_read must be a list of {{n, gist}}, one per transcript")
+            else:
+                got = [x.get("n") for x in read]
+                missing = sorted(set(calls[r["lead_id"]]) - set(got))
+                if missing:
+                    problems.append(f"line {n}: calls_read is missing call(s) {missing}")
+                if sorted(got) != sorted(set(got)) or set(got) - set(calls[r["lead_id"]]):
+                    problems.append(f"line {n}: calls_read has repeated or unknown call numbers")
+                for x in read:
+                    g = x.get("gist")
+                    if not isinstance(g, str) or not g.strip() or len(g) > GIST:
+                        problems.append(f"line {n}: call {x.get('n')} needs a gist of 1-{GIST} characters")
     problems += [f"lead {lid} read {k} times" for lid, k in seen.items() if k > 1]
     problems += [f"lead {lid} not read" for lid in want if not seen[lid]]
     return problems
 
 
-def write_round(items: list[dict], reading_dir: str, as_of: str) -> str:
-    folder = os.path.join(reading_dir, as_of.replace("-", "").replace(" ", "-").replace(":", ""))
+FULL_INSTRUCTIONS = """
+## Full reading: every call, and proof of it
+
+In this round each lead carries every recorded call since the booking, in full, plus the last call before it (marked
+"before_handover": usually the booking conversation, where expectations about the fee and payment were set). Read
+every call to the end. Add to each reading:
+
+- "calls_read": one entry per transcript of the lead, {{"n": the call's number, "gist": what was said in that call in
+  one line, max {gist} characters}}. The check rejects a lead with any call missing, so list every one.
+
+Judge the cause from the whole history: what the lead was told at booking, every conversation since, and how the
+team followed up.
+"""
+
+
+def batches_by_size(items: list[dict], full: bool) -> list[list[dict]]:
+    if not full:
+        return [items[i:i + BATCH] for i in range(0, len(items), BATCH)]
+    out, cur, size = [], [], 0
+    for item in sorted(items, key=lambda x: -sum(len(t["text"]) for t in x["transcripts"])):
+        n = len(item["dossier"]) + sum(len(t["text"]) for t in item["transcripts"])
+        if cur and (size + n > FULL_BATCH_CHARS or len(cur) >= BATCH):
+            out.append(cur)
+            cur, size = [], 0
+        cur.append(item)
+        size += n
+    return out + ([cur] if cur else [])
+
+
+def write_round(items: list[dict], reading_dir: str, as_of: str, full: bool = False) -> str:
+    folder = os.path.join(reading_dir, as_of.replace("-", "").replace(" ", "-").replace(":", "") + ("-full" if full else ""))
     os.makedirs(folder, exist_ok=True)
     for name in os.listdir(folder):
         if name.startswith("batch_"):
             os.remove(os.path.join(folder, name))
-    for i in range(0, len(items), BATCH):
-        with open(os.path.join(folder, f"batch_{i // BATCH + 1:02d}.jsonl"), "w", encoding="utf-8") as fh:
-            for item in items[i:i + BATCH]:
+    for i, batch in enumerate(batches_by_size(items, full), 1):
+        with open(os.path.join(folder, f"batch_{i:02d}.jsonl"), "w", encoding="utf-8") as fh:
+            for item in batch:
                 fh.write(json.dumps(item, ensure_ascii=False) + "\n")
     text = INSTRUCTIONS.format(as_of=as_of, folder=folder, causes="; ".join(CAUSES), savable="; ".join(SAVABLE),
                                expect="; ".join(EXPECT), counselling="; ".join(COUNSELLING), **TEXT)
+    if full:
+        text += FULL_INSTRUCTIONS.format(gist=GIST)
+    json.dump({"full": full, "as_of": as_of}, open(os.path.join(folder, "round.json"), "w"))
     open(os.path.join(folder, "INSTRUCTIONS.md"), "w", encoding="utf-8").write(text)
     return folder
 
@@ -232,26 +304,30 @@ def load_readings(reading_dir: str) -> dict[str, dict]:
             if not os.path.exists(batch) or check_reading(path, batch):
                 print(f"skipped {rnd}/{name}: run the check on it", file=sys.stderr)
                 continue
+            meta_path = os.path.join(folder, "round.json")
+            full = json.load(open(meta_path)).get("full", False) if os.path.exists(meta_path) else False
             for line in open(path, encoding="utf-8"):
                 if line.strip():
                     r = json.loads(line)
-                    out[r["lead_id"]] = {**r, "cause_owner": CAUSES[r["primary_cause"]]}
+                    if full or not out.get(r["lead_id"], {}).get("full"):
+                        out[r["lead_id"]] = {**r, "cause_owner": CAUSES[r["primary_cause"]], "full": full}
     return out
 
 
 def reading_items(views: list[dict], leads: list[dict], hist: dict[str, list], now: datetime,
-                  transcripts: dict[str, list]) -> list[dict]:
+                  transcripts: dict[str, list], full: bool = False) -> list[dict]:
     by_id = {l["ProspectID"]: l for l in leads}
     items = []
     for v in views:
         acts = sorted((a for a in hist[v["lead_id"]] if utc(a.get("CreatedOn"))), key=lambda a: a["CreatedOn"])
         items.append({"lead_id": v["lead_id"], "flags": flags(v, acts, v["booked"], now),
                       "dossier": dossier(by_id[v["lead_id"]], v, acts, v["booked"], now),
-                      "transcripts": transcript_excerpts(transcripts.get(v["lead_id"], []), v["booked"])})
+                      "transcripts": (full_transcripts if full else transcript_excerpts)(transcripts.get(v["lead_id"], []), v["booked"])})
     return items
 
 
-def main(data_dir: str, out_dir: str, stats_from: str, read_from: str, transcripts_path: str) -> None:
+def main(data_dir: str, out_dir: str, stats_from: str, read_from: str, transcripts_path: str, mode: str = "") -> None:
+    full = mode == "full"
     meta, leads, hist = _load(data_dir)
     now = utc(meta["fetched_at_utc"])
     as_of = now.astimezone(IST).strftime("%Y-%m-%d %H:%M")
@@ -259,14 +335,14 @@ def main(data_dir: str, out_dir: str, stats_from: str, read_from: str, transcrip
     to_read = [v for v in views if v["booked_ist"][:10] >= read_from and v["outcome"] != "collected"]
     reading_dir = os.path.join(out_dir, "reading")
     readings = load_readings(reading_dir)
-    unread = [v for v in to_read if v["lead_id"] not in readings]
+    unread = [v for v in to_read if v["lead_id"] not in readings or (full and not readings[v["lead_id"]].get("full"))]
     os.makedirs(out_dir, exist_ok=True)
     if unread:
         calls = {}
         for line in open(transcripts_path, encoding="utf-8"):
             d = json.loads(line)
             calls[d["lead_id"]] = d["calls"]
-        folder = write_round(reading_items(unread, leads, hist, now, calls), reading_dir, as_of)
+        folder = write_round(reading_items(unread, leads, hist, now, calls, full), reading_dir, as_of, full)
         missing = sum(1 for v in unread if v["lead_id"] not in calls)
         print(f"{len(unread)} unpaid leads to read ({missing} with no transcript search yet): {folder}", file=sys.stderr)
     data = {"as_of_ist": as_of, "stats_from": stats_from, "read_from": read_from,
@@ -545,4 +621,4 @@ if __name__ == "__main__":
         found = check_reading(sys.argv[2], sys.argv[3])
         print("\n".join(found) or "ok")
         sys.exit(1 if found else 0)
-    main(*sys.argv[1:6])
+    main(*sys.argv[1:7])

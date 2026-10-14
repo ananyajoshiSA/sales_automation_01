@@ -69,3 +69,36 @@ def test_reports_render_for_both_teams_and_the_community_team(tmp_path):
     assert "Community team: 1 leads" in page and "50.0%" in page
     page = cr.community_html(data, names, {"summary": [{"title": "Fit.", "text": "Check payment route at booking."}]})
     assert "For the community team" in page and "Expected Rs 3,000 a month" in page and "Pratik Sarkar" in page
+
+
+def test_full_round_gives_every_call_and_rejects_a_skipped_one(tmp_path):
+    booked = utc("2026-09-10 05:00:00")
+    calls = [{"start_api": "2026-08-01T05:00:00+00:00", "transcript": "old sales call", "duration": 600},
+             {"start_api": "2026-09-09T05:00:00+00:00", "transcript": "booking call " + "x" * 30000, "duration": 1800},
+             {"start_api": "2026-09-12T05:00:00+00:00", "transcript": "first collection call", "duration": 300},
+             {"start_api": "2026-09-20T05:00:00+00:00", "transcript": "", "duration": 200}]
+    full = cr.full_transcripts(calls, booked)       # the last call before the booking window is kept and marked
+    assert [t["n"] for t in full] == [1, 2, 3] and [t["before_handover"] for t in full] == [True, False, False]
+    assert full[1]["text"].startswith("booking call") and len(full[1]["text"]) > 30000 and full[2]["date"] == "12 Sep 2026"
+    calls[1]["start_api"] = "2026-09-01T05:00:00+00:00"           # booking call more than 2 days before: kept, marked
+    full = cr.full_transcripts(calls, booked)
+    assert [t["before_handover"] for t in full] == [True, False] and "old sales call" not in [t["text"] for t in full]
+
+    assert len(full) == 2
+    items = [{"lead_id": "a", "flags": [], "dossier": "d", "transcripts": full}]
+    folder = cr.write_round(items, str(tmp_path), "2026-10-14 10:00", full=True)
+    assert folder.endswith("-full") and "calls_read" in open(f"{folder}/INSTRUCTIONS.md").read()
+    base = {"lead_id": "a", "what_happened": "w", "why_not_paid": "y", "community_note": "none",
+            "primary_cause": "Lead: cannot afford it now", "contributing": [], "savable": "No",
+            "expect_payment": "Not expected", "counselling": "Good"}
+    read = tmp_path / "read.jsonl"
+    read.write_text(json.dumps({**base, "calls_read": [{"n": 2, "gist": "first collection call"}]}) + "\n")
+    assert cr.check_reading(str(read), f"{folder}/batch_01.jsonl") == ["line 1: calls_read is missing call(s) [1]"]
+    read.write_text(json.dumps({**base, "calls_read": [{"n": 1, "gist": "booking"}, {"n": 2, "gist": "first call"}]}) + "\n")
+    assert cr.check_reading(str(read), f"{folder}/batch_01.jsonl") == []
+
+
+def test_full_batches_are_sized_by_text():
+    item = lambda lid, size: {"lead_id": lid, "dossier": "", "transcripts": [{"text": "x" * size}]}  # noqa: E731
+    out = cr.batches_by_size([item("a", 150_000), item("b", 120_000), item("c", 40_000), item("d", 50_000)], full=True)
+    assert [[i["lead_id"] for i in b] for b in out] == [["a"], ["b", "d"], ["c"]]   # largest first
