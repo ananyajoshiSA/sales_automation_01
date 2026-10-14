@@ -1,5 +1,5 @@
-import { describe, expect, it } from "vitest";
-import worker from "../src/index";
+import { describe, expect, it, vi } from "vitest";
+import worker, { OFF_MESSAGE } from "../src/index";
 import { MAX_RANGE_DAYS, parseRange, runAuthorized, serveSummary } from "../src/routes";
 import { countReads, recordError, usersDue, utcDay } from "../src/tasks";
 import type { Env } from "../src/tasks";
@@ -125,5 +125,41 @@ describe("users refresh", () => {
     env.DB.sqlite.prepare("UPDATE sync_state SET cursor = ?, last_error = NULL WHERE task = 'users'")
       .run(new Date().toISOString().slice(0, 19).replace("T", " "));
     expect(await usersDue(env.DB)).toBe(false); // fresh success
+  });
+});
+
+describe("switched off (DASHBOARD_OFF = 1)", () => {
+  it("closes every page and API route, health and run included", async () => {
+    const env = mkEnv({ DASHBOARD_OFF: "1", ACCESS_LOCAL_DEV: "1", RUN_TOKEN: "s3cret" });
+    for (const path of ["/api/summary", "/api/health", "/api/ci/ranges"]) {
+      const r = await call(env, path);
+      expect(r.status).toBe(503);
+      expect(await r.json()).toMatchObject({ error: OFF_MESSAGE, off: true });
+    }
+    const run = await call(env, "/api/run?task=calls_out", { method: "POST", headers: { Authorization: "Bearer s3cret" } });
+    expect(run.status).toBe(503);
+    const page = await call(env, "/");
+    expect(page.status).toBe(503);
+    expect(await page.text()).toContain(OFF_MESSAGE);
+  });
+
+  it("makes the cron do nothing: no LeadSquared call, no D1 write", async () => {
+    const env = mkEnv({ DASHBOARD_OFF: "1" });
+    const fetchSpy = vi.spyOn(globalThis, "fetch");
+    const waits: Promise<unknown>[] = [];
+    await worker.scheduled({ scheduledTime: Date.UTC(2026, 9, 14, 10, 0), cron: "* * * * *" } as ScheduledController,
+      env, { waitUntil: (p: Promise<unknown>) => waits.push(p) } as unknown as ExecutionContext);
+    await Promise.all(waits);
+    expect(waits).toHaveLength(0);
+    expect(fetchSpy).not.toHaveBeenCalled();
+    expect(rowsIn(env, "write_budget")).toBe(0);
+    fetchSpy.mockRestore();
+  });
+
+  it("serves the static page through ASSETS when on", async () => {
+    const env = mkEnv({ ASSETS: { fetch: async () => new Response("page") } as unknown as Fetcher });
+    const r = await call(env, "/index.html");
+    expect(r.status).toBe(200);
+    expect(await r.text()).toBe("page");
   });
 });

@@ -1,5 +1,13 @@
 # Sales dashboard (Cloudflare free tier)
 
+> **Switched off since 14 Oct 2026** (user's request). `wrangler.jsonc` has no cron trigger and sets
+> `DASHBOARD_OFF` to `"1"`, so the Worker never reads LeadSquared or writes to D1, every page shows
+> "The sales dashboard is switched off." and every `/api/*` route (health and run included) answers 503.
+> The D1 data is kept, frozen at the moment of the switch. To switch it back on, restore
+> `"crons": ["* * * * *"]`, set `DASHBOARD_OFF` to `"0"` and push to main. Days missed while it was off
+> need a reload with `scripts/d1_backfill.py` (the live sync skips enrolments older than 7 days and
+> loses each lead's last caller after 3 days); that writes to the live database, so it waits for the user's go.
+
 Live dashboard for leads, first-time enrollments, calling activity, lagging callers, dialer
 problems and Zipteams call quality. Runs entirely on Cloudflare's free plan: one Worker, one D1
 database, one cron trigger and static assets, behind Cloudflare Access.
