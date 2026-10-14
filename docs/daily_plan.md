@@ -66,8 +66,8 @@ everything again (about 20 min), for example after a gap of several days or if a
 ```
 
 The report covers callers dialling or not, P/A leads tried and reached, every priority lead's status (untouched, tried,
-reached), missed calls not returned, callbacks due or overdue, leads enrolled today, lines
-hiding failures, and the to-do list for the next block. It needs no Claude judgement. If the morning state is missing,
+reached), missed calls not returned, callbacks due or overdue, leads enrolled today, and the to-do list for the next block. It needs no Claude judgement. A 0-second unanswered call is not a line fault: the Airtel and Jio lines log a lead
+who didn't pick up as CallFailure at 0 seconds. If the morning state is missing,
 the report still shows the team numbers and says the plan was not found.
 
 ## Nightly pipeline (22:00, every day)

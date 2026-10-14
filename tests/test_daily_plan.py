@@ -483,3 +483,14 @@ def test_revival_pool_history_shortlist_and_ranking(tmp_path):
     assert revival.band(25) == "High" and revival.band(4) == "Reject"
     assert "L" not in json.dumps(revival.to_state("2026-10-13", [{**r, "lead_id": "L1"} for r in rows[:1]])["leads"])
     assert len(revival.batches([{"owner": "A", "lead_id": str(i), "size": 1000} for i in range(65)])) == 3
+
+
+def test_dossier_reads_a_zero_second_callfailure_note_as_not_picked_up(tmp_path):
+    from analytics.daily_plan import dossiers
+
+    cs = [dict(call("u1", "L1", "2026-10-09 05:00:00"), call_notes="CallFailure"),
+          dict(call("u1", "L1", "2026-10-09 06:00:00", "CallFailure"), call_notes="Network error")]
+    dossiers.build(snap(cs), "2026-10-09", {"L1"}, {}, {}, str(tmp_path))
+    text = (tmp_path / "L1.txt").read_text()
+    assert "NotAnswered 0s" in text and "note: CallFailure" not in text   # the lead didn't pick up; not a line fault
+    assert "note: Network error" in text                                    # a real failure keeps its note

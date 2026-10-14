@@ -131,9 +131,7 @@ def missed(snap: Snap, day: str, stats: dict, prev_plan: dict, reads: dict) -> d
         if re.search(r"call-?back.{0,40}(never|not made|missed|late)|promised.{0,40}(never|not)|ring-?back.{0,20}missed", txt, re.I):
             broken.append({"name": r.get("name"), "owner": r.get("owner"), "what": (r.get("friday_summary") or "")[:200]})
     unreturned = {n: v["missed_unreturned"] for n, v in stats["callers"].items() if v["missed_unreturned"]}
-    hidden_lines = {n: v["zero_sec_pct"] for n, v in stats["callers"].items() if v["dials"] and v["zero_sec_pct"] >= 50}
-    return {"not_dialled": not_dialled, "long_no_ask": long_no_ask, "broken_callbacks": broken, "unreturned": unreturned,
-            "lines": hidden_lines}
+    return {"not_dialled": not_dialled, "long_no_ask": long_no_ask, "broken_callbacks": broken, "unreturned": unreturned}
 
 
 def active_plan(snap: Snap, day: str, plan: dict) -> dict:

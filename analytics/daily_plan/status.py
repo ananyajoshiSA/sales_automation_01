@@ -72,7 +72,6 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     timed = [p for p in pri if p["group"] == 2 and p["status"] != "reached"]
     overdue = [p for p in timed if not (len(p["check_by"]) == 5 and p["check_by"][2] == ":") or p["check_by"] <= hm]
     later = [p for p in timed if p not in overdue]
-    lines = [n for n, v in st["callers"].items() if v["dials"] >= 20 and v["zero_sec_pct"] >= 50]
     fresh = leadflow.rows(snap, date, date)
     fresh_wait = [x for x in fresh if x["mins"] is None]
     fresh_tried = [x for x in fresh if x["mins"] is not None and not x["reached"]]
@@ -107,8 +106,6 @@ def build(snap: Snap, date: str, plan: dict, enrolled: list[dict], leader: str) 
     if enr_today:
         todo.append(f"Moved to Course Enrolled today ({len(enr_today)}; Rs 10 bootcamp registrations are not enrollments — check the note): "
                     + "; ".join(f"{e['name']} ({e['owner'].split()[0]}, by {e['by'] or '?'}{', note: ' + e['comment'][:40] if e['comment'] else ''})" for e in enr_today) + ".")
-    if lines:
-        todo.append(f"Lines: most non-answers log as 0 seconds for {', '.join(lines)} — switch them to the +91 8065 pool.")
     low_sheet = [f"{n.split()[0]} {v['on_sheet_pct']}%" for n, v in st["callers"].items() if v["dials"] >= 20 and v["on_sheet_pct"] < 60]
     if low_sheet:
         todo.append("Below 60% of dials on the sheet: " + ", ".join(low_sheet) + ". Sheet leads first; old leads only after 16:00.")

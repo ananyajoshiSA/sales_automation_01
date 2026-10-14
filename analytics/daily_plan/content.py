@@ -150,13 +150,9 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     sb = facts.get("stats_before") or {}
     TB = sb.get("team", {}) if sb else {}
     M = facts["missed"]
-    lines = M["lines"]
     followed = [
         ["09:45 Attendance", _yn(not T["absent"], len(T["absent"]) <= 1),
          ("Everyone dialled." if not T["absent"] else f"No calls from: {', '.join(T['absent'])}.")],
-        ["09:50 Working lines", _yn(not lines, False),
-         ("No line problems seen." if not lines else "Most non-answers logged as 0 seconds (line may be failing): "
-          + ", ".join(f"{k} {v}%" for k, v in lines.items()) + ".")],
         ["10:00 Return missed calls first", _yn(T["inbound_missed"] <= T["inbound"] * 0.3, T["inbound_missed"] < T["inbound"] * 0.7),
          f"{T['inbound_missed']} of {T['inbound']} calls from leads were missed."],
         ["10:30–11:30 Tier A block, redial in 10–15 min", _yn(T["a_total"] and T["a_tried"] == T["a_total"] and T["a_redial15"] >= T["a_first_unanswered"] * 0.7, T["a_tried"] >= T["a_total"] * 0.6),
@@ -199,8 +195,6 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     if M["unreturned"]:
         missed_list.append(("Leads who rang us and were not called back", f"{T['inbound_missed']} of {T['inbound']} inbound calls missed. Unreturned by owner: "
                             + ", ".join(f"{k} {v}" for k, v in sorted(M["unreturned"].items(), key=lambda kv: -kv[1])) + "."))
-    if lines:
-        missed_list.append(("Lines", "Callers whose non-answers mostly log as 0 seconds: " + ", ".join(lines) + ". Move them to a line that shows failures."))
     if facts.get("paid_unstaged"):
         missed_list.append(("Paid earlier, stage still not Course Enrolled", "; ".join(f"{x['name']} ({x['owner']})" for x in facts["paid_unstaged"][:10])
                             + ". Not new enrollments; move them to Course Enrolled and hand the balance to admissions."))
@@ -209,8 +203,8 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
     cbs = [p for p in pri if p["group"] == 2]
     checks = [
         ["09:30", "Payment links, EMI sheets and the Rs 3,000 seat-block link ready for every program on the P/A lists.", "Get missing links from ops before 10:00."],
-        ["09:45", "Attendance and lines." + (f" Yesterday no calls from {', '.join(T['absent'])}." if T["absent"] else "")
-         + (f" Lines hiding failures: {', '.join(lines)}." if lines else ""), "Absent → their P/A leads go to the callers present, with a note. Bad line → telephony now."],
+        ["09:45", "Attendance." + (f" Yesterday no calls from {', '.join(T['absent'])}." if T["absent"] else ""),
+         "Absent → their P/A leads go to the callers present, with a note."],
         ["10:00", f"Missed calls returned first ({sum(1 for rs in S.values() for r in rs if r.get('missed'))} leads in the M rows).", "Unreturned at 10:30 → reassign."],
         ["11:30", "Every Tier A lead dialled at least twice (2nd dial within 15 min of the first).", "Filter each sheet: Tier = A, attempts blank → ask why, now."],
         ["12:00", "Payments promised for today done? " + (", ".join(p["name"] for p in promised[:10]) or "Group 1 leads") + ".",

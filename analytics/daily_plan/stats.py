@@ -51,7 +51,6 @@ def day_stats(snap: Snap, date: str, sheet: dict[str, dict] | None = None, until
             "missed_in": len(missed), "missed_unreturned": len(unret), "missed_ret15": len(ret15),
             "unreturned_leads": sorted({c["lead_id"] for c in unret}),
             "lines": dict(Counter((c.get("display_number") or "?").replace("+", "").replace("-", "") for c in dials)),
-            "zero_sec_pct": round(100 * sum(c["status"] != "Answered" and not c["duration"] for c in dials) / n) if n else 0,
         }
     team_out = [c for c in day if c["direction"] == "outbound" and c.get("user_id") in snap.users]
     hours = defaultdict(lambda: [0, 0])

@@ -54,6 +54,8 @@ def build(snap: Snap, day: str, lead_ids: set[str], prev_plan: dict, tx: dict, o
         L.append("CALLS (IST):")
         for c in cs:
             note = (c.get("call_notes") or "").strip()
+            if c["status"] == "NotAnswered" and note == "CallFailure":
+                note = ""  # the Airtel and Jio lines note a lead who didn't pick up as CallFailure, at 0 seconds
             L.append(f"  {c['t'].strftime('%a %d %b %H:%M')} {c['direction'][:3]} {c['status']} {c['duration']}s by "
                      f"{c.get('caller') or snap.users.get(c.get('user_id'), '?')} line {c.get('display_number') or '-'}"
                      + (f" | note: {note[:200]}" if note not in ("", "Missed", "Answered", "NotAnswered") else ""))
