@@ -3,7 +3,7 @@
 Reads the leads to cover (``lead_id``, ``booked_ist`` 'YYYY-MM-DD HH:MM') and the search output of
 ``scripts/fetch_collection_transcripts.py``. A number needs generation when it has an answered call of 60 s or
 more, from two days before the booking on, with no transcript text. Numbers are sent 10 to a request, 9 requests
-to a run (one ``TranscriptClient`` per run), 7 s between requests and 60 s between runs. Each number sent is
+to a run (one ``TranscriptClient`` per run), 20 s between requests and 60 s between runs. Each number sent is
 logged to ``log`` with the time, and a number already in the log is not sent again.
 
 Generation takes a while on the API's side: search the numbers again later and merge, the later search winning.
@@ -25,7 +25,7 @@ from integrations.timeutil import IST, now_utc
 from integrations.transcripts import TranscriptClient
 from integrations.transcripts.client import MAX_NUMBERS_PER_REQUEST, MAX_REQUESTS_PER_RUN, TranscriptError
 
-REQUEST_GAP = 7
+REQUEST_GAP = 20   # the generate endpoint takes 5 requests a minute (HTTP 429 above); retries count too
 RUN_GAP = 60
 MIN_SECONDS = 60
 
