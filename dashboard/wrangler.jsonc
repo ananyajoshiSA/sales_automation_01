@@ -6,15 +6,18 @@
   // account can't land the Worker there.
   "account_id": "5f3e897557136f4ccbe8d884329f1c58",
   "main": "src/index.ts",
-  // Served at https://sales-automation-01.<subdomain>.workers.dev, behind Cloudflare Access.
-  "workers_dev": true,
+  // Cloudflare switched off 2026-10-14: no workers.dev address, so even a direct `wrangler deploy` leaves
+  // nothing reachable. To switch back on set true (https://sales-automation-01.<subdomain>.workers.dev,
+  // behind Cloudflare Access).
+  "workers_dev": false,
   // No per-version preview URLs: they would be extra hostnames without the Access policy.
   "preview_urls": false,
   "compatibility_date": "2025-09-01",
-  // Free tier: one cron trigger (5 allowed per account); each run does one small task.
-  "triggers": { "crons": ["* * * * *"] },
-  // Dashboard page: static assets are free and don't invoke the Worker.
-  "assets": { "directory": "./public" },
+  // Switched off 2026-10-14 (user's request): no cron, so nothing reads LeadSquared. To switch back on,
+  // restore ["* * * * *"] (one small task per run) and set DASHBOARD_OFF to "0".
+  "triggers": { "crons": [] },
+  // Dashboard page. The Worker runs first on every request so DASHBOARD_OFF can close the page too.
+  "assets": { "directory": "./public", "binding": "ASSETS", "run_worker_first": true },
   "d1_databases": [
     {
       "binding": "DB",
@@ -25,6 +28,8 @@
     }
   ],
   "vars": {
+    // "1" switches the whole dashboard off: no sync, every page and /api/* route says it is switched off.
+    "DASHBOARD_OFF": "1",
     "LEADSQUARED_HOST": "api-in21.leadsquared.com",
     "CALL_RECORDS_PER_RUN": "200",
     "CALL_PAGE_SIZE": "100",

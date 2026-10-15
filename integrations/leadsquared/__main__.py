@@ -6,6 +6,7 @@
     python -m integrations.leadsquared users
     python -m integrations.leadsquared lead-by-email someone@example.com
     python -m integrations.leadsquared leads-by-group "Team Elite Calling" exports/elite.csv
+    python -m integrations.leadsquared admission      # shared request gate: use, budgets left, deferrals (no API call)
 """
 
 import csv
@@ -61,6 +62,8 @@ def main(argv: list[str]) -> int:
         elif cmd == "users":
             for u in client.get_users():
                 print(f"{u.get('ID')}  {u.get('FirstName', '')} {u.get('LastName', '')}  {u.get('EmailAddress', '')}")
+        elif cmd == "admission":
+            print(json.dumps(client.admission.status(), indent=2))
         elif cmd == "leads-by-group" and len(args) == 2:
             export_group_leads(client, *args)
         elif cmd == "lead-by-email" and args:

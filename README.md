@@ -25,6 +25,19 @@ variables in the environment settings instead.
 | `LEADSQUARED_HOST` | API host, bare (`api-in21.leadsquared.com`) or full base URL; default `https://api-in21.leadsquared.com/v2/` |
 | `LEADSQUARED_ACCESS_KEY` | Access key (Settings → API and Webhooks) |
 | `LEADSQUARED_SECRET_KEY` | Secret key |
+| `LEADSQUARED_COOLDOWN_SECONDS` | Pause after each request before the next starts; default `6`, `0` = no pause. Must be a finite number, 0 or more |
+| `LEADSQUARED_MAX_REQUESTS_PER_WINDOW`, `LEADSQUARED_WINDOW_SECONDS` | At most this many requests start in any window of this many seconds; default 10 in 5 s, `off` turns it off |
+| `LEADSQUARED_MAX_REQUESTS_PER_HOUR`, `..._PER_DAY`, … | Optional budgets and other gate settings, all off or defaulted unless set: see [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md#settings) |
+
+**Load control.** Every LeadSquared request from Python, retries included, goes through one gate shared by
+every thread and process on this machine (a SQLite file in `data/leadsquared/`). One request runs at a time,
+each starts 6 s after the last one finished, never more than 10 start in any 5 seconds, a 429's `Retry-After` holds everyone, and optional hourly and
+daily budgets can be set. When a wait would pass 5 minutes or a budget is used up, the request isn't sent and
+the client raises `AdmissionDeferred` with the next time it can go. Per-lead scans take about 6.5 s per lead
+(1,000 leads is about 1 hour 50 minutes). First enrolments are stored once read, so overlapping report runs don't
+re-read them. Other machines and the dashboard Worker don't share the gate, so run LeadSquared fetches from
+one machine. Settings, deferral handling, gaps and rollback: [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md).
+`python -m integrations.leadsquared admission` shows the gate's state and budgets.
 
 ```python
 from integrations.leadsquared import LeadSquaredClient
@@ -162,13 +175,28 @@ is IST text; `leads_for_ist_days` handles both. A GrowthX "Paid" row is a bootca
 
 ## Live dashboard
 
+**Switched off, with all of Cloudflare, since 14 Oct 2026**: nothing deploys or writes there
+([dashboard/README.md](dashboard/README.md) says how to switch back on).
 [dashboard/](dashboard/) is a Cloudflare Worker (free tier) that pulls LeadSquared every minute and
 shows leads, first-time enrollments, calling activity, lagging callers, dialer issues and Zipteams
 call quality. Setup, limits and definitions: [dashboard/README.md](dashboard/README.md).
 History is loaded with `scripts/d1_backfill.py`.
 
+## Email a report on request
+
+In the conversation that made a report, type `/email-report` or say "email this report". The
+[email-report skill](.claude/skills/email-report/SKILL.md) runs `scripts/email_report.py`, which sends the
+finished PDF, Excel or CSV file to a Google Apps Script mailer ([email_report/](email_report/)) in your
+Workspace account. The mailer emails it once to the approved recipients. Nothing is sent when a report is
+generated. Setup, step by step: [docs/email_report.md](docs/email_report.md).
+
+| Variable | Description |
+|---|---|
+| `REPORT_EMAIL_URL`, `REPORT_EMAIL_TOKEN` | The mailer's web app `/exec` address and its upload token |
+
 ## Tests
 
 ```bash
 .venv/bin/python -m pytest
+node --test email_report/code.test.mjs   # the mailer, against fake Google services
 ```

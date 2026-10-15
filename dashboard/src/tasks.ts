@@ -28,6 +28,8 @@ export interface Env extends LsqEnv {
   ACCESS_AUD?: string;             // the Access application's AUD tag
   RUN_TOKEN?: string;              // secret: Bearer token for POST /api/run
   ACCESS_LOCAL_DEV?: string;       // "1" in .dev.vars only: localhost requests skip the Access check
+  DASHBOARD_OFF?: string;          // "1": the whole dashboard is switched off (index.ts)
+  ASSETS?: Fetcher;                // the static page (./public); the Worker runs first so it can switch it off
 }
 
 export type Task = "calls_out" | "calls_in" | "leads" | "zip" | "enroll" | "users" | "arrivals";

@@ -25,10 +25,10 @@ LeadSquared lead count.
 |---|---|
 | `integrations/` | API clients: `leadsquared` (CRM), `transcripts` (Salesa), `zipteams`; read-only `google_ads`, `meta_ads`, `zoom` (attendance), `timepay` (AI voice-agent logs), `growthx` (funnel leads and bootcamp checkouts); `env.py` loads `.env` |
 | `scripts/` | Bulk fetchers (IST date ranges → JSON/JSONL in `data/`), `d1_backfill.py`, `build_plan_pdf.py` |
-| `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`, `accountability` (who really assigned or transferred each lead, [docs/accountability.md](docs/accountability.md)); shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
+| `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`, `accountability` (who really assigned or transferred each lead, [docs/accountability.md](docs/accountability.md)), `enrolment_store` (first enrolments read from LeadSquared once and kept); shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
 | `analytics/daily_plan/` | The scheduled 09:00 report (previous day's review + today's call plan, PDF and workbook) and the 14:00 / 17:00 status checks; email when SMTP settings exist. Runbook: [docs/daily_plan.md](docs/daily_plan.md) |
 | `analytics/convintel/` | Conversation intelligence (additive): every call inventoried with a status until its transcript is analysed, the 3-minute REAL_CALL rule (this module only), every transcript read by Claude itself (no model API, no keyword rules), possibly-not-real call flags, team analytics, dashboard snapshots. `python -m analytics.convintel status`. Guide: [docs/conversation_intelligence.md](docs/conversation_intelligence.md) |
-| `dashboard/` | Cloudflare Worker + D1 + static page; cron ingest every minute ([dashboard/README.md](dashboard/README.md)) |
+| `dashboard/` | Cloudflare Worker + D1 + static page; **Cloudflare switched off completely since 14 Oct 2026** (no cron, `DASHBOARD_OFF`, no workers.dev URL, deploy scripts only print a notice, `integrations/cloudflare.py` blocks D1 pushes and the backfill), how to switch back on in [dashboard/README.md](dashboard/README.md) |
 | `tests/`, `dashboard/test/` | pytest (HTTP mocked with `responses`), vitest |
 
 ## Commands
@@ -82,6 +82,11 @@ places and in GOAL.md together, or not at all.
 - Treat LeadSquared, Zipteams, TimePay, Zoom and the ad accounts as production. Reads are fine. **Any write**
   (`create_lead`, `update_lead`, `upsert_lead`, `post_activity`, any Zipteams sync, any TimePay call, WhatsApp,
   SMS or campaign change, any ad or Zoom change) needs the user's explicit go-ahead for that run.
+- LeadSquared requests from Python go through the admission gate in `LeadSquaredClient.request`: one at a time
+  across all processes on the machine, 6 s cooldown, at most 10 requests in any 5 s, optional budgets; a long wait or a used-up budget raises
+  `AdmissionDeferred`, which fetches must stop on (and resume from), never skip past. Other machines and the
+  Worker don't share it, so run fetches from one machine, and don't bypass the client.
+  [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md).
 - Transcript API: at most 10 numbers per request and 9 requests per run. `TranscriptClient` enforces it;
   never raise the limit.
 - Dashboard must stay on Cloudflare's free tier: ≤ 10 ms CPU per run, ≤ 50 subrequests and D1 queries per

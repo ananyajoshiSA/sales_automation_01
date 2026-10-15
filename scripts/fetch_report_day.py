@@ -1,7 +1,8 @@
 """Fetch everything the daily team performance report (Parameters v1.0) needs for one IST day.
 
 Writes data/report_{DATE}/: meta.json, users.json, calls.json (S1), zip.json (S3),
-enrollments.json (S4: first-ever "Course Enrolled" inside the conversion window) and
+enrollments.json (S4: first-ever "Course Enrolled" inside the conversion window, through
+``analytics.enrolment_store``) and
 payments.json (S6). Read-only against LeadSquared. Activities are read with a 3-day edit margin and kept
 by their start (``CreatedOn``), because the API filters on the last edit (``iter_activities_started``).
 
@@ -16,12 +17,12 @@ import os
 import sys
 from datetime import datetime, timedelta
 
-from analytics.team_performance import ENROLLED, first_enrollment
+from analytics.enrolment_store import ScanStats, scan_since
 from analytics.zip_calls import ZIP_LATE_WINDOW
 from integrations.leadsquared import PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, format_datetime, parse_phone_call
-from integrations.timeutil import EDIT_MARGIN, IST, ist_day_start, now_utc, utc
+from integrations.timeutil import EDIT_MARGIN, IST, ist_day_start, now_utc
 
-ZIP_NOTES, PAYMENT_SUCCESS, STAGE_CHANGE = 237, 213, 3002
+ZIP_NOTES, PAYMENT_SUCCESS = 237, 213
 
 
 def log(*a):
@@ -61,21 +62,13 @@ def main():
     w("payments.json", pays)
     log("payments", len(pays))
 
-    # S4: leads now in Course Enrolled, newest edit first; a lead first enrolled in the window was edited then too.
-    enrolled, scanned = [], 0
-    for l in c.iter_leads("ProspectStage", ENROLLED, columns=["ProspectID", "ModifiedOn", "OwnerId", "OwnerIdName"],
-                          sort_by="ModifiedOn", page_size=1000):
-        mod = utc(l.get("ModifiedOn"))
-        if mod and mod < d0:
-            break
-        scanned += 1
-        hist = (c.get_lead_activities(l["ProspectID"], activity_event=STAGE_CHANGE, row_count=100) or {}).get("ProspectActivities") or []
-        first = first_enrollment(hist)
+    # S4: leads now in Course Enrolled edited since d0; first enrolments already known aren't read again.
+    enrolled, stats = [], ScanStats()
+    for l, first, _ in scan_since(c, d0, ["ProspectID", "ModifiedOn", "OwnerId", "OwnerIdName"], stats):
         if first and d0 <= first <= cw_end:
             enrolled.append({**l, "enrolled_at": format_datetime(first)})
     w("enrollments.json", enrolled)
-    log(f"scanned {scanned} enrolled leads, {len(enrolled)} first enrollments in window -> {out}")
-
+    log(f"{stats}, {len(enrolled)} first enrollments in window -> {out}")
 
 if __name__ == "__main__":
     main()

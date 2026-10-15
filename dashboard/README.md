@@ -1,5 +1,24 @@
 # Sales dashboard (Cloudflare free tier)
 
+> **Cloudflare is switched off completely since 14 Oct 2026** (user's request). Nothing in the repo
+> deploys to or writes to Cloudflare:
+> - `wrangler.jsonc` has no cron, sets `DASHBOARD_OFF` to `"1"` (every page and `/api/*` route answers
+>   503 "switched off", nothing reads LeadSquared or writes to D1) and `workers_dev` to `false`, so even a
+>   direct `wrangler deploy` leaves no public address.
+> - `npm run deploy`, `deploy:prod` and `db:migrate:remote` only print a notice, so a Workers Build on a
+>   push to main succeeds without deploying. The builds themselves keep running until Git is disconnected
+>   in Cloudflare (Workers & Pages → sales-automation-01 → Settings → Builds), which only the account owner can do.
+> - `SWITCHED_OFF` in `integrations/cloudflare.py` makes `analytics.convintel.d1push --push` and
+>   `scripts/d1_backfill.py` stop before any request.
+>
+> The Worker last deployed (the 503 "switched off" version) and the D1 data stay in the account until someone
+> deletes them there. **To switch back on:** set `SWITCHED_OFF = False`; restore the scripts
+> (`"deploy": "wrangler deploy"`, `"deploy:prod": "wrangler d1 migrations apply sales_dashboard --remote && wrangler deploy"`,
+> `"db:migrate:remote": "wrangler d1 migrations apply sales_dashboard --remote"`); set `workers_dev` to `true`,
+> `"crons": ["* * * * *"]` and `DASHBOARD_OFF` to `"0"`; push to main. Days missed while it was off need a
+> reload with `scripts/d1_backfill.py` (the live sync skips enrolments older than 7 days and loses each
+> lead's last caller after 3 days); that writes to the live database, so it waits for the user's go.
+
 Live dashboard for leads, first-time enrollments, calling activity, lagging callers, dialer
 problems and Zipteams call quality. Runs entirely on Cloudflare's free plan: one Worker, one D1
 database, one cron trigger and static assets, behind Cloudflare Access.

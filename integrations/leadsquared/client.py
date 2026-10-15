@@ -7,17 +7,30 @@ Credentials are read from the environment, never hard-coded:
     LEADSQUARED_HOST        e.g. api-in21.leadsquared.com or https://api-in21.leadsquared.com/v2/
     LEADSQUARED_ACCESS_KEY
     LEADSQUARED_SECRET_KEY
+
+Every HTTP attempt (retries included) first takes a slot from the shared admission gate
+(``admission.py``): one attempt at a time per LeadSquared account across the Python processes on this
+machine, a cooldown after each (default 6 s), at most 10 starts in any 5 s, optional request and record budgets,
+and Retry-After holds.
+It limits this integration's demand on LeadSquared; it doesn't cut the number of requests a job needs.
+Settings and limits: docs/leadsquared_load_control.md.
 """
 
 from __future__ import annotations
 
+import math
 import os
 import time
 from datetime import datetime, timedelta, timezone
-from typing import Any, Iterable, Iterator, Mapping
+from email.utils import parsedate_to_datetime
+from typing import Any, Callable, Iterable, Iterator, Mapping
 
 import requests
 
+from integrations.leadsquared import admission as _admission
+from integrations.leadsquared.admission import (
+    AdmissionDeferred as _Deferred, CoordinatorUnavailable as _Unavailable, endpoint_category, requested_records,
+)
 from integrations.timeutil import EDIT_MARGIN, now_utc, utc
 
 DEFAULT_HOST = "https://api-in21.leadsquared.com/v2/"
@@ -40,6 +53,23 @@ class LeadSquaredError(Exception):
         super().__init__(message)
         self.status_code = status_code
         self.payload = payload
+
+
+class AdmissionDeferred(LeadSquaredError):
+    """Nothing was sent: a request budget is used up, or the wait for a slot would be too long.
+
+    ``next_eligible`` (UTC datetime, or None if no time is known) says when to try again; ``reason`` says why.
+    Jobs should stop, keep their checkpoint and report the deferral, not record the work as done.
+    """
+
+    def __init__(self, message: str, reason: str = "", next_eligible: datetime | None = None):
+        super().__init__(message)
+        self.reason = reason
+        self.next_eligible = next_eligible
+
+
+class CoordinatorUnavailable(LeadSquaredError):
+    """The shared admission store can't be used, so nothing was sent (there is no unpaced fallback)."""
 
 
 def to_attributes(fields: Mapping[str, Any]) -> list[dict[str, Any]]:
@@ -112,6 +142,26 @@ def format_datetime(dt: datetime) -> str:
     return dt.strftime("%Y-%m-%d %H:%M:%S")
 
 
+def retry_after_seconds(value: str | None, now_wall: Callable[[], float] = time.time) -> float | None:
+    """Seconds to wait from a ``Retry-After`` header (whole seconds or an HTTP date); None if missing or malformed."""
+    value = (value or "").strip()
+    if value.isascii() and value.isdigit():
+        return float(value)
+    if not value:
+        return None
+    try:
+        when = parsedate_to_datetime(value)
+    except (TypeError, ValueError, IndexError):
+        return None
+    if when is None or when.tzinfo is None:
+        return None
+    return max(0.0, when.timestamp() - now_wall())
+
+
+def _status_class(code: int) -> str:
+    return "429" if code == 429 else f"{code // 100}xx"
+
+
 def _is_api_error(resp: requests.Response) -> bool:
     try:
         body = resp.json()
@@ -141,6 +191,12 @@ class LeadSquaredClient:
         self.timeout = timeout
         self.max_retries = max_retries
         self.session = session or requests.Session()
+        try:
+            # One gate per account, made once per process and shared by every client; never reset here.
+            self.admission = _admission.shared_admission(self.host, self.access_key)
+        except _admission.CoordinatorUnavailable as exc:
+            raise CoordinatorUnavailable(str(exc)) from exc
+        self.max_ids_per_bulk = self.admission.config.max_ids_per_bulk
 
     # ------------------------------------------------------------------ core
 
@@ -156,23 +212,51 @@ class LeadSquaredClient:
             query.update({k: v for k, v in params.items() if v is not None})
         url = self.host + path.lstrip("/")
 
+        lead_ids = (json.get("SearchParameters") or {}).get("LeadIds") \
+            if isinstance(json, dict) and isinstance(json.get("SearchParameters"), dict) else None
+        if isinstance(lead_ids, list) and len(lead_ids) > self.max_ids_per_bulk:
+            raise ValueError(f"{len(lead_ids)} lead IDs in one request; send at most {self.max_ids_per_bulk} "
+                             "(LEADSQUARED_MAX_IDS_PER_BULK_REQUEST) per request")
+        category, records = endpoint_category(path), requested_records(json)
+        gate, clock = self.admission, _admission.wall_clock
+        retry_at = -math.inf  # a retry's own earliest start (wall clock); the gate's deadline may be later
         for attempt in range(self.max_retries + 1):
+            failure = None
+            # The slot covers only the HTTP attempt: the body is read inside session.request (no streaming),
+            # and parsing and retry waits happen outside it.
             try:
-                resp = self.session.request(
-                    method, url, params=query, json=json, timeout=self.timeout
-                )
-            except requests.RequestException as exc:
+                with gate.slot(category, records, retry_at) as outcome:
+                    try:
+                        resp = self.session.request(
+                            method, url, params=query, json=json, timeout=self.timeout
+                        )
+                    except requests.RequestException as exc:
+                        failure = exc
+                        outcome["status"] = "network error"
+                    else:
+                        outcome["status"] = _status_class(resp.status_code)
+                        wait = retry_after_seconds(resp.headers.get("Retry-After"), clock)
+                        if resp.status_code == 429 and wait is not None:
+                            # Set before the slot is freed, so no other caller starts before LeadSquared allows.
+                            gate.hold_until(clock() + wait)
+            except _Deferred as exc:
+                raise AdmissionDeferred(str(exc), exc.reason, exc.next_eligible) from exc
+            except _Unavailable as exc:
+                raise CoordinatorUnavailable(str(exc)) from exc
+            if failure is not None:
                 if attempt < self.max_retries:
-                    time.sleep(2**attempt)
+                    retry_at = clock() + 2**attempt
                     continue
-                raise LeadSquaredError(f"{method} {path} failed: {exc}") from exc
+                # requests puts the full URL, keys included, in its message: strip them and drop the chained
+                # exception so neither a log nor a traceback shows them.
+                text = str(failure).replace(self.access_key, "***").replace(self.secret_key, "***")
+                raise LeadSquaredError(f"{method} {path} failed: {text}") from None
 
             # 429 = rate limited, 5xx = transient server error. LeadSquared also uses
             # 500 for validation errors (JSON body with Status=Error) — don't retry those.
             if (resp.status_code == 429 or (resp.status_code >= 500 and not _is_api_error(resp))) \
                     and attempt < self.max_retries:
-                retry_after = resp.headers.get("Retry-After")
-                time.sleep(float(retry_after) if retry_after and retry_after.isdigit() else 2**attempt)
+                retry_at = clock() + (2**attempt if wait is None else wait)
                 continue
             break
 
