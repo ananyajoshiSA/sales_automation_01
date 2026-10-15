@@ -25,8 +25,8 @@ bulk uploads are made from her login itself.
 
 ## The rules in code
 
-`analytics/accountability.py` (history, any date range) and `dashboard/src/accountability.ts` (live) apply
-the same rules. Evidence, strongest first:
+`analytics/accountability.py` (any date range) applies
+these rules. Evidence, strongest first:
 
 1. **Corrected**: a team leader confirmed who did it (`--corrections`, a CSV of `key,performed_by,confirmed_by,note`).
 2. **Verified**: the CRM's own record names a personal login (owner-change log, stage log, call log).
@@ -37,7 +37,7 @@ the same rules. Evidence, strongest first:
    name the field holds, or the last person who called the lead, is shown as a *name to check*, not proof.
 5. **Automated**: `System`.
 
-Shared logins default to `Rinku Jhala` and `Admin` (`--shared`, or `SHARED_ACCOUNTS` on the Worker).
+Shared logins default to `Rinku Jhala` and `Admin` (`--shared`).
 
 | Action | Accountable |
 |---|---|
@@ -53,8 +53,7 @@ transferred by, action performed by, current responsible person, action time (IS
 ## Audit trail
 
 `analytics.accountability` appends every new attribution and every later change (a correction, Assigned By
-filled in) to `audit.jsonl`, with the previous answer; the file is never rewritten. The Worker keeps the
-first answer next to the current one (`account_arrival.first_put_by`, `first_status`).
+filled in) to `audit.jsonl`, with the previous answer; the file is never rewritten.
 
 ## Running it
 
@@ -67,7 +66,3 @@ PYTHONPATH=. python -m analytics.accountability data/accountability/rj/leads.jso
 Without `--owner` it reads every lead whose Assigned On falls in the range (about 5,000 a day, one history
 request each). Output stays under `data/`: `actions.csv`, `leads.csv` (who put each lead in its account),
 `summary.md`.
-
-The dashboard checks shared-account arrivals at :15 and :45 past each hour (up to 8 leads a run), shows
-who put leads into each shared account, keeps shared logins out of the caller list, and labels enrolments
-on leads in a shared account as such.

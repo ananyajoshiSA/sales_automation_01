@@ -65,7 +65,7 @@ L#* or *lost after a complete process* (the benchmark). The primary leak is the 
 Thresholds sit in one place in code; unset ones are reported at several values.
 
 **Measurement loopholes to fix first:** M1 enrolment credited to current owner, not closer; M2 enrolment
-sync can skip or freeze; M3 Python and Worker define enrolment differently; M4 per-day averages inflated;
+sync can skip or freeze; M3 Python and Worker define enrolment differently (closed: the Worker was removed 15 Oct 2026); M4 per-day averages inflated;
 M5 callers under 20 dials vanish; M6 late-posted calls missed; M7 paging can skip records.
 
 ## 5. Track B: measuring the revenue each loophole costs
@@ -114,7 +114,7 @@ measures in section 3; guardrails: dialer issues, data-gap alarms.
 
 | # | Gap | Done when |
 |---|---|---|
-| G1 | Read event 213; revenue in D1 and dashboard | Revenue per caller, team, course, source |
+| G1 | Read event 213; revenue in the reports | Revenue per caller, team, course, source |
 | G2 | Nightly plan for every team, no hardcoding | Plan each morning, no manual edits |
 | G3 | Tier chances are guesses | Re-set from measured outcomes |
 | G4 | Speed to lead not alerted | Undialled fresh leads seen live |
@@ -132,7 +132,7 @@ lagging callers, leak scan. Monthly: revenue vs T0, loss report, recovery vs T7.
 
 ## 10. Constraints and non-goals
 
-- **Constraints:** read-only against LeadSquared and Zipteams; Cloudflare free tier; transcripts 9 × 10
+- **Constraints:** read-only against LeadSquared and Zipteams; transcripts 9 × 10
   per run; credentials in `.env`; lead data in `data/` and `exports/` only.
 - **Non-goals:** more leads, pricing, hiring, marketing.
 

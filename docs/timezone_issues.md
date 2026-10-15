@@ -114,5 +114,4 @@ check that fails if a module defines its own IST or calls `datetime.now()` witho
 Impact: the next report or script can't reintroduce a 5 h 30 m error unnoticed.
 
 Order: Fix 1 first (it changes the call counts every report uses), then Fix 2, then Fix 3. All three are
-Python-only. The dashboard Worker fetches by the same window and keeps by `CreatedOn` too
-(`dashboard/src/tasks.ts:79`), so it likely has issue 1; it is out of scope and left alone.
+Python-only. (The dashboard Worker, which likely had issue 1, was removed on 15 Oct 2026.)

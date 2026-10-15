@@ -5,6 +5,9 @@ clients and the dashboard Worker). No live data was available in this session, s
 about how leads, calls and enrolments are **selected, counted and credited**. Sizing each leak in rupees
 needs read-only LeadSquared and transcript access (section 8).*
 
+*15 Oct 2026: the Cloudflare dashboard (Worker, D1, `dashboard/`, `scripts/d1_backfill.py`) has been removed at
+the user's request. Findings and steps below that cite it are kept as history; they no longer apply.*
+
 ## 1. Bottom line
 
 The repo already pulls most of the data needed to raise enrolments. Revenue leaks through three kinds of

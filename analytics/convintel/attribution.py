@@ -2,7 +2,7 @@
 
 A call belongs to the user who made or took it and to that user's team when the call was inventoried: the first
 LeadSquared group that is not a calling-software group such as Acefone Users or Mcube Users
-(``analytics.definitions.team_of``, the rule the calling report and the main dashboard use). Shared admin logins
+(``analytics.definitions.team_of``, the rule the calling report uses). Shared admin logins
 (``SHARED_ACCOUNTS``, e.g. Rinku Jhala's) are never a person and LeadSquared automation is a bot: both stay in
 organisation totals and coverage but never in caller rankings.
 
@@ -30,7 +30,7 @@ _DIGITS = re.compile(r"\d")
 
 def safe_name(name: str | None) -> str | None:
     """Some calls name their caller by a phone number (a dialer line that is not a LeadSquared user); that name
-    is replaced, so no phone number travels with caller names into snapshots or the dashboard."""
+    is replaced, so no phone number travels with caller names into snapshots."""
     return NUMBER_NAME if name and len(_DIGITS.findall(name)) >= 7 else name
 
 

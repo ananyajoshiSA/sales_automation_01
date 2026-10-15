@@ -1,8 +1,8 @@
 """First-ever "Course Enrolled" times, read from LeadSquared once per lead and then kept.
 
-A lead's first enrolment does not change once it has happened, yet the daily report fetch, conversation
-intelligence and the D1 backfill each re-read the stage history of every lead in Course Enrolled edited since
-the start of their window, on every run. ``scan_since`` does that scan once for all three: it lists the leads
+A lead's first enrolment does not change once it has happened, yet the daily report fetch and conversation
+intelligence each re-read the stage history of every lead in Course Enrolled edited since the start of their
+window, on every run. ``scan_since`` does that scan once for both: it lists the leads
 now in Course Enrolled, newest edit first, back to ``d0``, and reads a lead's stage history (one request each)
 only when the store doesn't already know its first enrolment.
 

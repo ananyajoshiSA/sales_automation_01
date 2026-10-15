@@ -1,7 +1,7 @@
 """Module-only call classes: REAL_CALL is answered with at least 180 seconds of talk (requirement 02).
 
-The project-wide "real conversation" (analytics/definitions.py, the calling report v1.3 and the dashboard)
-stays at 2 minutes; this 3-minute rule is used only inside analytics/convintel and its own dashboard view,
+The project-wide "real conversation" (analytics/definitions.py and the calling report v1.3)
+stays at 2 minutes; this 3-minute rule is used only inside analytics/convintel and its own offline page,
 where it is always labelled "real calls (3+ min)".
 
 Talk time is LeadSquared's call ``Duration``. For answered calls the dialer logs the connected time; an

@@ -286,7 +286,7 @@ def test_every_flagged_call_of_every_tier_has_a_row_with_both_numbers_and_the_su
     by = {r["callerId"]: r for r in summary["byCaller"]}
     assert all(r["callIdsTotal"] == r["flagged"] + r["shortCalls"] for r in by.values())
     assert set(by["u1"]["callIds"]) == {"short", "short-empty", "real-empty", "unknown-empty", "model"}
-    text = json.dumps(summary) + json.dumps(fl)          # reasons reach the dashboard too
+    text = json.dumps(summary) + json.dumps(fl)          # reasons reach the snapshot too
     assert "9000000001" not in text and "8000000001" not in text
 
 

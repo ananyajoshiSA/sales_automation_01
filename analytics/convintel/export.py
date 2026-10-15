@@ -1,10 +1,10 @@
-"""Report export: the analysis dataset, the dashboard snapshot, and the files team leaders open.
+"""Report export: the analysis dataset, the snapshot, and the files team leaders open.
 
 For a period it reads the registry, then LeadSquared users, lead details, first enrolments, Zipteams notes and
 payment records (read-only; cached under data/convintel/sources/), puts each call's validated layer results and
-its Zipteams analysis on it, and assembles the snapshot the dashboard section shows. Files, under
+its Zipteams analysis on it, and assembles the snapshot the offline page shows. Files, under
 data/convintel/reports/<key>/ (git-ignored): snapshot.json, flagged_calls.csv (the calls that may not be real
-conversations, with reasons) and index.html (the dashboard section as one offline page). Verbatim transcript
+conversations, with reasons) and index.html (the snapshot as one offline page). Verbatim transcript
 excerpts are left out unless ``--excerpts`` is given.
 
     python -m analytics.convintel report FROM TO [--key 7d] [--excerpts] [--accountability DIR] [--out DIR]
@@ -185,7 +185,7 @@ def coverage_section(reg: Registry, calls: list[dict], day_from: str, day_to: st
 def snapshot(ds: dict, reg: Registry, key: str, label: str, prior: dict | None = None, excerpts: bool = False,
              config: dict | None = None, accountability_rows: list[dict] | None = None,
              audit: list[dict] | None = None, derived: dict | None = None) -> dict:
-    """The dashboard snapshot for one period (see the build contract's snapshot JSON). ``derived``, when given, is
+    """The snapshot for one period (see the build contract's snapshot JSON). ``derived``, when given, is
     filled with the full, uncapped rows that ``persist`` stores in the registry."""
     from analytics.convintel import coaching, crosscall, integrity, responsibility, revenue, team, zipcompare
     from analytics.convintel.reconcile import reconcile
@@ -262,7 +262,7 @@ def snapshot(ds: dict, reg: Registry, key: str, label: str, prior: dict | None =
             "semanticEngine": ("Claude, reading each transcript in a Claude Code session (no API)"
                                if any(c.get("sem") for c in calls) else
                                "Claude has not read this period's transcripts yet"),
-            "notes": ["A real call here is answered and at least 3 minutes. The main dashboard's 2-minute 'real "
+            "notes": ["A real call here is answered and at least 3 minutes. The calling report's 2-minute 'real "
                       "conversation' is unchanged.",
                       "Transcripts are analysed by Claude only: Claude reads each whole transcript, and every excerpt "
                       "it cites is checked word for word against the transcript before it is kept. A call counts "

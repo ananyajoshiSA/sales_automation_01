@@ -1,6 +1,6 @@
 """Command line for conversation intelligence (docs/conversation_intelligence.md). Read-only against LeadSquared and
 the transcript API. No model API is ever called: Claude reads the transcripts inside a Claude Code session
-(``read``, reading.py). D1 is written only by ``analytics.convintel.d1push --push --yes``.
+(``read``, reading.py).
 
     python -m analytics.convintel status [FROM TO]
     python -m analytics.convintel inventory FROM TO [--window 14:00-14:30]
