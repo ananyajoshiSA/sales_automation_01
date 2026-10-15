@@ -82,7 +82,7 @@ places and in GOAL.md together, or not at all.
   (`create_lead`, `update_lead`, `upsert_lead`, `post_activity`, any Zipteams sync, any TimePay call, WhatsApp,
   SMS or campaign change, any ad or Zoom change) needs the user's explicit go-ahead for that run.
 - LeadSquared requests from Python go through the admission gate in `LeadSquaredClient.request`: one at a time
-  across all processes on the machine, 6.5 s cooldown, optional budgets; a long wait or a used-up budget raises
+  across all processes on the machine, 6 s cooldown, at most 10 requests in any 5 s, optional budgets; a long wait or a used-up budget raises
   `AdmissionDeferred`, which fetches must stop on (and resume from), never skip past. Other machines and the
   Worker don't share it, so run fetches from one machine, and don't bypass the client.
   [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md).

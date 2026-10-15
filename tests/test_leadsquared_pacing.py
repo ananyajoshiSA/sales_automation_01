@@ -83,6 +83,36 @@ def test_zero_cooldown_still_one_at_a_time(fake_clock):
     assert s.starts == [0, 0, 0] and fake_clock.sleeps == []
 
 
+def test_at_most_10_requests_start_in_any_5_seconds(monkeypatch, fake_clock):
+    configure(monkeypatch, LEADSQUARED_MAX_REQUESTS_PER_WINDOW=10, LEADSQUARED_MAX_IN_FLIGHT=4)
+    s = StubSession(fake_clock)
+    c = mk(s)
+    for _ in range(25):
+        c.request("GET", "x")
+    assert s.starts == [0] * 10 + [5] * 10 + [10] * 5           # each window of 5 s holds at most 10 starts
+    assert c.admission.status()["settings"]["max_requests_per_window"] == 10
+
+
+def test_the_window_limit_counts_retries_and_rolls(monkeypatch, fake_clock):
+    configure(monkeypatch, LEADSQUARED_MAX_REQUESTS_PER_WINDOW=3, LEADSQUARED_WINDOW_SECONDS=5)
+    s = StubSession(fake_clock, replies=[(503, {}), (200, {})])
+    c = mk(s)
+    c.request("GET", "x")                                         # a 503 and its retry: two attempts
+    fake_clock.sleep(2)
+    c.request("GET", "x")
+    c.request("GET", "x")                                         # the 4th attempt waits for the first to age out
+    assert s.starts == [0, 1, 3, 5]
+
+
+def test_window_limit_off(monkeypatch, fake_clock):
+    configure(monkeypatch, LEADSQUARED_MAX_REQUESTS_PER_WINDOW="off")
+    s = StubSession(fake_clock)
+    c = mk(s)
+    for _ in range(15):
+        c.request("GET", "x")
+    assert s.starts == [0] * 15 and c.admission.status()["settings"]["max_requests_per_window"] == "off"
+
+
 @pytest.mark.parametrize("cooldown", [0, 4])
 def test_threads_and_separate_clients_never_overlap(monkeypatch, fake_clock, cooldown):
     configure(monkeypatch, LEADSQUARED_COOLDOWN_SECONDS=cooldown)
@@ -356,7 +386,7 @@ def test_cooldown_and_holds_survive_a_restart(monkeypatch, lsq_gate, fake_clock)
 
 # ------------------------------------------------------------------ configuration
 
-@pytest.mark.parametrize("raw,expected", [(None, 6.5), ("", 6.5), ("0", 0.0), ("2.5", 2.5)])
+@pytest.mark.parametrize("raw,expected", [(None, 6.0), ("", 6.0), ("0", 0.0), ("2.5", 2.5)])
 def test_cooldown_setting(monkeypatch, raw, expected):
     if raw is None:
         monkeypatch.delenv("LEADSQUARED_COOLDOWN_SECONDS", raising=False)
@@ -367,8 +397,10 @@ def test_cooldown_setting(monkeypatch, raw, expected):
 
 def test_defaults_leave_budgets_off_explicitly(monkeypatch):
     monkeypatch.delenv("LEADSQUARED_COOLDOWN_SECONDS", raising=False)
+    monkeypatch.delenv("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", raising=False)
     c = admission.AdmissionConfig.from_env()
-    assert (c.cooldown, c.max_in_flight, c.max_ids_per_bulk) == (6.5, 1, 250)
+    assert (c.cooldown, c.max_in_flight, c.max_ids_per_bulk) == (6.0, 1, 250)
+    assert (c.per_window, c.window) == (10, 5.0)
     assert (c.per_hour, c.per_day, c.records_per_day, c.endpoint_per_hour) == (None, None, None, {})
     monkeypatch.setenv("LEADSQUARED_MAX_REQUESTS_PER_HOUR", "off")
     monkeypatch.setenv("LEADSQUARED_ENDPOINT_HOURLY_BUDGETS", "lead_history=600, activity_bulk=200")
@@ -385,6 +417,8 @@ def test_defaults_leave_budgets_off_explicitly(monkeypatch):
     ("LEADSQUARED_MAX_ADMISSION_WAIT_SECONDS", "inf"), ("LEADSQUARED_MAX_IDS_PER_BULK_REQUEST", "0"),
     ("LEADSQUARED_ENDPOINT_HOURLY_BUDGETS", "history=5"), ("LEADSQUARED_ENDPOINT_HOURLY_BUDGETS", "lead_history"),
     ("LEADSQUARED_ACCOUNT_LABEL", "has spaces"),
+    ("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", "0"), ("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", "2.5"),
+    ("LEADSQUARED_WINDOW_SECONDS", "0"), ("LEADSQUARED_WINDOW_SECONDS", "nan"),
 ])
 def test_invalid_settings_are_refused(monkeypatch, name, raw):
     monkeypatch.setenv(name, raw)

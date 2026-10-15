@@ -9,8 +9,14 @@ git-ignored `data/` folder. This page says what it does, how to set it, what it 
 
 - **One request at a time** (`LEADSQUARED_MAX_IN_FLIGHT`, default 1) across every Python process using the
   same store, for the same LeadSquared account.
-- **A 6.5-second pause** after each request finishes before the next one starts (`LEADSQUARED_COOLDOWN_SECONDS`).
+- **A 6-second pause** after each request finishes before the next one starts (`LEADSQUARED_COOLDOWN_SECONDS`).
   The pause is kept in the store, so it survives a restart and is shared by processes.
+- **At most 10 requests start in any 5 seconds** (`LEADSQUARED_MAX_REQUESTS_PER_WINDOW`,
+  `LEADSQUARED_WINDOW_SECONDS`), retries included, on a rolling window. With the 6-second pause and one request
+  at a time this never binds (under 1 request per 5 s); it is the ceiling that still holds if the pause is lowered
+  or more requests are allowed at once. LeadSquared's own account limit is 35 per 5 s, so this keeps 25 per 5 s
+  free for other users of the account. It is per machine like the rest of the gate: two machines running at once
+  can each send 10.
 - **Retries go through the gate too.** A retry waits for the later of its own backoff (1, 2, 4 s) and the
   cooldown. A 429's `Retry-After` (seconds or an HTTP date) holds every caller, not just the one that got it.
   A hold is only ever lengthened, never shortened. Which statuses are retried is unchanged (429, and 5xx
@@ -62,7 +68,9 @@ an error naming the variable.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LEADSQUARED_COOLDOWN_SECONDS` | `6.5` | Pause after each request finishes. `0` = no pause (still one at a time). |
+| `LEADSQUARED_COOLDOWN_SECONDS` | `6` | Pause after each request finishes. `0` = no pause (still one at a time). |
+| `LEADSQUARED_MAX_REQUESTS_PER_WINDOW` | `10` | Most requests (retries included) that start in any window. Whole number, or `off`. |
+| `LEADSQUARED_WINDOW_SECONDS` | `5` | Length of that window in seconds. Above 0. |
 | `LEADSQUARED_MAX_IN_FLIGHT` | `1` | Requests allowed at once across processes. Whole number, 1 or more. |
 | `LEADSQUARED_MAX_REQUESTS_PER_HOUR` | off | Attempts in any 60 minutes. Whole number, or `off`. |
 | `LEADSQUARED_MAX_REQUESTS_PER_DAY` | off | Attempts in any 24 hours. Whole number, or `off`. |
@@ -112,6 +120,9 @@ full reads safely.
   minute at most) that the gate doesn't count.
 - **The old Worker on Ananya's Cloudflare account** still polls with bad keys; only deleting it stops it.
 - **Requests made outside `LeadSquaredClient`.** There are none in the Python code today; keep it that way.
+- **Code on other branches.** The Team Elite Calling jobs run from branch `ccr-a0c7f8a2-aj2dly`, whose client
+  has no gate (it only limits history reads to 5 a second), so neither the pause nor the 10-per-5-seconds
+  ceiling applies to them.
 - **A slow reply.** `requests`' timeout applies to each socket read, not the whole reply. The slot stays
   held (its lease is renewed) as long as the process is alive; a process that dies frees it when the
   lease runs out.
@@ -119,7 +130,7 @@ full reads safely.
 ## Turning it down or off
 
 - **Back to no pause:** `LEADSQUARED_COOLDOWN_SECONDS=0` and leave the budgets unset. Requests still go
-  one at a time.
+  one at a time. The 10-per-5-seconds ceiling still applies; `LEADSQUARED_MAX_REQUESTS_PER_WINDOW=off` removes it.
 - **Re-read every enrolment history:** `LEADSQUARED_ENROLMENT_STORE=off`, or delete the file.
 - **Forget the gate's history:** delete `data/leadsquared/admission.sqlite3` while no fetch is running.
 - **Undo the code:** `git revert` the commit that added this page. That brings back the earlier per-process
