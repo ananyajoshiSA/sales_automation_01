@@ -44,6 +44,7 @@ SAME_RUN_SECS = 300  # files finished this close together came from one run, so 
 STALE_SECS = 24 * 3600
 URL = re.compile(r"^https://script\.google\.com/macros/s/[\w-]+/exec$")
 OK = {"sent", "duplicate"}
+RETRY_SECS = 5  # wait before the one retry of a Google 404 or HTML error page
 
 
 class Unclear(Exception):
@@ -121,13 +122,24 @@ def settings() -> tuple[str, str]:
     return url, token
 
 
-def call(url: str, body: dict, label: str, session: requests.Session | None = None) -> dict:
+def call(url: str, body: dict, label: str, session: requests.Session | None = None, retry: bool = True) -> dict:
     """POST to the mailer. Google answers with a redirect that requests follows as a GET, so the token
-    (in the body) only ever goes to script.google.com."""
-    r = request_json(session or requests.Session(), "POST", url, label=label, json=body, timeout=180, max_retries=2)
-    if not isinstance(r, dict) or "status" not in r:
-        raise ApiError("the mailer did not answer with JSON: check the web app is deployed with access 'Anyone'")
-    return r
+    (in the body) only ever goes to script.google.com.
+
+    Google now and then answers a working web app with a 404 or an HTML error page (2 in 35 calls on
+    15 Oct 2026), so that gets one more try. Resending is safe: the mailer's sent log answers "duplicate"."""
+    try:
+        r = request_json(session or requests.Session(), "POST", url, label=label, json=body, timeout=180, max_retries=2)
+    except ApiError as exc:
+        if exc.status_code != 404 or not retry:
+            raise
+        r = None
+    if isinstance(r, dict) and "status" in r:
+        return r
+    if retry:
+        time.sleep(RETRY_SECS)
+        return call(url, body, label, session, retry=False)
+    raise ApiError("the mailer did not answer with JSON: check the web app is deployed with access 'Anyone'")
 
 
 def check(url: str, token: str) -> dict:
