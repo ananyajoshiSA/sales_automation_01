@@ -97,7 +97,8 @@ def per_lead_reads(c, leads, users, d0, last, zip_to, since, cache):
     log(f"{len(ids)} team leads active since {(since or d0).isoformat()}")
     if os.path.exists(cache):
         os.remove(cache)  # histories change between runs: never reuse an earlier run's
-    hist = revival.history(ids, cache, client=c, codes=(PHONE_OUTBOUND, PHONE_INBOUND, PAYMENT_SUCCESS) + ZIP_EVENTS)
+    # each read can take ~7 s when LeadSquared is slow; the rate limit in revival.history still caps the pace
+    hist = revival.history(ids, cache, workers=24, client=c, codes=(PHONE_OUTBOUND, PHONE_INBOUND, PAYMENT_SUCCESS) + ZIP_EVENTS)
     os.remove(cache)
     names = {u["ID"]: f"{u.get('FirstName') or ''} {u.get('LastName') or ''}".strip() for u in users}
     calls, payments, zip_acts = [], [], []
