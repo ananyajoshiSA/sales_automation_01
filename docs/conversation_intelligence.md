@@ -3,8 +3,8 @@
 An additive module (`analytics/convintel/`) that tracks every LeadSquared call to its transcript and analysis,
 has Claude read each transcript for words and phrases, intent, quality, objections, commitments and coaching (no
 API and no keyword rules: Claude does all of it), flags calls that may
-not be real conversations, and rolls everything up by caller, team and organisation. It changes no existing report,
-dashboard number, shared definition or Worker task. Lever (GOAL.md): conversation quality and calling the right
+not be real conversations, and rolls everything up by caller, team and organisation. It changes no existing report
+or shared definition. Lever (GOAL.md): conversation quality and calling the right
 leads first, seen in enrolments per real call.
 
 ## What it does, step by step
@@ -18,7 +18,6 @@ leads first, seen in enrolments per real call.
 | | `python -m analytics.convintel read collect [ROUND]` | Stores every finished reading of a call still handed out, from whichever round's folder holds it; drafts, half-written files and files changed since their check wait. `read prepare` collects first. |
 | Reconciliation | `python -m analytics.convintel reconcile FROM TO` | Proves the registry accounts for every call (below). |
 | Report | `python -m analytics.convintel report FROM TO --key 7d` | Snapshot JSON, `flagged_calls.csv` and an offline `index.html` under `data/convintel/reports/<key>/`; the period's opportunities, Zipteams disagreements, coaching, team metrics, lead journeys and accountability rows are stored in the registry tables. |
-| Dashboard | `python -m analytics.convintel.d1push SNAPSHOT.json --push --yes` | Writes the snapshot to D1 for the dashboard's Conversation Intelligence page. A remote write: only on the user's go-ahead. |
 | All of it | `python -m analytics.convintel run FROM TO [--loop --every 300]` | One cycle (or a loop): re-reads days still inside LeadSquared's 3-day edit margin, searches transcripts, collects Claude's readings, hands new transcripts to a reading round, reconciles. A Claude Code session reads the rounds. |
 | Status | `python -m analytics.convintel status [FROM TO]` | Counts per status, coverage and the last runs. |
 
@@ -35,7 +34,7 @@ tables requirement 11 names: `transcript_coverage_registry` (one row per call, n
 A **real call** here is answered with at least 180 seconds of talk: 179 s is `SHORT_CALL`, 180 s and 181 s are
 `REAL_CALL`, an unanswered or failed call is `NOT_CONNECTED`, and an answered call whose duration is missing,
 zero, unreadable or over 4 hours is `UNKNOWN` (never a real call). The project's 2-minute "real conversation"
-(CLAUDE.md, the calling report, the main dashboard) is unchanged; this module always labels its rule
+(CLAUDE.md, the calling report) is unchanged; this module always labels its rule
 "real calls (3+ min)".
 
 ## Statuses
@@ -122,7 +121,7 @@ They are rolled up per caller (share flagged, flags by type, the call ids) and l
 `flagged_calls.csv`: call id, lead id, direction, caller, team, the caller's line (LeadSquared's DisplayNumber,
 a company number shared across callers), the lead's number (the number dialled on an outbound call), IST start,
 duration, class, transcript state and words, flags and reasons (user, 9 Oct 2026). The file holds phone numbers,
-so it stays under `data/`; the dashboard shows the same flags without numbers.
+so it stays under `data/`; the snapshot and the offline page show the same flags without numbers.
 
 ## Reconciliation
 
@@ -136,8 +135,8 @@ valid result for each layer; no claim is stuck; how much of the search queue is 
 
 - A call belongs to its caller and the caller's team when inventoried: the first LeadSquared group the caller is
   in that is not calling software (any group named Acefone or Mcube, such as Acefone Users or New Joinees - Mcube),
-  else "Unassigned". It is `analytics.definitions.team_of`, the rule the calling report (v1.5) and the main
-  dashboard use, so the teams match. Each call counts once, in that team. Shared admin logins (Rinku Jhala,
+  else "Unassigned". It is `analytics.definitions.team_of`, the rule the calling report (v1.5) uses, so the
+  teams match. Each call counts once, in that team. Shared admin logins (Rinku Jhala,
   Admin) are never a person and bots are never callers: both stay in organisation totals.
 - Calls inventoried under the earlier rule (a caller's first group) are checked once, the next time `inventory` or
   `report` runs. Only a call stamped with a calling-software group or "Unassigned" moves, with its stored findings,
@@ -160,10 +159,9 @@ valid result for each layer; no claim is stuck; how much of the search queue is 
 
 ## Privacy
 
-Transcripts, reading rounds, lead numbers and the registry stay under `data/` (git-ignored). The dashboard snapshot
+Transcripts, reading rounds, lead numbers and the registry stay under `data/` (git-ignored). The snapshot
 carries no lead numbers and no transcript excerpts unless `--excerpts` is given. Claude's reading packs hold the
-transcript, the duration, direction, class and start time, never the lead's number, id or name; `d1push` refuses a
-snapshot in which a phone number appears. The dashboard shows Claude's word and phrase analysis only as counts by
+transcript, the duration, direction, class and start time, never the lead's number, id or name. The offline page shows Claude's word and phrase analysis only as counts by
 kind of phrase, never the words.
 
 Reading a transcript in a Claude Code session also puts its text in that session's conversation log on the machine

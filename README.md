@@ -35,7 +35,7 @@ each starts 6 s after the last one finished, never more than 10 start in any 5 s
 daily budgets can be set. When a wait would pass 5 minutes or a budget is used up, the request isn't sent and
 the client raises `AdmissionDeferred` with the next time it can go. Per-lead scans take about 6.5 s per lead
 (1,000 leads is about 1 hour 50 minutes). First enrolments are stored once read, so overlapping report runs don't
-re-read them. Other machines and the dashboard Worker don't share the gate, so run LeadSquared fetches from
+re-read them. Other machines don't share the gate, so run LeadSquared fetches from
 one machine. Settings, deferral handling, gaps and rollback: [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md).
 `python -m integrations.leadsquared admission` shows the gate's state and budgets.
 
@@ -172,15 +172,6 @@ join without signing in (2 of 54 on a checked 8 Oct meeting had an email), so ma
 leads through webinar registrants. GrowthX's `from`/`to` filter is on UTC days and `capturedAt`
 is IST text; `leads_for_ist_days` handles both. A GrowthX "Paid" row is a bootcamp ticket
 (Rs 10–200), not a course fee, so it is not the payment source the revenue report needs.
-
-## Live dashboard
-
-**Switched off, with all of Cloudflare, since 14 Oct 2026**: nothing deploys or writes there
-([dashboard/README.md](dashboard/README.md) says how to switch back on).
-[dashboard/](dashboard/) is a Cloudflare Worker (free tier) that pulls LeadSquared every minute and
-shows leads, first-time enrollments, calling activity, lagging callers, dialer issues and Zipteams
-call quality. Setup, limits and definitions: [dashboard/README.md](dashboard/README.md).
-History is loaded with `scripts/d1_backfill.py`.
 
 ## Email a report on request
 

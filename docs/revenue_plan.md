@@ -83,8 +83,8 @@ last caller who spoke to the lead, not to whoever owns it today.
 
 ## Not done, or needs input
 
-- **Dashboard work is out of scope for now.** That covers plan step 4 and the dashboard and Worker
-  parts of steps 7 and 10.
+- **The dashboard was removed on 15 Oct 2026** (the user: not required). Plan step 4 and the dashboard
+  and Worker parts of steps 7 and 10 are dropped.
 - **The LeadSquared API returned no payment activities (event 213) for 5–8 Oct.** The revenue
   reader works, but it has nothing to read until payments come through the API or another payment
   source is connected.

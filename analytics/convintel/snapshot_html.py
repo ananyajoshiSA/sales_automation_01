@@ -1,8 +1,8 @@
 """Write one self-contained page for a conversation-intelligence snapshot, to open offline or send around.
 
-The page is dashboard/public/ci.html with style.css and ci.js inlined and the snapshot embedded as
-<script type="application/json" id="ci-data">, so the dashboard's own renderer draws it from a file:// URL with
-no server and no external requests. It holds lead ids and caller names (and excerpts, if the snapshot has them):
+The page is analytics/convintel/page/ci.html with style.css and ci.js inlined and the snapshot embedded as
+<script type="application/json" id="ci-data">, so ci.js draws it from a file:// URL with no server and no
+external requests. It holds lead ids and caller names (and excerpts, if the snapshot has them):
 write it under data/ or exports/ (git-ignored) and share it only inside the team.
 
     python -m analytics.convintel.snapshot_html SNAPSHOT.json OUT.html
@@ -17,7 +17,7 @@ import re
 import sys
 from pathlib import Path
 
-PUBLIC = Path(__file__).resolve().parents[2] / "dashboard" / "public"
+PUBLIC = Path(__file__).resolve().parent / "page"
 CSS_TAG = '<link rel="stylesheet" href="style.css">'
 JS_TAG = '<script src="ci.js"></script>'
 TITLE = re.compile(r"<title>([^<]*)</title>")
@@ -34,7 +34,7 @@ def page(snapshot: dict, public: Path = PUBLIC) -> str:
     css = (public / "style.css").read_text(encoding="utf-8")
     js = (public / "ci.js").read_text(encoding="utf-8")
     if CSS_TAG not in doc or JS_TAG not in doc:
-        raise RuntimeError("dashboard/public/ci.html no longer links style.css and ci.js as expected")
+        raise RuntimeError("analytics/convintel/page/ci.html no longer links style.css and ci.js as expected")
     # Inside an inline element only these sequences matter; "<\/" means the same in JavaScript strings.
     js = re.sub(r"</(script)", r"<\\/\1", js, flags=re.I).replace("<!--", "<\\!--")
     css = re.sub(r"</(style)", r"<\\/\1", css, flags=re.I)

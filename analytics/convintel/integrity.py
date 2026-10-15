@@ -15,7 +15,7 @@ flag means the call needs a listen, never that it was faked.
 
 Overlap, repeat and bunching are judged only for people: shared logins and automation accounts are used by
 several people or by the system. Thresholds are the daily report's (analytics/call_integrity.py), with its
-2-minute line moved to this module's 3 minutes. ``integrity_summary`` goes to the dashboard and holds no phone
+2-minute line moved to this module's 3 minutes. ``integrity_summary`` goes into the snapshot and holds no phone
 numbers; ``flag_rows`` holds the caller's line and the number dialled, so it is written only to files under data/.
 """
 
@@ -47,7 +47,7 @@ REAL_LABEL = {"yes": "Claude judged it a real conversation", "doubtful": "Claude
               "no": "Claude judged it not a real conversation"}
 CALL_IDS_CAP = 50
 REVIEW = "needs review, not proof"
-# Claude's integrity reason reaches the dashboard; a number it quoted from the call must not.
+# Claude's integrity reason reaches the snapshot; a number it quoted from the call must not.
 DIGITS = re.compile(r"\+?\d(?:[\s-]?\d){6,}")
 # Classes whose logged duration is usable: an UNKNOWN "call" may be a line left open for hours.
 TIMED = (S.REAL_CALL, S.SHORT_CALL)
@@ -305,7 +305,7 @@ def flag_rows(calls: list[dict], flags: dict[str, list[dict]]) -> list[dict]:
     These rows hold phone numbers: ``callerNumber`` is the company line the caller dialled from (LeadSquared's
     DisplayNumber, shared across callers) and ``leadNumber`` is the "number dialled / lead number" (normalized
     91XXXXXXXXXX: the number called on an outbound call, the lead's own number on an inbound one). Never put them
-    in the snapshot, the dashboard, logs or the repo. No transcript text."""
+    in the snapshot, logs or the repo. No transcript text."""
     rows = []
     for c in calls:
         if not (fl := flags.get(c["call_id"])):

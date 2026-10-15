@@ -24,32 +24,33 @@ LeadSquared lead count.
 | Path | What it is |
 |---|---|
 | `integrations/` | API clients: `leadsquared` (CRM), `transcripts` (Salesa), `zipteams`; read-only `google_ads`, `meta_ads`, `zoom` (attendance), `timepay` (AI voice-agent logs), `growthx` (funnel leads and bootcamp checkouts); `env.py` loads `.env` |
-| `scripts/` | Bulk fetchers (IST date ranges → JSON/JSONL in `data/`), `d1_backfill.py`, `build_plan_pdf.py` |
+| `scripts/` | Bulk fetchers (IST date ranges → JSON/JSONL in `data/`), `build_plan_pdf.py` |
 | `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`, `accountability` (who really assigned or transferred each lead, [docs/accountability.md](docs/accountability.md)), `enrolment_store` (first enrolments read from LeadSquared once and kept); shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
-| `analytics/convintel/` | Conversation intelligence (additive): every call inventoried with a status until its transcript is analysed, the 3-minute REAL_CALL rule (this module only), every transcript read by Claude itself (no model API, no keyword rules), possibly-not-real call flags, team analytics, dashboard snapshots. `python -m analytics.convintel status`. Guide: [docs/conversation_intelligence.md](docs/conversation_intelligence.md) |
-| `dashboard/` | Cloudflare Worker + D1 + static page; **Cloudflare switched off completely since 14 Oct 2026** (no cron, `DASHBOARD_OFF`, no workers.dev URL, deploy scripts only print a notice, `integrations/cloudflare.py` blocks D1 pushes and the backfill), how to switch back on in [dashboard/README.md](dashboard/README.md) |
-| `tests/`, `dashboard/test/` | pytest (HTTP mocked with `responses`), vitest |
+| `analytics/convintel/` | Conversation intelligence (additive): every call inventoried with a status until its transcript is analysed, the 3-minute REAL_CALL rule (this module only), every transcript read by Claude itself (no model API, no keyword rules), possibly-not-real call flags, team analytics, snapshots and an offline HTML page (`page/`). `python -m analytics.convintel status`. Guide: [docs/conversation_intelligence.md](docs/conversation_intelligence.md) |
+| `tests/` | pytest (HTTP mocked with `responses`) |
+
+The Cloudflare dashboard (Worker, D1, `scripts/d1_backfill.py`, `analytics/convintel/d1push.py`) was removed on
+15 Oct 2026 at the user's request: the dashboard is not required. Don't rebuild it unless asked.
 
 ## Commands
 
 ```bash
 python3 -m venv .venv && .venv/bin/pip install -r requirements-dev.txt
 .venv/bin/python -m pytest                     # Python tests
-cd dashboard && npm install && npm test && npm run typecheck
 ```
 
 Run the relevant tests before every commit. Add or update a test with every behaviour change.
 
 ## Definitions — one meaning everywhere
 
-These are shared by the Python reports and the Worker (`dashboard/src/metrics.ts`). Change them in both
-places and in GOAL.md together, or not at all.
+These are shared by every Python report (`analytics/definitions.py`). Change them in the code and in GOAL.md
+together, or not at all.
 
 - **First-time enrolment:** the lead's first ever stage change to *Course Enrolled*, credited to the owner.
   Re-tagged existing students never count.
 - **Working day:** 20+ outbound dials. **Real conversation:** answered and 120+ seconds.
 - **Team:** the first group LeadSquared lists for a user that is not a calling-software group (a name with the word
-  Acefone or Mcube): `team_of` in `analytics/definitions.py`, `teamFromGroups` in the Worker.
+  Acefone or Mcube): `team_of` in `analytics/definitions.py`.
 - **Lagging caller:** below 70% of the team median (whole account if the team has < 3 callers) on 2+
   measures over 2+ working days, at least one of dials, real conversations or talk time.
 - **Dialer issue:** 50%+ of dials end in `CallFailure`. Such a caller is never marked lagging.
@@ -72,7 +73,7 @@ places and in GOAL.md together, or not at all.
     including a call that ends after midnight.
   - Transcript API clocks can be 5 h 30 min off in either direction. Place a transcript on a day only through
     `match_to_calls`, which takes the time from its LeadSquared call.
-- Count each call once. Don't add per-call rows to D1.
+- Count each call once.
 - Never invent numbers, targets or probabilities. Label estimates as estimates (as the call-plan PDF does).
   `analytics.revenue` reads payment activities (event 213), but the API returned none for 5–8 Oct 2026;
   until payments come through, report enrolments and say so.
@@ -83,21 +84,16 @@ places and in GOAL.md together, or not at all.
   SMS or campaign change, any ad or Zoom change) needs the user's explicit go-ahead for that run.
 - LeadSquared requests from Python go through the admission gate in `LeadSquaredClient.request`: one at a time
   across all processes on the machine, 6 s cooldown, at most 10 requests in any 5 s, optional budgets; a long wait or a used-up budget raises
-  `AdmissionDeferred`, which fetches must stop on (and resume from), never skip past. Other machines and the
-  Worker don't share it, so run fetches from one machine, and don't bypass the client.
+  `AdmissionDeferred`, which fetches must stop on (and resume from), never skip past. Other machines don't
+  share it, so run fetches from one machine, and don't bypass the client.
   [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md).
 - Transcript API: at most 10 numbers per request and 9 requests per run. `TranscriptClient` enforces it;
   never raise the limit.
-- Dashboard must stay on Cloudflare's free tier: ≤ 10 ms CPU per run, ≤ 50 subrequests and D1 queries per
-  run, < 100,000 D1 rows written per day (`WRITE_BUDGET` 90,000). Check a change against these before
-  merging; `test/cpu.local.test.ts` measures CPU.
-- Don't deploy the Worker or run remote D1 commands unless asked.
 
 **Privacy and secrets**
 - `data/` and `exports/` hold lead PII and are git-ignored. Never commit them, paste lead details into
   commits or PRs, or move them outside the repo.
-- Credentials live only in the root `.env` (or the cloud environment's settings; `dashboard/.dev.vars`
-  for local Worker dev; `wrangler secret` in production). Never hardcode or print a key.
+- Credentials live only in the root `.env` (or the cloud environment's settings). Never hardcode or print a key.
 
 ## Code style
 

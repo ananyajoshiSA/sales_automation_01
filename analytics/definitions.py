@@ -36,8 +36,7 @@ def is_calling_software(group: str) -> bool:
 
 
 def team_of(groups: list[str] | None, default: str = "Unassigned") -> str:
-    """A caller's team: the first group LeadSquared lists for them that is not a calling-software group.
-    The dashboard's ``teamFromGroups`` (dashboard/src/metrics.ts) applies the same rule."""
+    """A caller's team: the first group LeadSquared lists for them that is not a calling-software group."""
     return next((g.strip() for g in groups or [] if str(g or "").strip() and not is_calling_software(g)), default)
 
 SPEED_BUCKETS = ((5, "≤5 min"), (15, "5–15 min"), (60, "15–60 min"), (240, "1–4 h"), (1440, "4–24 h"))

@@ -67,7 +67,7 @@ What each fetch does with it:
 |---|---|
 | `scripts/fetch_lead_histories.py` (also used by `fetch_accountability.py`, `fetch_bootcamp_collections.py`) | Stops, keeps every lead already written, prints when to rerun, exits with code 75. Rerunning the same command resumes. |
 | `python -m analytics.convintel inventory` | Marks the run failed with the reason and keeps the calls of every block already read. A rerun reads the period again and stores only what changed. |
-| First-enrolment scans (`fetch_report_day.py`, convintel, `d1_backfill.py`) | Stop with the error. Every first enrolment found before the stop is already stored, so the rerun is shorter. |
+| First-enrolment scans (`fetch_report_day.py`, convintel) | Stop with the error. Every first enrolment found before the stop is already stored, so the rerun is shorter. |
 | Every other fetch | Stops with the error; rerun the command. Nothing is skipped silently. |
 
 If the store can't be used (a bad path, a broken file), the client raises `CoordinatorUnavailable` and
@@ -107,11 +107,11 @@ the last deferral. It prints no keys, URLs or lead details.
 
 The gate spreads requests out; it doesn't reduce how many there are. These changes reduce them:
 
-- **First enrolments are read once per lead** (`analytics/enrolment_store.py`). The daily report fetch,
-  conversation intelligence and the D1 backfill each scan the leads now in Course Enrolled that were edited
+- **First enrolments are read once per lead** (`analytics/enrolment_store.py`). The daily report fetch and
+  conversation intelligence each scan the leads now in Course Enrolled that were edited
   since the start of their window, and used to read every one's stage history on every run. A first
-  enrolment never changes once it happens, so it is now stored the first time it is read and reused by all
-  three. Only complete histories that show an enrolment are stored; anything else is read again next time,
+  enrolment never changes once it happens, so it is now stored the first time it is read and reused by
+  both. Only complete histories that show an enrolment are stored; anything else is read again next time,
   as before. Each scan prints how many leads came from the store and how many histories it read.
 - **Bulk lead reads take 250 IDs per request** instead of 200 in conversation intelligence.
 - **Repeated lead IDs are fetched once** in `fetch_lead_histories.py`.
@@ -128,10 +128,8 @@ full reads safely.
 - **Other machines.** The store is a file on one machine. A fetch running on the user's computer and another
   in a cloud session don't see each other. Don't put the store on `/mnt/project-files` or any network
   mount: SQLite locking there is unreliable. Run LeadSquared fetches from one machine at a time.
-- **The dashboard Worker** (`dashboard/src/lsq.ts`, TypeScript on Cloudflare) can't use the file. It has
-  been switched off since 14 Oct 2026; if it is switched back on it adds its own requests (about 8 a
-  minute at most) that the gate doesn't count.
-- **The old Worker on Ananya's Cloudflare account** still polls with bad keys; only deleting it stops it.
+- **The old dashboard Worker on Ananya's Cloudflare account** still polls with bad keys; only deleting it
+  on Cloudflare stops it. (The dashboard code was removed from this repo on 15 Oct 2026.)
 - **Requests made outside `LeadSquaredClient`.** There are none in the Python code today; keep it that way.
 - **Code on other branches.** The Team Elite Calling jobs run from branch `ccr-a0c7f8a2-aj2dly`, whose client
   has no gate (it only limits history reads to 5 a second), so neither the pause nor the 10-per-5-seconds

@@ -115,7 +115,7 @@ CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 
 
 def ts(t: datetime | None) -> str | None:
-    """UTC 'YYYY-MM-DD HH:MM:SS' (the format LeadSquared and the dashboard use) for an aware datetime."""
+    """UTC 'YYYY-MM-DD HH:MM:SS' (the format LeadSquared uses) for an aware datetime."""
     return t.astimezone(timezone.utc).strftime("%Y-%m-%d %H:%M:%S") if t else None
 
 

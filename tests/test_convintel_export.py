@@ -61,7 +61,7 @@ def build(tmp_path):
     return reg, ds
 
 
-def test_snapshot_shape_matches_the_dashboard_fixture(tmp_path):
+def test_snapshot_shape_matches_the_fixture(tmp_path):
     reg, ds = build(tmp_path)
     snap = export.snapshot(ds, reg, "2d", "Two days")
     fixture = json.loads(FIXTURE.read_text(encoding="utf-8"))

@@ -20,8 +20,8 @@ free the new holder's slot.
 
 Deadlines in the file are wall-clock seconds (``time.time()``), which every process on one machine shares;
 waits are measured locally with ``time.monotonic()``. Not covered: other machines (keep the file on local disk,
-never on a network mount such as /mnt/project-files, where SQLite locking is unreliable) and the dashboard
-Worker (TypeScript on Cloudflare; switched off since 14 Oct 2026). Details: docs/leadsquared_load_control.md.
+never on a network mount such as /mnt/project-files, where SQLite locking is unreliable). Details:
+docs/leadsquared_load_control.md.
 """
 
 from __future__ import annotations

@@ -17,12 +17,6 @@ exports/
 # Data snapshots (contain PII)
 data/
 
-# Cloudflare / Wrangler (dashboard Worker)
-.wrangler/
-.dev.vars
-.dev.vars.*
-node_modules/
-
 # OS / local tooling
 .DS_Store
 .claude/settings.local.json

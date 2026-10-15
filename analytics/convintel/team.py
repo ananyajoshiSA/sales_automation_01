@@ -432,10 +432,10 @@ def _enrolled(leads: dict, *enrolment_lists) -> set[str]:
 def _notes(org: dict) -> list[str]:
     u = org["enrolmentsUnattributed"]
     return [
-        "A real call here means answered and 3+ minutes. This rule is used only in this view; the main "
-        "dashboard's 2-minute 'real conversation' is unchanged.",
+        "A real call here means answered and 3+ minutes. This rule is used only in this view; the calling "
+        "report's 2-minute 'real conversation' is unchanged.",
         "A caller's team is the first LeadSquared group they are in that is not calling software (Acefone, Mcube), "
-        "as in the calling report and the main dashboard; a caller in no other group is 'Unassigned'. Each call "
+        "as in the calling report; a caller in no other group is 'Unassigned'. Each call "
         "counts once, in its caller's team.",
         "Unique-lead counts (leads contacted, leads with a real call) do not add up across teams or callers: a lead "
         "called by two teams counts in each. Organisation totals count each lead once.",

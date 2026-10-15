@@ -1,15 +1,12 @@
 // Conversation Intelligence & Team Analytics page (ci.html). Shows one snapshot computed offline by
-// analytics/convintel and served as stored text by /api/ci/snapshot. Filters, drilldowns (Organisation ->
-// Team -> Caller -> Lead -> Call) and sorting all run on the loaded snapshot, with no extra requests; the
-// view lives in the URL hash, so a link opens the same view.
-// The same file renders a snapshot embedded in the page as <script type="application/json" id="ci-data">
-// (analytics/convintel/snapshot_html.py): then nothing is fetched and the page works offline.
+// analytics/convintel and embedded in the page as <script type="application/json" id="ci-data">
+// (analytics/convintel/snapshot_html.py), so nothing is fetched and the page works offline. Filters, drilldowns
+// (Organisation -> Team -> Caller -> Lead -> Call) and sorting all run on the embedded snapshot; the view lives in
+// the URL hash, so a link opens the same view.
 // Every value from the snapshot goes through esc() before it reaches innerHTML.
 (function () {
   "use strict";
   const IST_MS = 330 * 60_000;
-  const REFRESH_MS = 5 * 60_000;   // re-check the range list; the snapshot is fetched only when it changed
-  const RETRY_MS = 60_000;         // after "being updated"
   const LATE_MIN = 180;            // a snapshot older than this is marked late
   const ROW_IDS = 5;               // call links shown per caller in the integrity table
 
@@ -329,8 +326,7 @@
       : "";
     return `<header><div><h1>Conversation Intelligence &amp; Team Analytics</h1>` +
       `<p class="fresh${late ? " late" : ""}">Data as of ${esc(istTime(obj(s.dataAsOf).callsUpTo))} · published ${esc(istTime(s.generatedAt))}</p>` +
-      `<p class="muted small">${esc(r.label || r.key || "")}${days ? `: ${esc(days)} (IST days)` : ""}${o.embedded ? " · saved copy, not live" : ""}` +
-      `${o.embedded ? "" : ' · <a href="index.html">Main dashboard</a>'}</p></div>` +
+      `<p class="muted small">${esc(r.label || r.key || "")}${days ? `: ${esc(days)} (IST days)` : ""}${o.embedded ? " · saved copy, not live" : ""}</p></div>` +
       `<div class="range-box">${ranges}</div></header>`;
   }
 
@@ -339,7 +335,7 @@
     const secs = isNum(d.realCallSecs) ? Number(d.realCallSecs) : 180;
     const lines = [
       `In this view a real call means answered and ${secs / 60 === Math.round(secs / 60) ? `${secs / 60}+ minutes` : `${secs}+ seconds`}. ` +
-      `The main dashboard's "real conversation" (answered, 2+ minutes) is unchanged.`,
+      `The calling report's "real conversation" (answered, 2+ minutes) is unchanged.`,
     ];
     if (isNum(cov.expected_transcripts)) {
       lines.push(`Analysed so far: ${fmt(cov.analyzed, 0)} of ${fmt(cov.expected_transcripts, 0)} expected transcripts (${pc(cov.coverage_pct)}). ` +
@@ -931,7 +927,7 @@
   /** A page with no snapshot: the header, the range buttons and why there is nothing to show. */
   function shell(opts = {}) {
     const ranges = list(opts.ranges).map((g) => `<button type="button" data-range="${esc(g.key)}" class="${g.key === opts.range ? "on" : ""}">${esc(g.label || g.key)}</button>`).join("");
-    return `<header><div><h1>Conversation Intelligence &amp; Team Analytics</h1><p class="muted small"><a href="index.html">Main dashboard</a></p></div>` +
+    return `<header><div><h1>Conversation Intelligence &amp; Team Analytics</h1></div>` +
       `<div class="range-box">${ranges ? `<nav class="ci-ranges" aria-label="Date range">${ranges}</nav>` : ""}</div></header>` +
       `<div class="alert${opts.messageBad ? " bad" : ""}">${esc(opts.message || "Loading…")}</div>`;
   }
@@ -987,96 +983,17 @@
     try { history.replaceState(null, "", h); } catch { location.hash = h; }
   }
 
-  // ---- loading (live page) ---------------------------------------------------------------------
+  // ---- loading (the snapshot embedded in the page) ---------------------------------------------
 
   function boot(root) {
-    const app = { snap: null, ranges: [], range: "", message: "", bad: false, gen: "", seq: 0, embedded: false };
-    const paint = () => render(app.snap, root, { state: readHash(), ranges: app.ranges, range: app.range, onRange: pick,
-      message: app.message, messageBad: app.bad, live: !app.embedded, embedded: app.embedded });
+    const app = { snap: null, message: "", bad: false };
+    const paint = () => render(app.snap, root, { state: readHash(), ranges: [], range: "", message: app.message,
+      messageBad: app.bad, live: false, embedded: true });
     const embedded = document.getElementById("ci-data");
-    if (embedded) {
-      app.embedded = true;
-      try { app.snap = JSON.parse(embedded.textContent || "null"); } catch { app.message = "The data saved in this page could not be read."; app.bad = true; }
-      if (!app.snap && !app.message) { app.message = "This page has no data saved in it."; app.bad = true; }
-      window.addEventListener("hashchange", paint);
-      return paint();
-    }
-
-    async function getJson(path) {
-      const r = await fetch(path);
-      const text = await r.text();
-      let body = null;
-      try { body = JSON.parse(text); } catch {}
-      if (!r.ok || !body) throw Object.assign(new Error((body && body.error) || `HTTP ${r.status}`), { status: r.status });
-      return { body, gen: r.headers.get("x-ci-generated-at") || "" };
-    }
-
-    async function loadRanges() {
-      try {
-        app.ranges = list((await getJson("/api/ci/ranges")).body.ranges);
-        return true;
-      } catch (e) {
-        app.message = e.status ? e.message : `Could not load data: ${e.message}`;
-        app.bad = e.status !== 503;
-        paint();
-        return false;
-      }
-    }
-
-    async function load(key) {
-      const seq = ++app.seq;
-      app.range = key;
-      if (!app.snap || obj(app.snap.range).key !== key) { app.message = "Loading…"; app.bad = false; paint(); }
-      try {
-        const { body, gen } = await getJson(`/api/ci/snapshot?range=${encodeURIComponent(key)}`);
-        if (seq !== app.seq) return;
-        Object.assign(app, { snap: body, range: key, gen, message: "", bad: false });
-      } catch (e) {
-        if (seq !== app.seq) return;
-        // A load half-way through (503) keeps the copy on screen and tries again; anything else explains itself.
-        if (!app.snap || obj(app.snap.range).key !== key) app.snap = null;
-        app.message = e.status ? e.message : `Could not load data: ${e.message}`;
-        app.bad = e.status !== 503;
-        if (e.status === 503) setTimeout(() => { if (app.range === key) load(key); }, RETRY_MS);
-      }
-      paint();
-    }
-
-    function pick(key) {
-      try { localStorage.setItem("ci-range", key); } catch {}
-      writeHash({ ...readHash(), range: key });
-      load(key);
-    }
-
-    async function start() {
-      if (!(await loadRanges())) return;
-      const st = readHash();
-      let key = st.range;
-      if (!app.ranges.some((r) => r.key === key)) {
-        let saved = "";
-        try { saved = localStorage.getItem("ci-range") || ""; } catch {}
-        key = (app.ranges.find((r) => r.key === saved) || app.ranges.find((r) => r.key === "today") || app.ranges[0] || {}).key;
-      }
-      if (!key) {
-        app.message = "No conversation intelligence data has been loaded yet. It appears here once the analysis job publishes its first snapshot.";
-        return paint();
-      }
-      writeHash({ ...st, range: key });
-      load(key);
-    }
-
-    window.addEventListener("hashchange", () => {
-      const key = readHash().range;
-      if (key && key !== app.range && app.ranges.some((r) => r.key === key)) load(key); else paint();
-    });
-    // Snapshots change only when the offline job publishes; fetch again only when the index says so.
-    setInterval(async () => {
-      if (document.hidden || !app.range) return;
-      if (!(await loadRanges())) return;
-      const cur = app.ranges.find((r) => r.key === app.range);
-      if (cur && cur.generatedAt !== app.gen) load(app.range); else paint();
-    }, REFRESH_MS);
-    start();
+    try { app.snap = embedded ? JSON.parse(embedded.textContent || "null") : null; } catch { app.message = "The data saved in this page could not be read."; app.bad = true; }
+    if (!app.snap && !app.message) { app.message = "This page has no data saved in it."; app.bad = true; }
+    window.addEventListener("hashchange", paint);
+    return paint();
   }
 
   const api = { render, html, shell, VIEWS: VIEWS.map((v) => v[0]) };
