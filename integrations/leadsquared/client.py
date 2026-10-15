@@ -429,6 +429,7 @@ class LeadSquaredClient:
         to_dt: datetime,
         margin: timedelta = EDIT_MARGIN,
         now: datetime | None = None,
+        edited_since: datetime | None = None,
     ) -> Iterator[dict]:
         """Every activity of one type created (for a call: started) in ``[from_dt, to_dt]``.
 
@@ -438,10 +439,13 @@ class LeadSquaredClient:
         repeats. An activity with a missing or unreadable ``CreatedOn`` is kept if it was edited in the
         window, so the caller can count it. Windows are read one page at a time (``_iter_unpaged``)
         because paging through a large result skips a few rows.
+
+        With ``edited_since``, only activities edited from then on are read: an incremental refresh of
+        a window whose older rows the caller already holds.
         """
         stop = min(to_dt + margin, now or now_utc())
         seen: set = set()
-        day = from_dt
+        day = max(from_dt, edited_since) if edited_since else from_dt
         while day <= stop:
             end = min(day + timedelta(days=1), stop)
             for a in self._iter_unpaged(activity_event, day, end):

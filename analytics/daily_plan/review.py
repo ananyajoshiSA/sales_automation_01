@@ -1,0 +1,159 @@
+"""Facts for the previous working day's review: numbers, plan adherence, enrollments, conversation quality,
+priority-lead outcomes and missed opportunities. Everything here is computed; Claude adds the narrative."""
+
+from __future__ import annotations
+
+import re
+from collections import Counter, defaultdict
+
+from analytics.daily_plan.common import CLOSED, Snap, ist
+from analytics.daily_plan.stats import day_stats
+
+
+def _secs(c) -> int:
+    try:
+        return int(c.get("secs") or 0)
+    except (TypeError, ValueError):
+        return 0
+
+
+def _issues(c) -> str:
+    x = c.get("issues")
+    return "; ".join(x) if isinstance(x, list) else (x or "")
+
+
+def quality(reads: dict) -> dict:
+    """Per caller: real conversations read, full ask made, link sent on the call, who-decides asked."""
+    agg = defaultdict(Counter)
+    for r in reads.values():
+        for c in r.get("fri_conversations") or r.get("conversations") or []:
+            who = (c.get("caller") or r.get("owner") or "?").strip()
+            agg[who]["conv"] += 1
+            for k in ("full_ask_made", "link_sent_on_call", "who_decides_asked"):
+                agg[who][k] += bool(c.get(k))
+    return {k: dict(v) for k, v in agg.items()}
+
+
+def enrollments(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list[dict]:
+    """Team leads first moved to Course Enrolled on ``day``, with who moved them and what the calls show."""
+    out = []
+    for l in enrolled:
+        t = ist(l.get("first_enrolled"))
+        if not t or t.strftime("%Y-%m-%d") != day or l.get("OwnerIdName") not in snap.callers:
+            continue
+        by = comment = ""
+        for a in l.get("history") or []:
+            d = {x["Key"]: x["Value"] for x in a.get("Data") or []}
+            if d.get("CurrentStage") == "Course Enrolled":
+                by, comment = d.get("CreatedBy") or "", d.get("Comment") or ""
+        r = reads.get(l["ProspectID"], {})
+        if r.get("status") == "bootcamp":  # Rs 10 bootcamp registration staged as Course Enrolled: not an enrollment
+            continue
+        if r.get("status") == "already_student" or (r.get("paid_on") and r["paid_on"] < day):
+            continue  # an existing student re-tagged, or a lead who paid before ``day``: a stage fix, not that day's enrollment
+        out.append({"lead_id": l["ProspectID"], "name": ((l.get("FirstName") or "") + " " + (l.get("LastName") or "")).strip() or "Unnamed",
+                    "owner": l.get("OwnerIdName"), "at": t.strftime("%H:%M"), "by": by, "comment": comment, "how": "Course Enrolled",
+                    "evidence": r.get("payment_evidence") or comment or ""})
+    seen = {e["lead_id"] for e in out}
+    for lid, r in reads.items():  # said on a call that they paid on ``day``, stage not moved yet: still that day's enrollment
+        l = snap.leads.get(lid) or {}
+        if r.get("status") == "paid_new" and lid not in seen and l.get("ProspectStage") not in CLOSED and l.get("OwnerIdName") in snap.callers \
+                and r.get("paid_on") == day:
+            out.append({"lead_id": lid, "name": r.get("name") or snap.lead_name(lid), "owner": l.get("OwnerIdName"), "at": "", "by": "", "comment": "",
+                        "how": "paid on the call (move to Course Enrolled)", "evidence": r.get("payment_evidence") or ""})
+    return out
+
+
+def paid_unstaged(snap: Snap, day: str, reads: dict) -> list[dict]:
+    """Leads who paid before ``day`` (or on an unknown date) but are still not in Course Enrolled: a stage to fix, not a new enrollment."""
+    return [{"lead_id": lid, "name": r.get("name") or snap.lead_name(lid), "owner": (snap.leads.get(lid) or {}).get("OwnerIdName"),
+             "evidence": r.get("payment_evidence") or ""}
+            for lid, r in reads.items()
+            if r.get("status") == "paid_new" and r.get("paid_on") != day and (snap.leads.get(lid) or {}).get("ProspectStage") not in CLOSED
+            and (snap.leads.get(lid) or {}).get("OwnerIdName") in snap.callers]
+
+
+def bootcamp_registrations(snap: Snap, day: str, enrolled: list[dict], reads: dict) -> list[dict]:
+    """Leads moved to Course Enrolled on ``day`` whose only payment was the Rs 10 bootcamp registration (not counted)."""
+    out = []
+    for l in enrolled:
+        t = ist(l.get("first_enrolled"))
+        r = reads.get(l["ProspectID"], {})
+        if t and t.strftime("%Y-%m-%d") == day and r.get("status") == "bootcamp" and l.get("OwnerIdName") in snap.callers:
+            out.append({"name": r.get("name") or snap.lead_name(l["ProspectID"]), "owner": l.get("OwnerIdName")})
+    return out
+
+
+def priority_outcomes(snap: Snap, day: str, prev_plan: dict, reads: dict, won: set[str] = frozenset()) -> list[dict]:
+    """How each of the previous plan's priority leads ended the day; ``won`` holds the day's enrollments."""
+    out = []
+    for lid, p in prev_plan.items():
+        if p.get("group") is None:
+            continue
+        cs = [c for c in snap.by_lead.get(lid, []) if c["t"].strftime("%Y-%m-%d") == day]
+        o = [c for c in cs if c["direction"] == "outbound"]
+        best = max((c["duration"] for c in cs if c["status"] == "Answered"), default=0)
+        r = reads.get(lid, {})
+        if lid in won:
+            result = "Won"
+        elif r.get("status") == "paid_new" or ((snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and r.get("status") != "bootcamp"):
+            result = "Paid earlier"
+        elif not o and not cs:
+            result = "Not called"
+        elif best >= 120:
+            result = "Spoke"
+        elif best:
+            result = "Short pickup"
+        else:
+            result = "Not reached"
+        out.append({"lead_id": lid, "name": snap.lead_name(lid), "owner": p.get("owner"), "group": p["group"], "result": result,
+                    "what": r.get("friday_summary") or (f"{len(o)} dial(s), none answered" if o else "No dial")})
+    order = {"Won": 0, "Paid earlier": 1, "Spoke": 1, "Short pickup": 2, "Not reached": 3, "Not called": 4}
+    return sorted(out, key=lambda x: (order[x["result"]], x["group"]))
+
+
+def missed(snap: Snap, day: str, stats: dict, prev_plan: dict, reads: dict) -> dict:
+    team = stats["team"]
+    not_dialled = [(snap.lead_name(lid), prev_plan[lid]["owner"]) for lid in team["a_not_tried"]
+                   if (snap.leads.get(lid) or {}).get("ProspectStage") not in CLOSED]
+    long_no_ask = []
+    for r in reads.values():
+        if r.get("tier") not in ("A", "B"):
+            continue
+        for c in r.get("fri_conversations") or []:
+            if _secs(c) >= 300 and not c.get("full_ask_made"):
+                long_no_ask.append({"name": r.get("name"), "caller": c.get("caller") or r.get("owner"), "min": _secs(c) // 60,
+                                    "issue": _issues(c)[:160]})
+    long_no_ask.sort(key=lambda x: -x["min"])
+    broken = []
+    for r in reads.values():
+        txt = " ".join(_issues(c) for c in r.get("fri_conversations") or []) + " " + (r.get("friday_summary") or "")
+        if re.search(r"call-?back.{0,40}(never|not made|missed|late)|promised.{0,40}(never|not)|ring-?back.{0,20}missed", txt, re.I):
+            broken.append({"name": r.get("name"), "owner": r.get("owner"), "what": (r.get("friday_summary") or "")[:200]})
+    unreturned = {n: v["missed_unreturned"] for n, v in stats["callers"].items() if v["missed_unreturned"]}
+    return {"not_dialled": not_dialled, "long_no_ask": long_no_ask, "broken_callbacks": broken, "unreturned": unreturned}
+
+
+def active_plan(snap: Snap, day: str, plan: dict) -> dict:
+    """The plan without leads that were already enrolled: legacy P/verify rows, and leads in Course Enrolled not called that day."""
+    out = {}
+    for lid, e in plan.items():
+        if e.get("tier") == "P" or e.get("verify"):
+            continue
+        called = any(c["t"].strftime("%Y-%m-%d") == day for c in snap.by_lead.get(lid, []))
+        if (snap.leads.get(lid) or {}).get("ProspectStage") in CLOSED and not called and not e.get("bootcamp"):
+            continue
+        out[lid] = e
+    return out
+
+
+def facts(snap: Snap, day: str, before: str | None, prev_plan: dict, reads: dict, enrolled: list[dict]) -> dict:
+    prev_plan = active_plan(snap, day, prev_plan)
+    stats = day_stats(snap, day, prev_plan)
+    stats_before = day_stats(snap, before, None) if before else None
+    enr = enrollments(snap, day, enrolled, reads)
+    return {"day": day, "before": before, "stats": stats, "stats_before": stats_before, "quality": quality(reads),
+            "enrollments": enr, "bootcamp": bootcamp_registrations(snap, day, enrolled, reads),
+            "paid_unstaged": paid_unstaged(snap, day, reads),
+            "priority_outcomes": priority_outcomes(snap, day, prev_plan, reads, {e["lead_id"] for e in enr}),
+            "missed": missed(snap, day, stats, prev_plan, reads), "has_plan": bool(prev_plan)}

@@ -216,6 +216,23 @@ def test_iter_activities_started_never_reads_past_now(client):
     assert w["ToDate"] == "2026-10-05 04:30:00"
 
 
+@responses.activate
+def test_iter_activities_started_can_read_only_recent_edits(client):
+    """An incremental refresh reads edits from ``edited_since`` but still keeps rows by their start in the full window."""
+    from integrations.timeutil import IST
+
+    url = HOST + "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+    responses.post(url, json={"List": [{"ProspectActivityId": "edited", "CreatedOn": "2026-10-05 05:00:00", "ModifiedOn": "2026-10-07 04:00:00"},
+                                       {"ProspectActivityId": "new", "CreatedOn": "2026-10-07 04:10:00", "ModifiedOn": "2026-10-07 04:11:00"},
+                                       {"ProspectActivityId": "old", "CreatedOn": "2026-09-01 05:00:00", "ModifiedOn": "2026-10-07 04:20:00"}]})
+    d0 = datetime(2026, 10, 5, tzinfo=IST)
+    since = datetime(2026, 10, 7, 9, 0, tzinfo=IST)
+    got = list(client.iter_activities_started(22, d0, d0 + timedelta(days=3, seconds=-1), now=since + timedelta(hours=2), edited_since=since))
+    assert [g["ProspectActivityId"] for g in got] == ["edited", "new"]
+    (w,) = [json.loads(c.request.body)["Parameter"] for c in responses.calls]
+    assert (w["FromDate"], w["ToDate"]) == ("2026-10-07 03:30:00", "2026-10-07 05:30:00")
+
+
 def test_parse_phone_call_keeps_the_edit_time_and_ignores_note_start_times():
     from integrations.leadsquared import parse_phone_call
     act = {"ActivityEvent": "22", "CreatedOn": "2026-10-05 14:29:02", "ModifiedOn": "2026-10-05 14:29:34",
