@@ -65,6 +65,20 @@ def test_enrolled_or_paid_leads_never_go_back_on_a_sheet():
     assert flat["L7"]["source"] == "carried" and flat["L7"]["tier"] == "C"
 
 
+def test_leads_marked_not_interested_or_later_stay_off_the_sheets_unless_they_ring_us():
+    stage = {"L1": "Not Interested", "L2": "May buy later", "L3": "Irrelevant lead", "L4": "May buy later", "L5": "May buy later", "L6": "Not Interested"}
+    leads = [dict(l, ProspectStage=stage.get(l["ProspectID"], l["ProspectStage"])) for l in LEADS]
+    reads = {lid: {"lead_id": lid, "name": lid, "status": "active", "tier": t, "chance": 5}
+             for lid, t in (("L1", "C"), ("L2", "B"), ("L4", "C"), ("L5", "A"))}
+    prev = {"L3": {"owner": "Asha K", "tier": "C", "chance": 2}, "L6": {"owner": "Ravi S", "tier": "B", "chance": 8}}
+    cs = [call("u0", "L4", "2026-10-10 03:00:00", "Missed", 0, "inbound")]                # L4 rang us and is still waiting
+    R = rows.build_rows(snap(cs, leads=leads), "2026-10-10", reads, prev, [])
+    flat = {r["lead_id"] for rs in R["by_owner"].values() for r in rs}
+    assert not {"L1", "L2", "L3", "L6"} & flat                                             # caller's disposition respected
+    assert {"L4", "L5"} <= flat                                                            # rang us since / about to pay
+    assert sorted(d["lead_id"] for d in R["dropped"] if d["status"] == "shelved") == ["L1", "L2"]
+
+
 def test_rs10_bootcamp_registration_is_a_prospect_not_an_enrollment():
     from analytics.daily_plan import review
     leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] in ("L1", "L3") else l for l in LEADS]
@@ -494,3 +508,13 @@ def test_dossier_reads_a_zero_second_callfailure_note_as_not_picked_up(tmp_path)
     text = (tmp_path / "L1.txt").read_text()
     assert "NotAnswered 0s" in text and "note: CallFailure" not in text   # the lead didn't pick up; not a line fault
     assert "note: Network error" in text                                    # a real failure keeps its note
+
+
+def test_lead_flow_section_splits_fresh_from_reassigned_leads():
+    from analytics.daily_plan import leadflow
+
+    rs = [{"new": True}, {"new": False}, {"new": False}]
+    rs = [dict(r, type="Other", owner="Asha K", mins=3, waiting=None, attempts=1, reached=False, real=False, stage="", name="x",
+               phone="", arrived=datetime(2026, 10, 10, 10, 0), last="") for r in rs]
+    html = leadflow.section("Lead flow", rs, leads=False)
+    assert "3 leads came to the team: 1 created in this period (fresh leads) and 2 older leads" in html

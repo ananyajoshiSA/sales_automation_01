@@ -107,6 +107,13 @@ details. Never put these in the repo or in chat.
   A Rs 10 bootcamp registration (or a free bootcamp sign-up) is not an enrollment, even when staged Course Enrolled:
   the lead stays on the sheets as a prospect for the course.
 
+## Who is on the call sheets
+
+Leads in Course Enrolled, or who said on a call that they paid, never go on a sheet. Leads whose LeadSquared stage is
+Not Interested, May buy later, Irrelevant lead, Invalid or Duplicate stay off the sheets too (the caller's disposition
+stands), unless the lead has rung us since and is waiting for a call back, or the reader rates it tier A (about to pay).
+The morning report counts how many were left off.
+
 ## Lead flow (Shivangi's request, 11 Oct)
 
 Every report now shows, for the leads that came in, how fast each was first dialled, how many attempts it got, whether it
@@ -116,6 +123,8 @@ was reached, and its disposition (LeadSquared stage) now, by lead type: **High P
 - Type comes from the lead's Report_Type field (High Priority / Incoming / Chat/Email/Referral), else Lead Request type,
   else Source (Inbound Phone call → Incoming, a chat source → Chat). Incoming Missed has no field: the lead's first contact
   was a call to us that nobody answered.
+- Leads that came in = fresh leads (created in the period) plus older leads assigned to a caller again (re-enquiries,
+  reassignments). Each section states the split: on 1-14 Oct, 1,768 leads = 465 fresh + 1,303 older leads.
 - First dial is timed from when the lead came in (created; for a reassigned lead, when it was assigned). A lead arriving
   before 09:30 or after 20:30 IST is timed from the next 09:30.
 - Status checks (14:00, 17:00): today's leads, with to-do lines for leads not dialled, dialled but not reached, and leads

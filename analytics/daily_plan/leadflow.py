@@ -111,7 +111,7 @@ def _mins(m: int | None) -> str:
 
 def summary_table(S: list[dict], label: str = "Lead type") -> str:
     e = html.escape
-    H = [f"<table><tr><th>{e(label)}</th><th>Leads (new)</th><th>Dialled</th><th>In 5 min</th><th>In 30 min</th><th>Median to 1st dial</th>"
+    H = [f"<table><tr><th>{e(label)}</th><th>Leads (fresh)</th><th>Dialled</th><th>In 5 min</th><th>In 30 min</th><th>Median to 1st dial</th>"
          "<th>Never dialled</th><th>Attempts per lead</th><th>Reached</th><th>2 min+ talk</th><th>Disposition now (top 3)</th></tr>"]
     for s in S:
         b = " style='font-weight:bold'" if s["group"] == "All" else ""
@@ -147,7 +147,10 @@ def section(title: str, rs: list[dict], leads: bool = True, phones: bool = True,
     e = html.escape
     if not rs:
         return f"<h2>{e(title)}</h2><p>No leads came in.</p>"
-    H = [f"<h2>{e(title)}</h2>", f"<p class='small'>{e(NOTE)}</p>", summary_table(summary(rs))]
+    new = sum(r["new"] for r in rs)
+    split = (f"{len(rs):,} leads came to the team: {new:,} created in this period (fresh leads) and {len(rs) - new:,} older leads "
+             "assigned to a caller again (re-enquiries and reassignments).")
+    H = [f"<h2>{e(title)}</h2>", f"<p><b>{e(split)}</b></p>", f"<p class='small'>{e(NOTE)}</p>", summary_table(summary(rs))]
     if by_caller:
         H += ["<h3>By caller</h3>", summary_table(summary(rs, "owner"), "Caller")]
     if leads:
