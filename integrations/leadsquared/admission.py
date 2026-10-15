@@ -4,7 +4,7 @@ Python process on this machine through a SQLite file in the git-ignored ``data/`
 ``LeadSquaredClient.request`` takes a slot here before every HTTP attempt, retries included:
 
 - at most ``LEADSQUARED_MAX_IN_FLIGHT`` attempts (default 1) run at a time across all processes using the file;
-- each starts no sooner than ``LEADSQUARED_COOLDOWN_SECONDS`` (default 4) after the previous one finished;
+- each starts no sooner than ``LEADSQUARED_COOLDOWN_SECONDS`` (default 6.5) after the previous one finished;
 - optional rolling budgets (operator-set, off unless set): attempts per hour and per day, requested records
   per day, and attempts per hour for one endpoint category;
 - a 429's ``Retry-After`` holds every caller (the client calls ``hold_until`` before freeing its slot).
@@ -154,7 +154,7 @@ def _endpoint_budgets(raw: str) -> dict[str, int]:
 
 @dataclass(frozen=True)
 class AdmissionConfig:
-    cooldown: float = 4.0
+    cooldown: float = 6.5
     max_in_flight: int = 1
     per_hour: int | None = None          # None = off
     per_day: int | None = None
@@ -167,7 +167,7 @@ class AdmissionConfig:
     @classmethod
     def from_env(cls) -> "AdmissionConfig":
         return cls(
-            cooldown=_env_number("LEADSQUARED_COOLDOWN_SECONDS", 4.0, minimum=0),
+            cooldown=_env_number("LEADSQUARED_COOLDOWN_SECONDS", 6.5, minimum=0),
             max_in_flight=_env_number("LEADSQUARED_MAX_IN_FLIGHT", 1, minimum=1, integer=True),
             per_hour=_env_number("LEADSQUARED_MAX_REQUESTS_PER_HOUR", None, minimum=1, integer=True, allow_off=True),
             per_day=_env_number("LEADSQUARED_MAX_REQUESTS_PER_DAY", None, minimum=1, integer=True, allow_off=True),

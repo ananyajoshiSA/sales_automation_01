@@ -9,7 +9,7 @@ git-ignored `data/` folder. This page says what it does, how to set it, what it 
 
 - **One request at a time** (`LEADSQUARED_MAX_IN_FLIGHT`, default 1) across every Python process using the
   same store, for the same LeadSquared account.
-- **A 4-second pause** after each request finishes before the next one starts (`LEADSQUARED_COOLDOWN_SECONDS`).
+- **A 6.5-second pause** after each request finishes before the next one starts (`LEADSQUARED_COOLDOWN_SECONDS`).
   The pause is kept in the store, so it survives a restart and is shared by processes.
 - **Retries go through the gate too.** A retry waits for the later of its own backoff (1, 2, 4 s) and the
   cooldown. A 429's `Retry-After` (seconds or an HTTP date) holds every caller, not just the one that got it.
@@ -62,7 +62,7 @@ an error naming the variable.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LEADSQUARED_COOLDOWN_SECONDS` | `4` | Pause after each request finishes. `0` = no pause (still one at a time). |
+| `LEADSQUARED_COOLDOWN_SECONDS` | `6.5` | Pause after each request finishes. `0` = no pause (still one at a time). |
 | `LEADSQUARED_MAX_IN_FLIGHT` | `1` | Requests allowed at once across processes. Whole number, 1 or more. |
 | `LEADSQUARED_MAX_REQUESTS_PER_HOUR` | off | Attempts in any 60 minutes. Whole number, or `off`. |
 | `LEADSQUARED_MAX_REQUESTS_PER_DAY` | off | Attempts in any 24 hours. Whole number, or `off`. |

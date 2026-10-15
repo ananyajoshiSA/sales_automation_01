@@ -356,7 +356,7 @@ def test_cooldown_and_holds_survive_a_restart(monkeypatch, lsq_gate, fake_clock)
 
 # ------------------------------------------------------------------ configuration
 
-@pytest.mark.parametrize("raw,expected", [(None, 4.0), ("", 4.0), ("0", 0.0), ("2.5", 2.5)])
+@pytest.mark.parametrize("raw,expected", [(None, 6.5), ("", 6.5), ("0", 0.0), ("2.5", 2.5)])
 def test_cooldown_setting(monkeypatch, raw, expected):
     if raw is None:
         monkeypatch.delenv("LEADSQUARED_COOLDOWN_SECONDS", raising=False)
@@ -368,7 +368,7 @@ def test_cooldown_setting(monkeypatch, raw, expected):
 def test_defaults_leave_budgets_off_explicitly(monkeypatch):
     monkeypatch.delenv("LEADSQUARED_COOLDOWN_SECONDS", raising=False)
     c = admission.AdmissionConfig.from_env()
-    assert (c.cooldown, c.max_in_flight, c.max_ids_per_bulk) == (4.0, 1, 250)
+    assert (c.cooldown, c.max_in_flight, c.max_ids_per_bulk) == (6.5, 1, 250)
     assert (c.per_hour, c.per_day, c.records_per_day, c.endpoint_per_hour) == (None, None, None, {})
     monkeypatch.setenv("LEADSQUARED_MAX_REQUESTS_PER_HOUR", "off")
     monkeypatch.setenv("LEADSQUARED_ENDPOINT_HOURLY_BUDGETS", "lead_history=600, activity_bulk=200")
