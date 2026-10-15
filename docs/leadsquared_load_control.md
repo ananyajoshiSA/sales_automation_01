@@ -5,6 +5,19 @@ Every LeadSquared request the Python code makes goes through one gate in `LeadSq
 start. It is shared by every thread, client and process on one machine through a small SQLite file in the
 git-ignored `data/` folder. This page says what it does, how to set it, what it doesn't cover, and how to undo it.
 
+## The account's limits
+
+From LeadSquared's API usage page (Super plan, read by the user on 15 Oct 2026):
+
+- **35 requests every 5 seconds** for the whole account.
+- **474,000 requests a day** (100,000 plus 1,000 per user).
+- On 15 Oct 2026 the account had made 72,170 requests by 16:23 IST (15% of the day). This repo's scheduled jobs
+  made roughly 5,000 of them; the rest come from other tools connected to the account (dialers, Zipteams,
+  TimePay, lead forms and so on), which this gate can't see or limit. That traffic averages about 6 requests
+  every 5 seconds, so it shares the 35 with whatever this repo sends.
+
+Both limits apply to the account as a whole: every machine, chat and tool that uses it counts towards them.
+
 ## What the gate does
 
 - **One request at a time** (`LEADSQUARED_MAX_IN_FLIGHT`, default 1) across every Python process using the
@@ -62,8 +75,8 @@ sends nothing. The message names the file and the `LEADSQUARED_ADMISSION_DB` set
 
 ## Settings
 
-All are optional. None of the budgets has a value in this repo: LeadSquared's limits depend on the plan, so
-an operator picks budgets from what they know about the account. A malformed value stops the client with
+All are optional. None of the hourly or daily budgets has a value in this repo: with the account's 474,000 a day
+(above) the daily limit is far off, so an operator sets budgets only if they want a tighter share. A malformed value stops the client with
 an error naming the variable.
 
 | Variable | Default | Meaning |
