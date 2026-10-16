@@ -121,6 +121,25 @@ Then write `narrative.json` (`headline`, `fixes`, `why`, `calls`, `callers`, `le
 `exports/weekly/<first>_<last>/` and adds each call's reading to the ledger. Reasons are judgements, one per lead,
 and are not priced: rupee figures wait for payment data and a 20-lead hand check (GOAL.md section 5).
 
+### The team leader's weekly note (the main weekly deliverable)
+
+The owner, 16 Oct: "imagine you're writing a report to Shivangi that how can she improve enrollment numbers next week …
+give examples that this conversation happened, this could have been saved". After `weekly-build`:
+
+```bash
+.venv/bin/python -m analytics.daily_plan weekly-leader-prepare <first day> <last day>   # near-miss candidates + brief
+```
+
+Candidates are every part-paid lead and every open or lost lead with a conversation (not unreached, not a clear no).
+Claude judges each batch (`data/weekly/<first>_<last>/leader/cand_<k>.jsonl`, brief `docs/weekly_leader_brief.md`) and
+writes `leader/out_<k>.jsonl`: the buying signal, what went wrong, the team leader's lever (callbacks, joining to close,
+payment plans, the payer on the call, allocation and ownership, course and price, inbound calls, handovers, stages),
+whether it was likely saveable and a short story. Run `weekly-leader-build` once to get `leader/leader_facts.json`
+(attendance, start times, real conversations per 100 dials by hour, allocation per caller, first-dial speed, leads
+chased by many callers, near-miss counts), write `leader/leader.json` (`title`, `headline`, `moves`: five
+`{title, do, why, examples: [lead_id], check}`, `allocation`, `management`, `slots`, `day_plan`: `[[time, what]]`,
+`checklist`), and build again. The PDF is `exports/weekly/<first>_<last>/Elite_weekly_note_for_team_leader.pdf`.
+
 ## Email settings (environment variables in the cloud environment's settings)
 
 `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`; `REPORT_TO`: full reports with lead phone

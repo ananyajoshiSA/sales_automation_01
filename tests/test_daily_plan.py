@@ -633,3 +633,22 @@ def test_weekly_review_spreads_examples_across_callers():
     from analytics.daily_plan import weekly
     leads = [{"owner": "A", "name": f"a{i}"} for i in range(5)] + [{"owner": "B", "name": "unknown"}, {"owner": "B", "name": "b1"}]
     assert [l["name"] for l in weekly._spread(leads, 4)] == ["a0", "b1", "a1", "unknown"]
+
+
+def test_leader_note_picks_candidates_counts_near_misses_and_renders(tmp_path):
+    from analytics.daily_plan import leader_week
+    weekly, s = _weekly_fixture(tmp_path)
+    reads = {"L1": {"lead_id": "L1", "outcome": "open", "primary_reason": "L6", "owner": "Asha K"},
+             "L2": {"lead_id": "L2", "outcome": "lost", "primary_reason": "L3"},
+             "L3": {"lead_id": "L3", "outcome": "paying"}, "L4": {"lead_id": "L4", "outcome": "enrolled", "owner": "Asha K"}}
+    assert [r["lead_id"] for r in leader_week.candidates(reads)] == ["L3", "L1"]     # unreached and enrolled leads are not near misses
+    near = {"L1": {"lead_id": "L1", "name": "Ravi", "owner": "Asha K", "signal": "strong", "saveable": "likely", "tl_lever": "callback_check",
+                   "story": "Said yes on Tue; the 2 pm call was never made.", "tl_action": "Check due callbacks at 14:00."},
+            "L3": {"lead_id": "L3", "signal": "none", "saveable": "unlikely", "tl_lever": "none"}}
+    C = leader_week.near_counts(near)
+    assert (C["likely"], C["possible"], C["levers"]) == (1, 0, [("callback_check", 1)])
+    F = leader_week.ops(s, "2026-10-09", "2026-10-10", reads)
+    assert F["enrolled"] == 1 and set(F["callers"]) == set(s.callers)
+    doc = leader_week.html_doc(F, near, {"headline": "x", "moves": [{"title": "Keep callbacks", "do": "d", "why": "w", "examples": ["L1"]}]},
+                               {"team": "Team X", "leader": "Tara L", "period": "Fri 9 Oct to Sat 10 Oct", "built": "Sat"})
+    assert "Keep callbacks" in doc and doc.count("the 2 pm call was never made") == 1      # an example in a move isn't repeated below

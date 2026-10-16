@@ -15,6 +15,9 @@
     python -m analytics.daily_plan weekly-prepare 2026-10-08 2026-10-16   # every connected call of the week, transcripts, dossiers
     #   ... Claude reads every call -> data/weekly/<start>_<end>/reads/out_*.jsonl, writes narrative.json ...
     python -m analytics.daily_plan weekly-build 2026-10-08 2026-10-16     # weekly review PDF + workbook, call ledger with readings
+    python -m analytics.daily_plan weekly-leader-prepare 2026-10-08 2026-10-16   # near-miss candidates for the team leader's note
+    #   ... Claude judges every candidate -> data/weekly/<start>_<end>/leader/out_*.jsonl, writes leader.json ...
+    python -m analytics.daily_plan weekly-leader-build 2026-10-08 2026-10-16     # the team leader's weekly note (PDF)
 """
 
 from __future__ import annotations
@@ -398,6 +401,52 @@ def cmd_weekly_build(a):
                       "read": R["read"], "outcomes": R["outcomes"], "reasons": R["reasons"][:8]}, indent=1))
 
 
+def cmd_weekly_leader_prepare(a):
+    """Near-miss candidates for the team leader's note, in batches, with the brief."""
+    from analytics.daily_plan import leader_week, weekly
+
+    d = weekly_dir(a)
+    L = os.path.join(d, "leader")
+    os.makedirs(L, exist_ok=True)
+    reads = weekly.settle(weekly.load_reads(os.path.join(d, "reads")), weekly.enrolled_dates("data/daily"), a.start)
+    cands = leader_week.candidates(reads)
+    n = max(1, -(-len(cands) // a.per_batch))
+    files = []
+    for k in range(n):
+        f = os.path.join(L, f"cand_{k}.jsonl")
+        with open(f, "w") as out:
+            out.writelines(json.dumps({"dossier": os.path.join(d, "dossiers", f"{r['lead_id']}.txt"), **r}, ensure_ascii=False) + "\n"
+                           for r in cands[k::n])
+        files.append(f)
+    open(os.path.join(L, "brief.md"), "w").write(open("docs/weekly_leader_brief.md").read().replace("{start}", a.start).replace("{end}", a.end))
+    print(json.dumps({"candidates": len(cands), "batches": files, "brief": os.path.join(L, "brief.md")}, indent=1))
+
+
+def cmd_weekly_leader_build(a):
+    """The team leader's weekly note: stops while any candidate lacks a judgement; writes leader_facts.json, then the PDF."""
+    from analytics.daily_plan import leader_week, weekly
+
+    d = weekly_dir(a)
+    L = os.path.join(d, "leader")
+    reads = weekly.settle(weekly.load_reads(os.path.join(d, "reads")), weekly.enrolled_dates("data/daily"), a.start)
+    near = leader_week.load_near(L)
+    missing = [r["lead_id"] for r in leader_week.candidates(reads) if r["lead_id"] not in near]
+    if missing:
+        print(f"not finished: {len(missing)} candidates have no judgement", file=sys.stderr)
+        sys.exit(2)
+    F = leader_week.ops(Snap(weekly.gather("data/daily", a.start, a.end)), a.start, a.end, reads)
+    json.dump({"ops": F, "near": leader_week.near_counts(near)}, open(os.path.join(L, "leader_facts.json"), "w"), indent=1, default=str)
+    N = json.load(open(os.path.join(L, "leader.json"))) if os.path.exists(os.path.join(L, "leader.json")) else {}
+    out = os.path.join("exports", "weekly", f"{a.start}_{a.end}")
+    os.makedirs(out, exist_ok=True)
+    period = f"{datetime.strptime(a.start, '%Y-%m-%d'):%a %-d %b} to {datetime.strptime(a.end, '%Y-%m-%d'):%a %-d %b %Y}"
+    meta = {"team": a.team, "leader": a.leader, "period": period, "built": now_ist().strftime("%a %-d %b %H:%M")}
+    stem = os.path.join(out, "Elite_weekly_note_for_team_leader")
+    from analytics.daily_plan.pdf import render
+    render(leader_week.html_doc(F, near, N, meta), stem + ".html", stem + ".pdf")
+    print(json.dumps({"pdf": stem + ".pdf", "near": leader_week.near_counts(near), "narrative": bool(N)}, indent=1, default=str))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m analytics.daily_plan")
     ap.add_argument("--team", default=TEAM)
@@ -422,10 +471,13 @@ def main(argv=None):
     wp = sub.add_parser("weekly-prepare"); wp.add_argument("start"); wp.add_argument("end"); wp.add_argument("--pause", type=int, default=60)
     wp.add_argument("--no-transcripts", action="store_true")
     wb = sub.add_parser("weekly-build"); wb.add_argument("start"); wb.add_argument("end"); wb.add_argument("--allow-missing", action="store_true")
+    lp = sub.add_parser("weekly-leader-prepare"); lp.add_argument("start"); lp.add_argument("end"); lp.add_argument("--per-batch", type=int, default=175)
+    lb = sub.add_parser("weekly-leader-build"); lb.add_argument("start"); lb.add_argument("end")
     a = ap.parse_args(argv)
     {"revival-prepare": cmd_revival_prepare, "revival-build": cmd_revival_build, "share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
      "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build,
-     "weekly-prepare": cmd_weekly_prepare, "weekly-build": cmd_weekly_build}[a.cmd](a)
+     "weekly-prepare": cmd_weekly_prepare, "weekly-build": cmd_weekly_build,
+     "weekly-leader-prepare": cmd_weekly_leader_prepare, "weekly-leader-build": cmd_weekly_leader_build}[a.cmd](a)
 
 
 if __name__ == "__main__":
