@@ -36,12 +36,12 @@ Both limits apply to the account as a whole: every machine, chat and tool that u
   only when replies come back very fast. LeadSquared's own account limit is 30 per 5 s, so this keeps 20 per 5 s
   free for other users of the account. It is per machine like the rest of the gate: two machines running at once
   can each send 10.
-- **The company-wide activity read starts at most once every 2 seconds** (2.5 per 5 s,
-  `LEADSQUARED_ENDPOINT_MAX_PER_WINDOW=activity_bulk=2.5`, the default since 16 Oct 2026), retries included. This
+- **The company-wide activity read starts at most once every 2.5 seconds** (2 per 5 s,
+  `LEADSQUARED_ENDPOINT_MAX_PER_WINDOW=activity_bulk=2`, the default since 16 Oct 2026), retries included. This
   is `RetrieveByActivityEvent`, the read behind every day's call log, Zipteams notes and payments; LeadSquared
-  allows 2.5 per 5 s on it. Other reads are not slowed by it. A day's report needs roughly 200 of these reads
-  (estimate), about 7 minutes at this rate. Per machine like the rest of the gate: two chats fetching at once
-  each send 2.5 per 5 s, so run one fetch at a time.
+  allows 2.5 per 5 s on it, so 2 keeps a 20% cushion and never puts 3 starts in any 5 s. Other reads are not
+  slowed by it. A day's report needs roughly 200 of these reads (estimate), about 8 minutes at this rate. Per
+  machine like the rest of the gate: two chats fetching at once each send 2 per 5 s, so run one fetch at a time.
 - **Retries go through the gate too.** A retry waits for the later of its own backoff (1, 2, 4 s) and the
   cooldown. A 429's `Retry-After` (seconds or an HTTP date) holds every caller, not just the one that got it.
   A hold is only ever lengthened, never shortened. Which statuses are retried is unchanged (429, and 5xx
@@ -96,7 +96,7 @@ an error naming the variable.
 | `LEADSQUARED_COOLDOWN_SECONDS` | `0.5` | Pause after each request finishes. `0` = no pause. Was `6` until 16 Oct 2026. |
 | `LEADSQUARED_MAX_REQUESTS_PER_WINDOW` | `10` | Most requests (retries included) that start in any window. Whole number, or `off`. |
 | `LEADSQUARED_WINDOW_SECONDS` | `5` | Length of that window in seconds. Above 0. |
-| `LEADSQUARED_ENDPOINT_MAX_PER_WINDOW` | `activity_bulk=2.5` | Starts per window for one endpoint category, kept evenly spaced (2.5 per 5 s = one every 2 s). Fractions allowed; `off` removes it. |
+| `LEADSQUARED_ENDPOINT_MAX_PER_WINDOW` | `activity_bulk=2` | Starts per window for one endpoint category, kept evenly spaced (2 per 5 s = one every 2.5 s). Fractions allowed; `off` removes it. |
 | `LEADSQUARED_MAX_IN_FLIGHT` | `2` | Requests allowed at once across processes. Whole number, 1 or more. Was `1` until 16 Oct 2026. |
 | `LEADSQUARED_MAX_REQUESTS_PER_HOUR` | off | Attempts in any 60 minutes. Whole number, or `off`. |
 | `LEADSQUARED_MAX_REQUESTS_PER_DAY` | off | Attempts in any 24 hours. Whole number, or `off`. |
