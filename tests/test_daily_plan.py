@@ -304,6 +304,7 @@ def test_snapshot_falls_back_to_per_lead_reads_when_bulk_is_refused(monkeypatch,
                          {"ProspectID": "L2", "ProspectActivityDate_Max": "2026-10-01 06:00:00", "ModifiedOn": "2026-10-02 06:00:00"}])
 
         def iter_activities_started(self, *a, **k):
+            self.reads.append(a[0])
             raise LeadSquaredError("Access Denied", status_code=403)
 
         def get_lead_activities(self, lid, **k):
@@ -317,13 +318,53 @@ def test_snapshot_falls_back_to_per_lead_reads_when_bulk_is_refused(monkeypatch,
     monkeypatch.setattr(ftd, "LeadSquaredClient", lambda: fake)
     monkeypatch.setattr(ftd, "now_utc", lambda: _utc("2026-10-13 08:00:00"))
     monkeypatch.setattr(revival, "RATE", 1000)
+    waits = []
+    monkeypatch.setattr(ftd, "sleep", waits.append)
     out = tmp_path / "snap.json"
     ftd.main("Team X", "2026-10-13", "2026-10-13", str(out))
     snap = json.load(open(out))
+    assert len(fake.reads) == 3 and waits == [120, 120]                       # the bulk read is tried three times first
     assert fake.histories == ["L1"]                                         # only the lead active since the start is read
     assert [(c["activity_id"], c["lead_id"], c["caller"]) for c in snap["calls"]] == [("today", "L1", "Asha K")]
     assert [z["ProspectActivityId"] for z in snap["zip_activities"]] == ["zip"]
     assert snap["source"] == "per-lead fallback" and not (tmp_path / "snap.json.hist.jsonl").exists()
+
+
+def test_snapshot_retries_a_refused_bulk_read_before_falling_back(monkeypatch, tmp_path):
+    import scripts.fetch_team_data as ftd
+    import pytest
+    from integrations.leadsquared import LeadSquaredError
+    from integrations.timeutil import utc as _utc
+
+    class RefusedOnce(_FakeLSQ):
+        refusals = 1
+
+        def iter_activities_started(self, ev, d0, d1, edited_since=None):
+            if self.refusals:
+                self.refusals -= 1
+                raise LeadSquaredError("Access Denied", status_code=403)
+            return super().iter_activities_started(ev, d0, d1, edited_since)
+
+    fake = RefusedOnce({22: [_act("a1", "L1", "2026-10-13 05:00:00", "2026-10-13 05:01:00")]})
+    monkeypatch.setattr(ftd, "LeadSquaredClient", lambda: fake)
+    monkeypatch.setattr(ftd, "now_utc", lambda: _utc("2026-10-13 08:00:00"))
+    waits = []
+    monkeypatch.setattr(ftd, "sleep", waits.append)
+    out = tmp_path / "snap.json"
+    ftd.main("Team X", "2026-10-13", "2026-10-13", str(out))
+    snap = json.load(open(out))
+    assert waits == [120] and fake.histories == []                            # one pause, then the bulk read worked
+    assert snap["source"] == "bulk" and [c["activity_id"] for c in snap["calls"]] == ["a1"]
+
+    class Broken(_FakeLSQ):
+        def iter_activities_started(self, *a, **k):
+            raise LeadSquaredError("Server error", status_code=500)
+
+    monkeypatch.setattr(ftd, "LeadSquaredClient", lambda: Broken())
+    waits.clear()
+    with pytest.raises(LeadSquaredError):                                     # only a 403 is waited out
+        ftd.main("Team X", "2026-10-13", "2026-10-13", str(out))
+    assert waits == []
 
 
 def test_enrolled_reuses_known_first_enrolments(tmp_path):
