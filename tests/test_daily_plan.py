@@ -652,3 +652,16 @@ def test_leader_note_picks_candidates_counts_near_misses_and_renders(tmp_path):
     doc = leader_week.html_doc(F, near, {"headline": "x", "moves": [{"title": "Keep callbacks", "do": "d", "why": "w", "examples": ["L1"]}]},
                                {"team": "Team X", "leader": "Tara L", "period": "Fri 9 Oct to Sat 10 Oct", "built": "Sat"})
     assert "Keep callbacks" in doc and doc.count("the 2 pm call was never made") == 1      # an example in a move isn't repeated below
+
+
+def test_leader_note_separates_bulk_handouts_from_best_leads(monkeypatch):
+    from analytics.daily_plan import leader_week
+    monkeypatch.setattr(leader_week, "BULK", 3)
+    leads = [dict(l, mx_Assigned_On="2026-10-07 04:40:00", mx_Assigned_By="Amit R") for l in LEADS[:4]]          # 4 old leads, one hour
+    leads += [dict(LEADS[4], CreatedOn="2026-10-09 05:00:00", mx_Report_Type="High Priority")]                     # a fresh best lead
+    s = snap([call("u1", "L1", "2026-10-09 06:00:00", "Answered", 300), call("u1", "L5", "2026-10-09 05:02:00", "Answered", 200)], leads=leads)
+    S = leader_week.sources(s, "2026-10-01", "2026-10-10", {"L5": {"outcome": "enrolled"}}, "2026-10-08")
+    types = dict(S["types"])
+    assert types["Bulk handout of old leads"]["leads"] == 4 and types["High Priority (fresh)"]["enrolled"] == 1
+    assert S["handouts"][0]["by"] == "Amit R" and S["handouts"][0]["leads"] == 4
+    assert S["best_by_caller"]["Asha K"]["in5"] == 1 and S["bulk_dial_share"] == {}                                 # under 100 dials: no share

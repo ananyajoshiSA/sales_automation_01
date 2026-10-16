@@ -435,6 +435,9 @@ def cmd_weekly_leader_build(a):
         print(f"not finished: {len(missing)} candidates have no judgement", file=sys.stderr)
         sys.exit(2)
     F = leader_week.ops(Snap(weekly.gather("data/daily", a.start, a.end)), a.start, a.end, reads)
+    month = f"data/daily/month/{a.end[:7]}.json"          # the month pull reaches back to bulk handouts made before the week
+    src = Snap(load_snapshots([month])) if os.path.exists(month) else Snap(weekly.gather("data/daily", a.start, a.end))
+    F["sources"] = leader_week.sources(src, min(a.start, a.end[:8] + "01") if os.path.exists(month) else a.start, a.end, reads, a.start)
     json.dump({"ops": F, "near": leader_week.near_counts(near)}, open(os.path.join(L, "leader_facts.json"), "w"), indent=1, default=str)
     N = json.load(open(os.path.join(L, "leader.json"))) if os.path.exists(os.path.join(L, "leader.json")) else {}
     out = os.path.join("exports", "weekly", f"{a.start}_{a.end}")

@@ -112,6 +112,53 @@ def ops(snap: Snap, start: str, end: str, reads: dict[str, dict]) -> dict:
             "enrolled": sum(r.get("outcome") == "enrolled" for r in reads.values())}
 
 
+BULK = 50          # leads handed out in one hour by one person: a bulk handout, not a lead arriving
+BEST = ("High Priority", "Incoming", "Incoming Missed")
+
+
+def sources(snap: Snap, start: str, end: str, reads: dict[str, dict], week_start: str | None = None) -> dict:
+    """Leads are not equal: by type and fresh or handed out again, how fast each was dialled, reached, talked to, enrolled.
+    Bulk handouts (one person, one hour, 50+ old leads) are their own row; best leads (fresh High Priority, Incoming,
+    Incoming Missed) by caller; each caller's share of the week's dials (from ``week_start``) spent on bulk-handout leads."""
+    enrolled = {k for k, r in reads.items() if r.get("outcome") == "enrolled"}
+    flow = leadflow.rows(snap, start, end)
+    by = lambda r: (snap.leads.get(r["lead_id"]) or {}).get("mx_Assigned_By") or "?"  # noqa: E731
+    drops = Counter((r["allocated"].strftime("%Y-%m-%d %H"), by(r)) for r in flow if not r["new"])
+    big = {k for k, n in drops.items() if n >= BULK}
+    bulk = [r for r in flow if not r["new"] and (r["allocated"].strftime("%Y-%m-%d %H"), by(r)) in big]
+    bulk_ids = {r["lead_id"] for r in bulk}
+
+    def row(rs: list[dict]) -> dict:
+        m = [r["mins"] for r in rs if r["mins"] is not None]
+        return {"leads": len(rs), "dials": sum(r["attempts"] for r in rs), "median_first_min": statistics.median(m) if m else None,
+                "in5": sum(x <= 5 for x in m), "never": sum(r["first_dial"] is None for r in rs), "reached": sum(r["reached"] for r in rs),
+                "real": sum(r["real"] for r in rs), "enrolled": sum(r["lead_id"] in enrolled for r in rs)}
+    groups = defaultdict(list)
+    for r in flow:
+        groups["Bulk handout of old leads" if r["lead_id"] in bulk_ids else f"{r['type']} ({'fresh' if r['new'] else 'given again'})"].append(r)
+    best = defaultdict(list)
+    for r in flow:
+        if r["new"] and r["type"] in BEST:
+            best[r["owner"]].append(r)
+    name = lambda c: snap.users.get(c.get("user_id"))  # noqa: E731
+    dials, on_bulk = Counter(), Counter()
+    for c in snap.calls:
+        if c["direction"] == "outbound" and (week_start or start) <= c["t"].strftime("%Y-%m-%d") <= end and name(c) in snap.callers:
+            dials[name(c)] += 1
+            on_bulk[name(c)] += c["lead_id"] in bulk_ids
+    arrival = defaultdict(list)
+    for rs in best.values():
+        for r in rs:
+            if r["mins"] is not None:
+                arrival[r["arrived"].hour].append(r["mins"])
+    return {"period": f"{start} to {end}", "types": sorted(((k, row(v)) for k, v in groups.items()), key=lambda kv: -kv[1]["leads"]),
+            "handouts": [{"when": k[0], "by": k[1], "leads": n, "to": dict(Counter(r["owner"] for r in bulk if (r["allocated"].strftime("%Y-%m-%d %H"), by(r)) == k))}
+                         for k, n in drops.most_common() if k in big],
+            "best_by_caller": {k: row(v) for k, v in sorted(best.items(), key=lambda kv: -len(kv[1]))},
+            "best_wait_by_arrival_hour": {h: statistics.median(v) for h, v in sorted(arrival.items()) if len(v) >= 5},
+            "bulk_dial_share": {k: round(100 * on_bulk[k] / dials[k]) for k in dials if dials[k] >= 100}}
+
+
 def load_near(d: str) -> dict[str, dict]:
     out = {}
     for f in sorted(glob.glob(os.path.join(d, "out_*.jsonl"))):
@@ -130,6 +177,13 @@ def near_counts(near: dict[str, dict]) -> dict:
     return {"judged": len(near), "signal": dict(Counter(r.get("signal") for r in near.values())),
             "likely": sum(r.get("saveable") == "likely" for r in hot), "possible": sum(r.get("saveable") == "possible" for r in hot),
             "levers": Counter(r.get("tl_lever") for r in hot if r.get("saveable") in ("likely", "possible")).most_common()}
+
+
+def _mins(m) -> str:
+    if m is None:
+        return "—"
+    m = int(m)
+    return f"{m} min" if m < 120 else f"{m // 60} h {m % 60:02d}"
 
 
 def _e(s) -> str:
@@ -180,12 +234,38 @@ def html_doc(F: dict, near: dict[str, dict], N: dict, meta: dict) -> str:
         rs = [r for r in hot if r.get("tl_lever") == k and r["lead_id"] not in used]
         if rs:
             H.append(f"<h3>{_e(label)} ({len(rs)})</h3>" + "".join(_story(r) for r in rs))
+    S = F.get("sources")
+    if N.get("sources") or S:
+        H.append("<h2>Not all leads are equal</h2>" + "".join(f"<p>{x}</p>" for x in N.get("sources", [])))
+    if S:
+        H.append(f"<p class='sub'>Leads that came to the team {_e(S['period'])}. Enrolled = checked against the calls in the week's review.</p>"
+                 "<table><tr><th>Lead</th><th>Leads</th><th>Median first dial</th><th>Dialled in 5 min</th><th>Never dialled</th>"
+                 "<th>Reached</th><th>Real conversation</th><th>Enrolled</th></tr>")
+        for k, v in S["types"]:
+            n = v["leads"] or 1
+            H.append(f"<tr><td>{_e(k)}</td><td>{v['leads']}</td><td>{_mins(v['median_first_min'])}</td><td>{100 * v['in5'] // n}%</td>"
+                     f"<td>{v['never']}</td><td>{100 * v['reached'] // n}%</td><td>{100 * v['real'] // n}%</td><td>{v['enrolled']}</td></tr>")
+        H.append("</table>")
     if N.get("allocation"):
-        H.append("<h2>Lead allocation</h2>" + "".join(f"<p>{x}</p>" for x in N["allocation"]))
+        H.append("<h2>How leads were handed out</h2>" + "".join(f"<p>{x}</p>" for x in N["allocation"]))
+    if S and S["handouts"]:
+        H.append("<h3>Bulk handouts of old leads</h3><table><tr><th>When (IST)</th><th>By</th><th>Leads</th><th>To</th></tr>" + "".join(
+            f"<tr><td>{_e(h['when'])}:00</td><td>{_e(h['by'])}</td><td>{h['leads']}</td><td>{_e(', '.join(f'{k} {v}' for k, v in sorted(h['to'].items(), key=lambda kv: -kv[1])))}</td></tr>"
+            for h in S["handouts"]) + "</table>")
+        H.append("<p class='sub'>Share of each caller's dials this week spent on bulk-handout leads: " + "; ".join(
+            f"{_e(k)} {v}%" for k, v in sorted(S["bulk_dial_share"].items(), key=lambda kv: -kv[1]) if v) + ".</p>")
+    if S and S["best_by_caller"]:
+        H.append("<h3>Who got the best leads (fresh High Priority, Incoming, Incoming Missed) and how fast they were called</h3>"
+                 "<table><tr><th>Caller</th><th>Best leads</th><th>Median first dial</th><th>Dialled in 5 min</th><th>Real conversation</th><th>Enrolled</th></tr>"
+                 + "".join(f"<tr><td>{_e(k)}</td><td>{v['leads']}</td><td>{_mins(v['median_first_min'])}</td><td>{v['in5']}</td>"
+                           f"<td>{100 * v['real'] // (v['leads'] or 1)}%</td><td>{v['enrolled']}</td></tr>" for k, v in S["best_by_caller"].items()) + "</table>")
+        if S["best_wait_by_arrival_hour"]:
+            H.append("<p class='sub'>Median wait for a best lead's first dial, by the hour it arrived: " + "; ".join(
+                f"{h}:00 {_mins(m)}" for h, m in S["best_wait_by_arrival_hour"].items()) + ".</p>")
     H.append(f"<p class='sub'>{F['came_in']} leads came to the team in the week ({F['fresh']} fresh, {F['came_in'] - F['fresh']} older leads "
              f"assigned again); {F['never_dialled']} were never dialled; median first dial {F['first_dial_median_min']} min after the lead came in "
              f"({F['first_dial_in5']} within 5 min).</p>")
-    H.append("<table><tr><th>Caller</th><th>Weekdays dialling</th><th>Leads given</th><th>of them fresh</th><th>Given on a day off</th>"
+    H.append("<h3>Leads given this week, by caller</h3><table><tr><th>Caller</th><th>Weekdays dialling</th><th>Leads given</th><th>of them fresh</th><th>Given on a day off</th>"
              "<th>Never dialled</th><th>Real conversations a day</th><th>Enrolled (own leads)</th></tr>")
     for n, c in sorted(F["callers"].items(), key=lambda kv: -F["allocation"].get(kv[0], {}).get("came_in", 0)):
         a = F["allocation"].get(n, {})
