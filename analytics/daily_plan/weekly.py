@@ -35,7 +35,7 @@ REASONS = {
     "ASK": "Real interest, no fee or ask made", "DECIDER": "Decider not involved", "BUDGET": "Can't pay now",
     "TIMING": "Wants to start later", "NOT_INTERESTED": "Clear no, with a reason", "DECIDING": "Still deciding, live",
 }
-OUTCOMES = ("enrolled", "paying", "open", "lost", "not a prospect")
+OUTCOMES = ("enrolled", "paying", "open", "lost", "not a prospect", "enrolled earlier")
 MISTAKES = ("none", "no ask", "no discovery", "wrong or inconsistent fact", "overpromise", "objection missed",
             "no next step fixed", "callback not kept", "wrong course", "tone", "line or audio problem")
 
@@ -130,6 +130,23 @@ def ledger(snap: Snap, calls: list[dict], recs: dict[str, Call], searched: set[s
 
 def _cut(t: str) -> str:
     return t if len(t) <= MAX_TX_CHARS else t[:MAX_TX_CHARS // 2] + "\n[… middle of the call cut …]\n" + t[-MAX_TX_CHARS // 2:]
+
+
+def enrolled_dates(root: str) -> dict[str, str]:
+    """Lead id -> first move to Course Enrolled, from every daily enrolled-leads pull."""
+    out = {}
+    for f in sorted(glob.glob(os.path.join(root, "*", "enrolled.json"))):
+        out.update({l["ProspectID"]: l.get("first_enrolled") for l in json.load(open(f))})
+    return out
+
+
+def settle(reads: dict[str, dict], enrolled: dict[str, str], start: str) -> dict[str, dict]:
+    """A lead read as enrolled whose first Course Enrolled came before the week is not this week's enrollment."""
+    for lid, r in reads.items():
+        first = (enrolled.get(lid) or "")[:10]
+        if r.get("outcome") == "enrolled" and first and first < start:
+            r["outcome"] = "enrolled earlier"
+    return reads
 
 
 def build_dossiers(snap: Snap, calls: list[dict], recs: dict[str, Call], out_dir: str, enrolled: dict) -> list[dict]:
@@ -273,7 +290,7 @@ def html_doc(R: dict, N: dict, days: list[dict], leads: list[dict], meta: dict) 
              + "".join(f"<th>{e(o.capitalize())}</th>" for o in OUTCOMES) + "</tr><tr>"
              + "".join(f"<td>{R['outcomes'].get(o, 0):,}</td>" for o in OUTCOMES) + "</tr></table>"
              "<p class='small'>Enrolled = first-time enrollment this week; paying = payment started (link, seat block, EMI) and not finished; "
-             "open = still a prospect; lost = no longer a prospect this month; not a prospect = existing student, support, job seeker, wrong number.</p>")
+             "open = still a prospect; lost = no longer a prospect this month; not a prospect = existing student, support, job seeker, wrong number; enrolled earlier = first Course Enrolled before this week.</p>")
     if N.get("why"):
         H.append("<h2>Why enrollments did not come through</h2>" + "".join(f"<p>{x}</p>" for x in N["why"]))
     if R["reasons"]:

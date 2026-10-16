@@ -339,9 +339,7 @@ def cmd_weekly_prepare(a):
     rows = weekly.ledger(snap, calls, recs, set(tx))
     with open(os.path.join(d, "calls.jsonl"), "w") as f:
         f.writelines(json.dumps(r) + "\n" for r in rows)
-    enrolled = {}
-    for f in sorted(glob.glob("data/daily/*/enrolled.json")):
-        enrolled.update({l["ProspectID"]: l.get("first_enrolled") for l in json.load(open(f))})
+    enrolled = weekly.enrolled_dates("data/daily")
     index = weekly.build_dossiers(snap, calls, recs, os.path.join(d, "dossiers"), enrolled)
     json.dump(index, open(os.path.join(d, "index.json"), "w"))
     files = weekly.write_batches(index, os.path.join(d, "reads"))
@@ -361,7 +359,7 @@ def cmd_weekly_build(a):
 
     d = weekly_dir(a)
     index = json.load(open(os.path.join(d, "index.json")))
-    reads = weekly.load_reads(os.path.join(d, "reads"))
+    reads = weekly.settle(weekly.load_reads(os.path.join(d, "reads")), weekly.enrolled_dates("data/daily"), a.start)
     chk = weekly.check(index, reads)
     if chk["missing_leads"] or chk["missing_calls"]:
         print(f"not finished: {len(chk['missing_leads'])} leads and {len(chk['missing_calls'])} calls have no reading", file=sys.stderr)

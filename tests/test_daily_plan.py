@@ -605,3 +605,10 @@ def test_weekly_review_checks_every_call_was_read_and_rolls_up(tmp_path):
     R = weekly.roll_up(rows, reads)
     assert R["outcomes"] == {"open": 1, "lost": 1} and dict(R["reasons"]) == {"ASK": 1, "L3": 1}
     assert R["per_caller"]["Asha K"]["real_read"] == 1 and R["mistakes"] == [("no ask", 1)]
+
+
+def test_weekly_review_counts_an_earlier_enrollment_apart():
+    from analytics.daily_plan import weekly
+    reads = {"A": {"outcome": "enrolled"}, "B": {"outcome": "enrolled"}, "C": {"outcome": "enrolled"}}
+    weekly.settle(reads, {"A": "2026-10-06T10:00:00", "B": "2026-10-09T10:00:00"}, "2026-10-08")
+    assert [reads[k]["outcome"] for k in "ABC"] == ["enrolled earlier", "enrolled", "enrolled"]   # C said on a call they paid
