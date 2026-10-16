@@ -3,10 +3,12 @@ Python process on this machine through a SQLite file in the git-ignored ``data/`
 
 ``LeadSquaredClient.request`` takes a slot here before every HTTP attempt, retries included:
 
-- at most ``LEADSQUARED_MAX_IN_FLIGHT`` attempts (default 1) run at a time across all processes using the file;
-- each starts no sooner than ``LEADSQUARED_COOLDOWN_SECONDS`` (default 6) after the previous one finished;
+- at most ``LEADSQUARED_MAX_IN_FLIGHT`` attempts (default 2) run at a time across all processes using the file;
+- none starts sooner than ``LEADSQUARED_COOLDOWN_SECONDS`` (default 0.5) after the last one finished;
 - at most ``LEADSQUARED_MAX_REQUESTS_PER_WINDOW`` attempts (default 10) start in any ``LEADSQUARED_WINDOW_SECONDS``
   (default 5), a ceiling that still holds when the cooldown is lowered or more attempts may run at once;
+- one endpoint category may get its own, lower rate in that same window (``LEADSQUARED_ENDPOINT_MAX_PER_WINDOW``,
+  default ``activity_bulk=1``: the company-wide activity read starts at most once every 5 s);
 - optional rolling budgets (operator-set, off unless set): attempts per hour and per day, requested records
   per day, and attempts per hour for one endpoint category;
 - a 429's ``Retry-After`` holds every caller (the client calls ``hold_until`` before freeing its slot).
@@ -154,12 +156,38 @@ def _endpoint_budgets(raw: str) -> dict[str, int]:
     return out
 
 
+def _endpoint_rates(raw: str) -> dict[str, float]:
+    """``activity_bulk=2.5,lead_history=4``: starts per window for one category (fractions allowed); ``off`` = none."""
+    if raw.strip().lower() == "off":
+        return {}
+    out: dict[str, float] = {}
+    for part in (p.strip() for p in raw.split(",")):
+        if not part:
+            continue
+        name, sep, value = (x.strip() for x in part.partition("="))
+        try:
+            rate = float(value)
+        except ValueError:
+            rate = math.nan
+        if not sep or name not in CATEGORIES or not math.isfinite(rate) or rate <= 0:
+            raise ValueError(f"LEADSQUARED_ENDPOINT_MAX_PER_WINDOW must look like 'activity_bulk=2.5' (or 'off') "
+                             f"with categories from {', '.join(CATEGORIES)} (got {part!r})")
+        out[name] = rate
+    return out
+
+
+# LeadSquared allows 2.5 per 5 s on the company-wide activity read (16 Oct 2026). The gate is per machine, so 1 per
+# 5 s keeps two chats fetching at once (2 per 5 s together) under that limit.
+DEFAULT_ENDPOINT_RATES = "activity_bulk=1"
+
+
 @dataclass(frozen=True)
 class AdmissionConfig:
-    cooldown: float = 6.0
-    max_in_flight: int = 1
+    cooldown: float = 0.5
+    max_in_flight: int = 2
     per_window: int | None = 10          # attempts started in any `window` seconds; None = off
     window: float = 5.0
+    endpoint_per_window: dict[str, float] = field(default_factory=lambda: _endpoint_rates(DEFAULT_ENDPOINT_RATES))
     per_hour: int | None = None          # None = off
     per_day: int | None = None
     records_per_day: int | None = None
@@ -171,11 +199,13 @@ class AdmissionConfig:
     @classmethod
     def from_env(cls) -> "AdmissionConfig":
         return cls(
-            cooldown=_env_number("LEADSQUARED_COOLDOWN_SECONDS", 6.0, minimum=0),
-            max_in_flight=_env_number("LEADSQUARED_MAX_IN_FLIGHT", 1, minimum=1, integer=True),
+            cooldown=_env_number("LEADSQUARED_COOLDOWN_SECONDS", 0.5, minimum=0),
+            max_in_flight=_env_number("LEADSQUARED_MAX_IN_FLIGHT", 2, minimum=1, integer=True),
             per_window=_env_number("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", 10, minimum=1, integer=True,
                                    allow_off=True),
             window=_env_number("LEADSQUARED_WINDOW_SECONDS", 5.0, minimum=0, strict_min=True),
+            endpoint_per_window=_endpoint_rates(os.environ.get("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW", "").strip()
+                                                or DEFAULT_ENDPOINT_RATES),
             per_hour=_env_number("LEADSQUARED_MAX_REQUESTS_PER_HOUR", None, minimum=1, integer=True, allow_off=True),
             per_day=_env_number("LEADSQUARED_MAX_REQUESTS_PER_DAY", None, minimum=1, integer=True, allow_off=True),
             records_per_day=_env_number("LEADSQUARED_MAX_RECORDS_PER_DAY", None, minimum=1, integer=True,
@@ -318,6 +348,17 @@ class Admission:
                         (self.account, now - c.window, n - c.per_window)).fetchone()[0]
         return at + c.window
 
+    def _endpoint_free(self, db: sqlite3.Connection, now: float, category: str) -> float | None:
+        """When this category may next start under its own rate, if later than now. The rate is enforced as even
+        spacing (window / rate between starts), so a fractional rate such as 2.5 per 5 s means one every 2 s."""
+        rate = self.config.endpoint_per_window.get(category)
+        if rate is None:
+            return None
+        last = db.execute("SELECT MAX(at) FROM attempts WHERE account = ? AND category = ?",
+                          (self.account, category)).fetchone()[0]
+        free = None if last is None else last + self.config.window / rate
+        return free if free is not None and free > now else None
+
     def _try_admit(self, category: str, records: int, not_before: float):
         c = self.config
         with self._tx() as db:
@@ -331,6 +372,10 @@ class Admission:
             window_free = self._window_free(db, now)
             if window_free is not None:
                 return ("wait", window_free, f"{c.per_window} requests per {c.window:g} s limit")
+            endpoint_free = self._endpoint_free(db, now, category)
+            if endpoint_free is not None:
+                return ("wait", endpoint_free,
+                        f"{c.endpoint_per_window[category]:g} {category} requests per {c.window:g} s limit")
             db.executemany("INSERT OR IGNORE INTO slots (account, slot) VALUES (?, ?)",
                            [(self.account, i) for i in range(c.max_in_flight)])
             free = db.execute("SELECT slot FROM slots WHERE account = ? AND slot < ? AND (holder IS NULL OR "
@@ -479,7 +524,8 @@ class Admission:
             "account": self.account, "store": self.path,
             "settings": {"cooldown_s": c.cooldown, "max_in_flight": c.max_in_flight,
                          "max_requests_per_window": c.per_window if c.per_window is not None else "off",
-                         "window_s": c.window, "max_wait_s": c.max_wait,
+                         "window_s": c.window, "endpoint_max_per_window": dict(c.endpoint_per_window),
+                         "max_wait_s": c.max_wait,
                          "lease_s": c.lease, "max_ids_per_bulk_request": c.max_ids_per_bulk},
             "in_flight": busy, "next_start": fmt(row[0]) if row and row[0] > now else "now",
             "attempts_last_hour": hour, "attempts_last_24h": day, "records_last_24h": records,

@@ -113,6 +113,39 @@ def test_window_limit_off(monkeypatch, fake_clock):
     assert s.starts == [0] * 15 and c.admission.status()["settings"]["max_requests_per_window"] == "off"
 
 
+BULK = "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+
+
+def test_the_company_wide_activity_read_starts_at_most_once_per_5_seconds(monkeypatch, fake_clock):
+    monkeypatch.delenv("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW")             # the default: activity_bulk=1
+    configure(monkeypatch, LEADSQUARED_MAX_REQUESTS_PER_WINDOW=10, LEADSQUARED_MAX_IN_FLIGHT=2)
+    s = StubSession(fake_clock)
+    c = mk(s)
+    for _ in range(6):
+        c.request("POST", BULK, json={})
+    assert s.starts == [0, 5, 10, 15, 20, 25]                      # one every 5 s: two machines together stay at 2
+    assert c.admission.status()["settings"]["endpoint_max_per_window"] == {"activity_bulk": 1}
+
+
+def test_the_endpoint_rate_leaves_other_reads_alone_and_counts_retries(monkeypatch, fake_clock):
+    configure(monkeypatch, LEADSQUARED_ENDPOINT_MAX_PER_WINDOW="activity_bulk=2.5")
+    s = StubSession(fake_clock, replies=[(503, {}), (200, {})])
+    c = mk(s)
+    c.request("POST", BULK, json={})                               # a 503 at 0 s, its retry waits for 2 s
+    c.request("GET", "UserManagement.svc/Users.Get")               # another endpoint: no extra wait
+    c.request("POST", BULK, json={})
+    assert s.starts == [0, 2, 2, 4]
+
+
+def test_endpoint_rate_off(monkeypatch, fake_clock):
+    configure(monkeypatch, LEADSQUARED_ENDPOINT_MAX_PER_WINDOW="off")
+    s = StubSession(fake_clock)
+    c = mk(s)
+    for _ in range(3):
+        c.request("POST", BULK, json={})
+    assert s.starts == [0, 0, 0] and c.admission.status()["settings"]["endpoint_max_per_window"] == {}
+
+
 @pytest.mark.parametrize("cooldown", [0, 4])
 def test_threads_and_separate_clients_never_overlap(monkeypatch, fake_clock, cooldown):
     configure(monkeypatch, LEADSQUARED_COOLDOWN_SECONDS=cooldown)
@@ -128,6 +161,41 @@ def test_threads_and_separate_clients_never_overlap(monkeypatch, fake_clock, coo
     assert not any(t.is_alive() for t in threads)
     assert len(s.starts) == 8 and s.max_in_flight == 1
     assert all(b - a >= cooldown for a, b in zip(s.starts, s.starts[1:]))
+
+
+def defaults(monkeypatch):
+    for name in ("LEADSQUARED_COOLDOWN_SECONDS", "LEADSQUARED_MAX_IN_FLIGHT", "LEADSQUARED_MAX_REQUESTS_PER_WINDOW"):
+        monkeypatch.delenv(name, raising=False)
+    monkeypatch.setattr(admission, "_registry", {})
+
+
+def at_most_per_window(starts, limit=10, window=5.0):
+    return all(sum(a <= t < a + window for t in starts) <= limit for a in starts)
+
+
+def test_default_pace_spreads_one_reader_half_a_second_apart(monkeypatch, fake_clock):
+    defaults(monkeypatch)
+    s = StubSession(fake_clock)                                      # instant replies: the fastest case
+    c = mk(s)
+    for _ in range(25):
+        c.request("GET", "x")
+    assert s.starts == [i * 0.5 for i in range(25)]                 # evenly spread, never back to back
+    assert at_most_per_window(s.starts)
+
+
+def test_default_pace_lets_two_readers_overlap_and_holds_10_per_5_seconds(monkeypatch, fake_clock):
+    defaults(monkeypatch)
+    fake_clock.real_pause = 0.001
+    s = StubSession(fake_clock, during=lambda: threading.Event().wait(0.003))
+    c = mk(s)
+    threads = [threading.Thread(target=c.request, args=("POST", "x")) for _ in range(30)]
+    for t in threads:
+        t.start()
+    for t in threads:
+        t.join(timeout=30)
+    assert not any(t.is_alive() for t in threads)
+    assert len(s.starts) == 30 and s.max_in_flight <= 2
+    assert at_most_per_window(sorted(s.starts))
 
 
 def test_separate_processes_share_one_gate(tmp_path):
@@ -386,7 +454,7 @@ def test_cooldown_and_holds_survive_a_restart(monkeypatch, lsq_gate, fake_clock)
 
 # ------------------------------------------------------------------ configuration
 
-@pytest.mark.parametrize("raw,expected", [(None, 6.0), ("", 6.0), ("0", 0.0), ("2.5", 2.5)])
+@pytest.mark.parametrize("raw,expected", [(None, 0.5), ("", 0.5), ("0", 0.0), ("2.5", 2.5)])
 def test_cooldown_setting(monkeypatch, raw, expected):
     if raw is None:
         monkeypatch.delenv("LEADSQUARED_COOLDOWN_SECONDS", raising=False)
@@ -396,12 +464,14 @@ def test_cooldown_setting(monkeypatch, raw, expected):
 
 
 def test_defaults_leave_budgets_off_explicitly(monkeypatch):
-    monkeypatch.delenv("LEADSQUARED_COOLDOWN_SECONDS", raising=False)
-    monkeypatch.delenv("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", raising=False)
+    for name in ("LEADSQUARED_COOLDOWN_SECONDS", "LEADSQUARED_MAX_IN_FLIGHT", "LEADSQUARED_MAX_REQUESTS_PER_WINDOW"):
+        monkeypatch.delenv(name, raising=False)
     c = admission.AdmissionConfig.from_env()
-    assert (c.cooldown, c.max_in_flight, c.max_ids_per_bulk) == (6.0, 1, 250)
+    assert (c.cooldown, c.max_in_flight, c.max_ids_per_bulk) == (0.5, 2, 250)
     assert (c.per_window, c.window) == (10, 5.0)
     assert (c.per_hour, c.per_day, c.records_per_day, c.endpoint_per_hour) == (None, None, None, {})
+    monkeypatch.delenv("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW")
+    assert admission.AdmissionConfig.from_env().endpoint_per_window == {"activity_bulk": 1}
     monkeypatch.setenv("LEADSQUARED_MAX_REQUESTS_PER_HOUR", "off")
     monkeypatch.setenv("LEADSQUARED_ENDPOINT_HOURLY_BUDGETS", "lead_history=600, activity_bulk=200")
     c = admission.AdmissionConfig.from_env()
@@ -419,6 +489,8 @@ def test_defaults_leave_budgets_off_explicitly(monkeypatch):
     ("LEADSQUARED_ACCOUNT_LABEL", "has spaces"),
     ("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", "0"), ("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", "2.5"),
     ("LEADSQUARED_WINDOW_SECONDS", "0"), ("LEADSQUARED_WINDOW_SECONDS", "nan"),
+    ("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW", "activity_bulk=0"), ("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW", "bulk=2"),
+    ("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW", "activity_bulk"), ("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW", "activity_bulk=inf"),
 ])
 def test_invalid_settings_are_refused(monkeypatch, name, raw):
     monkeypatch.setenv(name, raw)

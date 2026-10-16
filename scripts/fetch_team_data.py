@@ -9,14 +9,16 @@ Given an earlier snapshot of the same team that starts on or before ``start``, o
 shortly before that snapshot was taken are read; its other rows are reused. Leads and users are always read
 in full. A lead that joined the team since then brings only its newer calls.
 
-If LeadSquared refuses the company-wide activity endpoint (it answered 403 from 13 Oct 2026), the team leads
-active since the read start are read one by one instead. That route misses only calls a team member made to a
+If LeadSquared refuses the company-wide activity endpoint (its firewall has answered 403 on and off since 13 Oct
+2026), the read is tried again twice, 2 minutes apart, because the block comes and goes. If it is still refused,
+the team leads active since the read start are read one by one instead. That route misses only calls a team member made to a
 lead another team owns.
 """
 
 import json
 import os
 import sys
+import time
 from datetime import datetime, timedelta
 
 from analytics.daily_plan import revival
@@ -38,6 +40,9 @@ LEAD_COLUMNS = [
     "mx_Zip_Intent_Justification", "mx_Zip_Talking_Points", "mx_Zip_Team_Follow_up_date_and_time",
     "mx_Report_Type", "mx_Lead_Request_type",
 ]
+BULK_RETRIES = 2        # further tries of the bulk read after a 403, before reading lead by lead
+BULK_RETRY_WAIT = 120   # seconds between them
+sleep = time.sleep
 PAYMENT_SUCCESS = 213
 ZIP_EVENTS = (236, 237)
 ACTIVITY_DATES = ("ProspectActivityDate_Max", "mx_Last_Called_Date_DT", "ModifiedOn")
@@ -81,6 +86,18 @@ def bulk_reads(c, d0, last, zip_to, since, user_ids, lead_ids):
                 a["note"] = parse_activity_note(a.get("ActivityEvent_Note"))
                 sink.append(a)
     return calls, payments, zip_acts
+
+
+def bulk_with_retries(c, *args):
+    """bulk_reads, tried again after a pause while LeadSquared's firewall refuses it (403); the last refusal is raised."""
+    for attempt in range(BULK_RETRIES + 1):
+        try:
+            return bulk_reads(c, *args)
+        except LeadSquaredError as e:
+            if e.status_code != 403 or attempt == BULK_RETRIES:
+                raise
+            log(f"bulk activity endpoint refused (403); trying again in {BULK_RETRY_WAIT} s ({attempt + 1} of {BULK_RETRIES})")
+            sleep(BULK_RETRY_WAIT)
 
 
 def active_since(leads: list[dict], t: datetime) -> list[str]:
@@ -139,12 +156,12 @@ def main(group, start, end, out, prev=None):
     last = d1 - timedelta(seconds=1)
     zip_to = min(last + ZIP_LATE_WINDOW, now_utc())  # a call ending after midnight
     try:
-        calls, payments, zip_acts = bulk_reads(c, d0, last, zip_to, since, user_ids, lead_ids)
+        calls, payments, zip_acts = bulk_with_retries(c, d0, last, zip_to, since, user_ids, lead_ids)
         source = "bulk"
     except LeadSquaredError as e:
         if e.status_code != 403:
             raise
-        log("bulk activity endpoint refused (403): reading active team leads one by one")
+        log("bulk activity endpoint still refused (403): reading active team leads one by one")
         calls, payments, zip_acts = per_lead_reads(c, leads, users, d0, last, zip_to, since, out + ".hist.jsonl")
         source = "per-lead fallback"
     if since:

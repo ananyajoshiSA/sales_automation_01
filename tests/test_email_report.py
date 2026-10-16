@@ -23,6 +23,7 @@ def repo(tmp_path, monkeypatch):
     (tmp_path / "exports").mkdir()
     (tmp_path / "project_reports").mkdir()
     monkeypatch.setattr(er, "ROOTS", (str(tmp_path / "project_reports"), "exports"))
+    monkeypatch.setattr(er, "RETRY_SECS", 0)
     monkeypatch.setenv("REPORT_EMAIL_URL", URL)
     monkeypatch.setenv("REPORT_EMAIL_TOKEN", TOKEN)
     return tmp_path
@@ -168,6 +169,27 @@ def test_wrong_token_or_login_page(repo, capsys):
     responses.add(responses.POST, URL, body="<html>Sign in</html>")
     assert er.main([]) == 2
     assert "access 'Anyone'" in capsys.readouterr().out
+    assert len(responses.calls) == 2  # one retry, then give up
+
+
+@responses.activate
+def test_one_google_404_or_error_page_is_retried(repo, capsys):
+    put(repo, "exports/a.csv", CSV, 600)
+    responses.add(responses.POST, URL, status=302, headers={"Location": ECHO})
+    responses.add(responses.GET, ECHO, status=404, body="<html>Not Found</html>")
+    responses.add(responses.POST, URL, status=302, headers={"Location": ECHO + "2"})
+    responses.add(responses.GET, ECHO + "2", json={"ok": True, "status": "ready", "mode": "live", "recipients": 3})
+    responses.add(responses.POST, URL, status=302, headers={"Location": ECHO + "3"})
+    responses.add(responses.GET, ECHO + "3", body="<html>Error</html>")
+    responses.add(responses.POST, URL, status=302, headers={"Location": ECHO + "4"})
+    responses.add(responses.GET, ECHO + "4", json={"ok": True, "status": "sent", "detail": "emailed to 3 recipient(s)"})
+    assert er.main([]) == 0
+    assert "result: sent" in capsys.readouterr().out
+    assert [b["action"] for b in bodies()] == ["check", "check", "send", "send"]
+    responses.reset()
+    responses.add(responses.POST, URL, status=404, body="<html>Not Found</html>")
+    assert er.main([]) == 2
+    assert "HTTP 404" in capsys.readouterr().out and len(responses.calls) == 2
 
 
 def test_unclear_refused_too_large_and_missing_settings_contact_nothing(repo, monkeypatch, capsys):
