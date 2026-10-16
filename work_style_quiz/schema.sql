@@ -23,9 +23,9 @@ create policy "anyone can submit" on public.results for insert to anon with chec
 
 -- Only the admin can read or reset results.
 create policy "admin reads" on public.results for select to authenticated
-  using ((auth.jwt() ->> 'email') = 'admin@lawsikho.in');
+  using ((auth.jwt() ->> 'email') = 'mailyash912@gmail.com');
 create policy "admin deletes" on public.results for delete to authenticated
-  using ((auth.jwt() ->> 'email') = 'admin@lawsikho.in');
+  using ((auth.jwt() ->> 'email') = 'mailyash912@gmail.com');
 
 -- Lets the form say "already taken" before someone spends 10 minutes (returns true/false only).
 create function public.has_taken(p_email text) returns boolean
