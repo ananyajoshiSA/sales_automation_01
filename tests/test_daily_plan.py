@@ -612,3 +612,14 @@ def test_weekly_review_counts_an_earlier_enrollment_apart():
     reads = {"A": {"outcome": "enrolled"}, "B": {"outcome": "enrolled"}, "C": {"outcome": "enrolled"}}
     weekly.settle(reads, {"A": "2026-10-06T10:00:00", "B": "2026-10-09T10:00:00"}, "2026-10-08")
     assert [reads[k]["outcome"] for k in "ABC"] == ["enrolled earlier", "enrolled", "enrolled"]   # C said on a call they paid
+
+
+def test_weekly_review_gives_a_recording_to_the_call_of_its_length(tmp_path):
+    from datetime import timedelta
+    weekly, s = _weekly_fixture(tmp_path)
+    long_call = weekly.connected(s)[0]                                                      # L1, 310 s at 05:00 UTC
+    short = dict(long_call, activity_id="short", duration=5, t=long_call["t"] - timedelta(minutes=1))
+    rec = {"start_time": "2026-10-09T04:59:30Z", "call_duration": 305, "transcript": {"text": "caller: fee is 50k"},
+           "s3_audio_file_url": "https://acefone/x"}
+    recs = weekly.match(s, [short, long_call], {"919000000001": {"sales_call": [rec]}})
+    assert list(recs) == [long_call["activity_id"]]                    # closer to the 5 s call, but the length says the long one

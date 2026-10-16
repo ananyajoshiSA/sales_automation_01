@@ -2,8 +2,8 @@
 enrollments did or did not come through, what went wrong on the calls and what to fix next week.
 
 The calls come from the week's daily pulls in ``data/daily`` (one row per activity, newest pull wins). Each connected
-call is matched to its Salesa recording through ``match_to_calls``; numbers never searched are searched once
-(at most 9 requests of 10 numbers per run). Every lead with a connected call gets one dossier with the whole week of
+call is matched to its Salesa recording by number and time (``match_gap``, as in ``match_to_calls``), a call whose
+length agrees first; numbers never searched are searched once (at most 9 requests of 10 numbers per run). Every lead with a connected call gets one dossier with the whole week of
 calls, transcripts included, and Claude reads every call in it (docs/weekly_brief.md). The call ledger
 (``calls.jsonl``) keeps each connected call with its transcript status and, once read, its reading.
 
@@ -24,7 +24,7 @@ from analytics.daily_plan import dossiers as dz
 from analytics.daily_plan.common import Snap, ist
 from integrations.timeutil import now_utc
 from integrations.transcripts import normalize_phone
-from integrations.transcripts.client import Call, match_to_calls
+from integrations.transcripts.client import MATCH_MINUTES, Call, durations_agree, match_gap
 
 MAX_TX_CHARS = 9000  # one call's transcript in a dossier; longer ones are cut in the middle
 REASONS = {
@@ -103,14 +103,25 @@ def to_search(snap: Snap, calls: list[dict], when: dict) -> list[str]:
 
 
 def match(snap: Snap, calls: list[dict], tx: dict) -> dict[str, Call]:
-    """activity_id -> the recording that belongs to it (each recording to one call, closest first)."""
+    """activity_id -> the recording that belongs to it: each recording to one call and each call one recording, a call
+    whose length agrees with the recording first, then the closest start, so a 5-second call next to a 20-minute one
+    does not take its transcript."""
     api = [Call.from_api(n, kind, r) for n, raw in tx.items() for kind, k in (("sales", "sales_call"), ("support", "support_calls"))
            for r in (raw or {}).get(k) or []]
-    found = match_to_calls([a for a in api if a.has_transcript], [dict(c, lead_number=snap.phone(c)) for c in calls])
+    by_number = defaultdict(list)
+    for x in api:
+        if x.has_transcript and x.start_time:
+            by_number[x.phone].append(x)
+    pairs = []
+    for c in calls:
+        for x in by_number.get(normalize_phone(snap.phone(c)), []):
+            gap, _ = match_gap(x, c["t"], c.get("duration") or 0)
+            if gap <= MATCH_MINUTES:
+                pairs.append((not durations_agree(x.duration, c.get("duration") or 0), gap, c["activity_id"], x))
     used, out = set(), {}
-    for aid, (x, _) in sorted(found.items(), key=lambda kv: abs(kv[1][1])):
+    for _, _, aid, x in sorted(pairs, key=lambda p: p[:3]):
         ident = (x.phone, x.start_time, x.kind)
-        if ident not in used:
+        if aid not in out and ident not in used:
             used.add(ident)
             out[aid] = x
     return out
