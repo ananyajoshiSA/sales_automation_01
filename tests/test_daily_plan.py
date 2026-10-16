@@ -602,9 +602,13 @@ def test_weekly_review_checks_every_call_was_read_and_rolls_up(tmp_path):
     assert chk["missing_leads"] == ["L2"] and chk["read"] == 1
     reads["L2"] = {"lead_id": "L2", "outcome": "lost", "primary_reason": "L3", "calls": []}
     assert weekly.check(index, reads)["missing_calls"] == [calls[1]["activity_id"]]       # a lead read, one call skipped
+    assert weekly.roll_up(rows, reads)["per_caller"]["Asha K"].get("real_read", 0) == 0     # no transcript: the ask isn't judged
+    rows[0]["transcript"] = "transcript"
+    rows[1]["caller"] = "+91-9000000002"
     R = weekly.roll_up(rows, reads)
     assert R["outcomes"] == {"open": 1, "lost": 1} and dict(R["reasons"]) == {"ASK": 1, "L3": 1}
     assert R["per_caller"]["Asha K"]["real_read"] == 1 and R["mistakes"] == [("no ask", 1)]
+    assert "Not a LeadSquared user" in R["per_caller"] and not any("9000" in k for k in R["per_caller"])
 
 
 def test_weekly_review_counts_an_earlier_enrollment_apart():
@@ -623,3 +627,9 @@ def test_weekly_review_gives_a_recording_to_the_call_of_its_length(tmp_path):
            "s3_audio_file_url": "https://acefone/x"}
     recs = weekly.match(s, [short, long_call], {"919000000001": {"sales_call": [rec]}})
     assert list(recs) == [long_call["activity_id"]]                    # closer to the 5 s call, but the length says the long one
+
+
+def test_weekly_review_spreads_examples_across_callers():
+    from analytics.daily_plan import weekly
+    leads = [{"owner": "A", "name": f"a{i}"} for i in range(5)] + [{"owner": "B", "name": "unknown"}, {"owner": "B", "name": "b1"}]
+    assert [l["name"] for l in weekly._spread(leads, 4)] == ["a0", "b1", "a1", "unknown"]

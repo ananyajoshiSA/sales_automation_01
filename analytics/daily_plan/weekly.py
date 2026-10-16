@@ -237,6 +237,11 @@ def check(index: list[dict], reads: dict[str, dict]) -> dict:
     return {"leads": len(index), "read": len(index) - len(missing_leads), "missing_leads": missing_leads, "missing_calls": missing_calls}
 
 
+def _caller(name: str) -> str:
+    """A call logged without a LeadSquared user carries a phone number as its caller: never print it."""
+    return "Not a LeadSquared user" if not name or name == "?" or sum(ch.isdigit() for ch in name) >= 7 else name
+
+
 def roll_up(rows: list[dict], reads: dict[str, dict]) -> dict:
     """Coverage, outcomes (one per lead, adding up to every lead with a connected call), reasons, call habits."""
     by_call = {c.get("call_id"): c for r in reads.values() for c in r.get("calls") or []}
@@ -245,13 +250,13 @@ def roll_up(rows: list[dict], reads: dict[str, dict]) -> dict:
     reasons = Counter(r.get("primary_reason") for r in reads.values() if r.get("outcome") in ("open", "lost") and r.get("primary_reason"))
     per = defaultdict(lambda: Counter())
     for r in rows:
-        p = per[r["caller"]]
+        p = per[_caller(r["caller"])]
         p["connected"] += 1
         p["real"] += r["secs"] >= 120
         x = by_call.get(r["call_id"])
         if x:
             p["read"] += 1
-            if r["secs"] >= 120:
+            if r["secs"] >= 120 and r["transcript"] == "transcript":     # the ask can only be judged where the call was heard
                 p["real_read"] += 1
                 p["ask"] += bool(x.get("ask_made"))
                 p["link"] += bool(x.get("link_sent"))
@@ -269,6 +274,19 @@ h1 { font-size: 20px; color: #1f4e46; } h2 { font-size: 14px; color: #1f4e46; ma
 table { border-collapse: collapse; width: 100%; margin: 6px 0; } th, td { border: 1px solid #c9d6d2; padding: 3px 5px; vertical-align: top; text-align: left; }
 th { background: #e8f0ed; } .box { background: #f2f7f5; border-left: 4px solid #1f4e46; padding: 6px 10px; margin: 8px 0; }
 .small { font-size: 8px; color: #555; } .bad { color: #b42318; } li { margin: 2px 0; }"""
+
+
+def _spread(leads: list[dict], n: int) -> list[dict]:
+    """Up to n examples taken in turn from each caller, named leads first, so one caller's leads don't fill the list."""
+    by = defaultdict(list)
+    for l in sorted(leads, key=lambda l: (l.get("name") or "unknown").lower().startswith("unknown")):
+        by[l.get("owner") or "?"].append(l)
+    out, queues = [], sorted(by.values(), key=len, reverse=True)
+    while len(out) < n and any(queues):
+        for q in queues:
+            if q and len(out) < n:
+                out.append(q.pop(0))
+    return out
 
 
 def _pct(a: int, b: int) -> str:
@@ -307,23 +325,30 @@ def html_doc(R: dict, N: dict, days: list[dict], leads: list[dict], meta: dict) 
     if R["reasons"]:
         H.append("<h3>Main reason per open or lost lead (one per lead)</h3><table><tr><th>Reason</th><th>Leads</th><th>Examples</th></tr>")
         for k, n in R["reasons"]:
-            ex = [l for l in leads if l.get("primary_reason") == k and l.get("outcome") in ("open", "lost")][:6]
+            ex = _spread([l for l in leads if l.get("primary_reason") == k and l.get("outcome") in ("open", "lost")
+                          and (l.get("what_would_have_closed") or "").strip()], 6)
             H.append(f"<tr><td>{e(REASONS.get(k, k))}</td><td>{n}</td><td>" + "; ".join(
                 f"{e(x.get('name') or '?')} ({e((x.get('owner') or '?').split()[0])}): {e((x.get('what_would_have_closed') or '')[:120])}" for x in ex) + "</td></tr>")
         H.append("</table>")
     if N.get("calls"):
         H.append("<h2>What happens on the calls</h2>" + "".join(f"<p>{x}</p>" for x in N["calls"]))
-    H.append("<h3>By caller (calls of 2 min+)</h3><table><tr><th>Caller</th><th>Connected</th><th>Read</th><th>2 min+</th><th>Fee and ask</th>"
+    H.append("<h3>By caller (fee and ask, link, next step: share of 2 min+ calls with a transcript)</h3><table><tr><th>Caller</th><th>Connected</th><th>2 min+</th><th>2 min+ heard</th><th>Fee and ask</th>"
              "<th>Link sent on call</th><th>Dated next step</th><th>Most common slip</th></tr>")
-    for name, p in sorted(R["per_caller"].items(), key=lambda kv: -kv[1].get("connected", 0)):
+    big = {k: v for k, v in R["per_caller"].items() if v.get("connected", 0) >= 20 and k != "Not a LeadSquared user"}
+    rest = Counter()
+    for k, v in R["per_caller"].items():
+        if k not in big:
+            rest.update(v)
+    rows_ = sorted(big.items(), key=lambda kv: -kv[1].get("connected", 0)) + ([("Others (under 20 calls, or not a user)", dict(rest))] if rest else [])
+    for name, p in rows_:
         m = sorted(((k[2:], v) for k, v in p.items() if k.startswith("m:")), key=lambda kv: -kv[1])
-        H.append(f"<tr><td>{e(name)}</td><td>{p.get('connected', 0)}</td><td>{p.get('read', 0)}</td><td>{p.get('real', 0)}</td>"
+        H.append(f"<tr><td>{e(name)}</td><td>{p.get('connected', 0)}</td><td>{p.get('real', 0)}</td><td>{p.get('real_read', 0)}</td>"
                  f"<td>{_pct(p.get('ask', 0), p.get('real_read', 0))}</td><td>{_pct(p.get('link', 0), p.get('real_read', 0))}</td>"
                  f"<td>{_pct(p.get('next', 0), p.get('real_read', 0))}</td><td>{e(m[0][0]) + f' ({m[0][1]})' if m else '—'}</td></tr>")
     H.append("</table>")
     if R["mistakes"]:
         H.append("<h3>Slips across all read calls</h3><p>" + "; ".join(f"{e(k)} {v}" for k, v in R["mistakes"]) + ".</p>")
-    best = [l for l in leads if l.get("best_call_why")][:12]
+    best = _spread([l for l in leads if l.get("best_call_why")], 12)
     if best:
         H.append("<h2>Calls to copy</h2><ul>" + "".join(
             f"<li><b>{e(l.get('name') or '?')}</b> ({e(l.get('owner') or '?')}): {e(l['best_call_why'])}</li>" for l in best) + "</ul>")
@@ -351,7 +376,7 @@ def workbook(leads: list[dict], rows: list[dict], reads: dict[str, dict], out: s
                "Next step fixed", "Objection", "Slip", "Could have done better"])
     for r in rows:
         x = by_call.get(r["call_id"]) or {}
-        cs.append([r["t"], r["caller"], r["lead"], r["direction"], r["secs"], r["transcript"], x.get("what_happened"), x.get("ask_made"),
+        cs.append([r["t"], _caller(r["caller"]), r["lead"], r["direction"], r["secs"], r["transcript"], x.get("what_happened"), x.get("ask_made"),
                    x.get("link_sent"), x.get("next_step_fixed"), x.get("objection"), x.get("mistake"), x.get("better")])
     for sheet, widths in ((ws, (22, 16, 12, 26, 50, 60, 40)), (cs, (15, 16, 20, 9, 8, 14, 60, 9, 9, 9, 30, 18, 50))):
         for c in sheet[1]:
