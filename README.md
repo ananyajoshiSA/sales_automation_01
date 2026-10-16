@@ -27,11 +27,12 @@ variables in the environment settings instead.
 | `LEADSQUARED_SECRET_KEY` | Secret key |
 | `LEADSQUARED_COOLDOWN_SECONDS` | Pause after each request before the next starts; default `0.5`, `0` = no pause. Must be a finite number, 0 or more |
 | `LEADSQUARED_MAX_REQUESTS_PER_WINDOW`, `LEADSQUARED_WINDOW_SECONDS` | At most this many requests start in any window of this many seconds; default 10 in 5 s, `off` turns it off |
+| `LEADSQUARED_ENDPOINT_MAX_PER_WINDOW` | A lower rate for one endpoint in that window; default `activity_bulk=2.5` (the company-wide activity read starts once every 2 s), `off` turns it off |
 | `LEADSQUARED_MAX_REQUESTS_PER_HOUR`, `..._PER_DAY`, … | Optional budgets and other gate settings, all off or defaulted unless set: see [docs/leadsquared_load_control.md](docs/leadsquared_load_control.md#settings) |
 
 **Load control.** Every LeadSquared request from Python, retries included, goes through one gate shared by
 every thread and process on this machine (a SQLite file in `data/leadsquared/`). At most two requests run at once,
-none starts sooner than 0.5 s after the last one finished, never more than 10 start in any 5 seconds, a 429's `Retry-After` holds everyone, and optional hourly and
+none starts sooner than 0.5 s after the last one finished, never more than 10 start in any 5 seconds (the company-wide activity read at most 2.5), a 429's `Retry-After` holds everyone, and optional hourly and
 daily budgets can be set. When a wait would pass 5 minutes or a budget is used up, the request isn't sent and
 the client raises `AdmissionDeferred` with the next time it can go. Requests take about 1 s, so a one-at-a-time
 per-lead scan takes about 1.5 s per lead (1,000 leads is about 25 minutes); scans that read two leads at once
