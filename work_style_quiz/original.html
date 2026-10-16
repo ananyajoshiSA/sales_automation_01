@@ -1,0 +1,656 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<style>:root{color-scheme:light;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}body{margin:0;font:14px system-ui,sans-serif}img{max-width:100%}[hidden]{display:none!important}</style>
+<title>SkillArbitrage Work Style</title>
+<meta name="claude:viewport-fit-sides" content="cover">
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Poppins:wght@500;600;700;800&family=Mulish:wght@400;500;600;700&display=swap">
+<style>
+/* Layout: brand header bar, then one 780px reading column; navy hero bands carry the logo's pill-and-dot motif; admin widens to 1180px */
+:root{
+  --bg:#f8f8ff; --surface:#ffffff; --fg:#171717; --muted:#667085; --line:#e3e6ee; --line-strong:#d9dce3;
+  --brand:#2941ba; --brand-ink:#ffffff; --brand-soft:#eef0ff; --lilac:#93a5ff; --navy:#14162b; --navy-fg:#ffffff; --navy-muted:#b9c0e6;
+  --warn:#9a5b00; --warn-soft:#fff3dc; --ok:#1d7a4c; --ok-soft:#e1f5ea; --danger:#c0392b;
+  --ei:#2941ba; --sn:#d97a2b; --tf:#178f80; --jp:#7a52d8;
+  --display:"Poppins","Segoe UI",system-ui,sans-serif;
+  --body:"Mulish","Segoe UI",system-ui,sans-serif;
+  --shadow:0 1px 2px rgba(20,22,43,.05),0 8px 24px -12px rgba(20,22,43,.12);
+}
+@media (prefers-color-scheme: dark){:root:not([data-theme="light"]){
+  --bg:#0c0e1f; --surface:#151834; --fg:#eceeff; --muted:#9ba3c7; --line:#252a4d; --line-strong:#323863;
+  --brand:#93a5ff; --brand-ink:#0c0e1f; --brand-soft:#1e2350; --lilac:#93a5ff; --navy:#1a1e42; --navy-fg:#ffffff; --navy-muted:#b9c0e6;
+  --warn:#f2b85a; --warn-soft:#3a2b10; --ok:#6fd3a0; --ok-soft:#123324; --danger:#ff8a7a;
+  --ei:#93a5ff; --sn:#f0a464; --tf:#5cd1bf; --jp:#b59bff; --shadow:none; color-scheme:dark}}
+:root[data-theme="dark"]{
+  --bg:#0c0e1f; --surface:#151834; --fg:#eceeff; --muted:#9ba3c7; --line:#252a4d; --line-strong:#323863;
+  --brand:#93a5ff; --brand-ink:#0c0e1f; --brand-soft:#1e2350; --lilac:#93a5ff; --navy:#1a1e42; --navy-fg:#ffffff; --navy-muted:#b9c0e6;
+  --warn:#f2b85a; --warn-soft:#3a2b10; --ok:#6fd3a0; --ok-soft:#123324; --danger:#ff8a7a;
+  --ei:#93a5ff; --sn:#f0a464; --tf:#5cd1bf; --jp:#b59bff; --shadow:none; color-scheme:dark}
+*{box-sizing:border-box}
+body{background:var(--bg);color:var(--fg);font-family:var(--body);font-size:16px;line-height:1.6}
+body::before{content:"";position:fixed;inset:0 0 auto;height:env(safe-area-inset-top,0px);z-index:10;background:var(--bg)}
+.topbar{border-bottom:1px solid var(--line);background:var(--surface)}
+.topbar .in{max-width:1180px;margin:0 auto;padding-block:14px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px));display:flex;align-items:center;justify-content:space-between;gap:12px}
+.brand{display:flex;align-items:center;gap:10px;font-family:var(--display);font-weight:700;font-size:19px;letter-spacing:-.01em;color:var(--fg)}
+.brand svg{height:24px;width:auto;flex:none}
+.brand .a{color:var(--fg)}
+.pill-tag{font:600 12px var(--display);letter-spacing:.04em;padding:5px 12px;border-radius:999px;background:var(--brand-soft);color:var(--brand)}
+.wrap{max-width:780px;margin:0 auto;padding-block:32px 72px;padding-left:max(16px,env(safe-area-inset-left,0px));padding-right:max(16px,env(safe-area-inset-right,0px))}
+.wrap.wide{max-width:1180px}
+h1,h2,h3{font-family:var(--display);text-wrap:balance;margin:0;line-height:1.15;letter-spacing:-.02em}
+h1{font-size:clamp(30px,5.4vw,46px);font-weight:800}
+h2{font-size:clamp(22px,3.4vw,28px);font-weight:700}
+h3{font-size:17px;font-weight:600;letter-spacing:-.01em}
+p{margin:0}
+.eyebrow{font:600 12px var(--display);letter-spacing:.14em;text-transform:uppercase;color:var(--muted)}
+.stack{display:flex;flex-direction:column;gap:16px}
+.row{display:flex;gap:12px;flex-wrap:wrap;align-items:center}
+.muted{color:var(--muted)}
+.panel{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:24px;box-shadow:var(--shadow)}
+/* navy hero band with logo motif */
+.hero{position:relative;overflow:hidden;background:var(--navy);color:var(--navy-fg);border-radius:20px;padding:36px 28px}
+.hero .eyebrow{color:var(--navy-muted)}
+.hero p{color:var(--navy-muted)}
+.hero > *{position:relative;z-index:1}
+.motif{position:absolute;right:-70px;top:-30px;z-index:0;opacity:.75;pointer-events:none}
+[hidden]{display:none!important}
+.motif i{position:absolute;background:var(--lilac);opacity:.16}
+.motif .p{width:110px;height:270px;border-radius:55px;right:150px;top:10px}
+.motif .d{width:110px;height:110px;border-radius:50%;right:20px;top:90px}
+@media (max-width:560px){.motif{opacity:.5}.hero{padding:28px 20px}}
+.tabs{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:var(--brand-soft);margin-bottom:24px}
+.tabs button{background:none;border:0;border-radius:9px;padding:8px 16px;font:600 14px var(--display);color:var(--muted);cursor:pointer}
+.tabs button[aria-selected="true"]{background:var(--surface);color:var(--brand);box-shadow:var(--shadow)}
+.btn{font:600 15px var(--display);border-radius:10px;padding:12px 22px;border:1px solid var(--brand);background:var(--brand);color:var(--brand-ink);cursor:pointer;transition:transform .15s,box-shadow .15s}
+.btn:hover:not(:disabled){transform:translateY(-1px);box-shadow:0 6px 16px -8px var(--brand)}
+.btn.ghost{background:transparent;color:var(--brand)}
+.btn.sm{padding:5px 12px;font-size:13px;border-radius:8px}
+.btn:disabled{opacity:.4;cursor:not-allowed}
+:focus-visible{outline:3px solid var(--lilac);outline-offset:2px}
+label{font:600 13px var(--display);color:var(--fg)}
+input,select{font:16px var(--body);padding:11px 14px;border:1px solid var(--line-strong);border-radius:10px;background:var(--surface);color:var(--fg);width:100%}
+input:focus,select:focus{border-color:var(--brand);outline:none;box-shadow:0 0 0 3px var(--brand-soft)}
+.field{display:flex;flex-direction:column;gap:6px;flex:1 1 220px;min-width:0}
+ul.plain{margin:0;padding:0;list-style:none;display:flex;flex-direction:column;gap:10px}
+ul.plain li{display:flex;gap:12px}
+ul.plain li::before{content:"";flex:none;width:8px;height:8px;border-radius:50%;background:var(--lilac);margin-top:9px}
+.note{font-size:14px;color:var(--muted)}
+.err{color:var(--danger);font-size:14px}
+/* quiz */
+.progress{position:sticky;top:env(safe-area-inset-top,0px);background:var(--bg);padding-block:12px;z-index:5}
+.bar{height:6px;background:var(--brand-soft);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--brand);border-radius:3px;transition:width .35s}
+.q{display:flex;flex-direction:column;gap:14px;padding:22px;background:var(--surface);border:1px solid var(--line);border-radius:16px;box-shadow:var(--shadow)}
+.q.answered{border-color:var(--line-strong)}
+.qnum{font:600 12px var(--display);color:var(--brand);letter-spacing:.08em}
+.scenario{font-size:17px;font-weight:600;line-height:1.5}
+.opts{display:grid;grid-template-columns:1fr 1fr;gap:10px}
+.opt{border:1px solid var(--line);border-radius:12px;padding:12px 14px;display:flex;gap:10px;font-size:15px;transition:background .15s,border-color .15s}
+.opt b{font-family:var(--display);color:var(--brand);flex:none}
+.opt.lean{border-color:var(--brand);background:var(--brand-soft)}
+.scale{display:grid;grid-template-columns:repeat(4,1fr);gap:6px;padding:4px;border-radius:12px;background:var(--bg);border:1px solid var(--line)}
+.scale button{font:600 13px var(--display);padding:9px 4px;border-radius:9px;border:0;background:transparent;color:var(--muted);cursor:pointer}
+.scale button:hover{color:var(--fg)}
+.scale button[aria-pressed="true"]{background:var(--brand);color:var(--brand-ink)}
+@media (max-width:560px){.opts{grid-template-columns:1fr}.scale{grid-template-columns:repeat(2,1fr)}}
+/* result */
+.reveal{display:flex;gap:4px}
+.reveal span{font-family:var(--display);font-size:clamp(60px,14vw,96px);font-weight:800;line-height:1;letter-spacing:-.02em;color:var(--navy-fg);animation:pop .55s cubic-bezier(.2,.9,.3,1.3) both}
+.reveal span:nth-child(odd){color:var(--lilac)}
+.reveal span:nth-child(2){animation-delay:.2s}.reveal span:nth-child(3){animation-delay:.4s}.reveal span:nth-child(4){animation-delay:.6s}
+@keyframes pop{from{transform:translateY(18px) scale(.85);opacity:0}to{transform:none;opacity:1}}
+.typename{font-family:var(--display);font-size:clamp(22px,3.6vw,30px);font-weight:700;color:var(--navy-fg)}
+.meter{display:flex;flex-direction:column;gap:8px}
+.meter .ends{display:flex;justify-content:space-between;font:500 14px var(--display);color:var(--muted)}
+.meter .ends .on{color:var(--fg);font-weight:700}
+.track{position:relative;height:10px;border-radius:5px;background:var(--brand-soft)}
+.track .dot{position:absolute;top:50%;width:22px;height:22px;border-radius:50%;transform:translate(-50%,-50%);border:4px solid var(--surface);box-shadow:0 0 0 1px var(--line)}
+.track .fill{position:absolute;top:0;bottom:0;border-radius:5px;opacity:.5}
+.meter .pct{font:700 14px var(--display)}
+.fun{display:grid;grid-template-columns:repeat(3,minmax(0,1fr));gap:12px}
+@media (max-width:720px){.fun{grid-template-columns:repeat(2,minmax(0,1fr))}}
+@media (max-width:480px){.fun{grid-template-columns:1fr}}
+.funcard{background:var(--surface);border:1px solid var(--line);border-radius:14px;padding:16px 18px;display:flex;flex-direction:column;gap:6px;box-shadow:var(--shadow)}
+.funcard .k{font:600 11px var(--display);letter-spacing:.12em;text-transform:uppercase;color:var(--brand)}
+.funcard .v{font-size:15px;line-height:1.5}
+.lock{display:flex;gap:10px;align-items:center;font-size:14px;color:var(--muted);padding:14px 18px;border:1px dashed var(--line-strong);border-radius:12px}
+/* admin */
+.tablewrap{overflow-x:auto;border:1px solid var(--line);border-radius:14px;background:var(--surface);box-shadow:var(--shadow)}
+table{border-collapse:collapse;width:100%;font-size:14px;font-variant-numeric:tabular-nums}
+th,td{padding:12px 14px;text-align:left;border-bottom:1px solid var(--line);white-space:nowrap;vertical-align:top}
+th{font:600 11px var(--display);letter-spacing:.1em;text-transform:uppercase;color:var(--muted);background:var(--bg)}
+tbody tr:hover{background:var(--bg)}
+tr:last-child td{border-bottom:0}
+.chip{display:inline-block;font:700 13px var(--display);padding:3px 9px;border-radius:7px;background:var(--brand-soft);color:var(--brand);letter-spacing:.04em}
+.flag{display:inline-block;font:600 12px var(--display);padding:3px 10px;border-radius:999px}
+.flag.ok{background:var(--ok-soft);color:var(--ok)}
+.flag.warn{background:var(--warn-soft);color:var(--warn)}
+.why{font-size:12px;color:var(--muted);white-space:normal;max-width:240px;margin-top:6px;line-height:1.45}
+.stats{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:760px){.stats{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.stat{padding:16px;border:1px solid var(--line);border-radius:14px;background:var(--surface);display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow)}
+.split{display:flex;height:26px;border-radius:7px;overflow:hidden;font:600 12px var(--display);color:var(--surface);gap:2px}
+.split span{display:flex;align-items:center;justify-content:center;min-width:0}
+.kpis{display:flex;gap:28px;flex-wrap:wrap}
+.kpi b{display:block;font:800 30px var(--display);color:var(--navy-fg);line-height:1}
+.kpi span{font-size:13px;color:var(--navy-muted)}
+.empty{padding:36px;text-align:center;color:var(--muted)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<style>
+/* one-question-at-a-time player, milestones, graphics */
+.player{display:flex;flex-direction:column;gap:18px}
+.ptop{display:flex;align-items:center;justify-content:space-between;gap:12px}
+.segs{display:grid;grid-template-columns:repeat(4,1fr);gap:6px}
+.seg{height:8px;border-radius:4px;background:var(--brand-soft);overflow:hidden}
+.seg i{display:block;height:100%;background:var(--brand);border-radius:4px;transition:width .35s}
+.counter{font:700 14px var(--display);color:var(--muted);font-variant-numeric:tabular-nums}
+.counter b{color:var(--fg);font-size:18px}
+.card{position:relative;background:var(--surface);border:1px solid var(--line);border-radius:22px;padding:28px;box-shadow:var(--shadow);display:flex;flex-direction:column;gap:20px;overflow:hidden}
+.card.in{animation:slidein .35s cubic-bezier(.2,.8,.2,1) both}
+.card.back{animation:slideback .35s cubic-bezier(.2,.8,.2,1) both}
+@keyframes slidein{from{transform:translateX(40px);opacity:0}to{transform:none;opacity:1}}
+@keyframes slideback{from{transform:translateX(-40px);opacity:0}to{transform:none;opacity:1}}
+.illo{width:88px;height:88px;position:relative;flex:none}
+.illo .pp{position:absolute;left:0;top:4px;width:34px;height:80px;border-radius:17px;background:var(--lilac);opacity:.35}
+.illo .dd{position:absolute;left:18px;top:14px;width:64px;height:64px;border-radius:50%;background:var(--brand-soft);display:grid;place-items:center;border:2px solid var(--surface)}
+.illo svg{width:34px;height:34px;stroke:var(--brand);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.qhead{display:flex;gap:18px;align-items:center}
+.qhead .scenario{font:600 clamp(17px,2.4vw,20px)/1.45 var(--display);letter-spacing:-.01em}
+.choices{display:grid;grid-template-columns:1fr 1fr;gap:12px}
+@media (max-width:600px){.choices{grid-template-columns:1fr}.qhead{flex-direction:column;align-items:flex-start}.card{padding:22px}}
+.choice{border:2px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:14px;transition:border-color .15s,background .15s,transform .15s}
+.choice:hover{border-color:var(--lilac)}
+.choice.sel{border-color:var(--brand);background:var(--brand-soft)}
+.choice .txt{font-size:16px;line-height:1.5;flex:1}
+.choice .tag{font:700 12px var(--display);color:var(--brand);letter-spacing:.1em}
+.str{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.str button{font:600 13px var(--display);padding:10px 6px;border-radius:10px;border:1px solid var(--line-strong);background:var(--surface);color:var(--fg);cursor:pointer;transition:background .15s,color .15s,transform .1s}
+.str button:hover{border-color:var(--brand);color:var(--brand)}
+.str button:active{transform:scale(.97)}
+.str button[aria-pressed="true"]{background:var(--brand);border-color:var(--brand);color:var(--brand-ink)}
+.pnav{display:flex;justify-content:space-between;align-items:center;gap:12px}
+.kbd{font-size:13px;color:var(--muted)}
+.kbd kbd{font:600 12px var(--display);border:1px solid var(--line-strong);border-bottom-width:2px;border-radius:5px;padding:1px 6px;background:var(--surface)}
+@media (max-width:600px){.kbd{display:none}}
+.milestone{text-align:center;align-items:center;padding-block:40px}
+.milestone .big{font:800 clamp(40px,8vw,64px)/1 var(--display);color:var(--brand)}
+.dims4{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px}
+@media (max-width:720px){.dims4{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.dimc{background:var(--surface);border:1px solid var(--line);border-radius:16px;padding:16px;display:flex;flex-direction:column;gap:10px;box-shadow:var(--shadow)}
+.dimc .ic{width:44px;height:44px;border-radius:12px;display:grid;place-items:center}
+.dimc .ic svg{width:24px;height:24px;fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.dimc .t{font:600 14px var(--display);line-height:1.3}
+.dimc .s{font-size:13px;color:var(--muted)}
+.steps{display:flex;gap:16px;flex-wrap:wrap}
+.steps div{display:flex;gap:10px;align-items:center;font-size:15px}
+.steps b{width:28px;height:28px;border-radius:50%;display:grid;place-items:center;background:var(--brand-soft);color:var(--brand);font:700 13px var(--display);flex:none}
+.funcard .ic{width:36px;height:36px;border-radius:10px;background:var(--brand-soft);display:grid;place-items:center;margin-bottom:4px}
+.funcard .ic svg{width:20px;height:20px;stroke:var(--brand);fill:none;stroke-width:1.8;stroke-linecap:round;stroke-linejoin:round}
+.badge{display:flex;gap:16px;align-items:center;flex-wrap:wrap}
+#confetti{position:fixed;inset:0;pointer-events:none;z-index:50}
+.typegrid{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:8px}
+.tg{border-radius:12px;padding:12px;border:1px solid var(--line);background:var(--surface);display:flex;flex-direction:column;gap:2px;position:relative;min-height:84px}
+.tg .c{font:800 17px var(--display);letter-spacing:.03em}
+.tg .n{font-size:12px;color:var(--muted)}
+.tg .k{position:absolute;right:10px;top:10px;font:800 20px var(--display);color:var(--brand)}
+.tg.has{border-color:var(--brand)}
+.tg.zero{opacity:.55}
+@media (max-width:600px){.typegrid{grid-template-columns:repeat(2,minmax(0,1fr))}}
+.qtable td{white-space:normal;min-width:160px;line-height:1.45}
+.qtable td:first-child{min-width:40px}
+.mtag{display:inline-block;font:700 11px var(--display);padding:2px 8px;border-radius:6px;color:var(--surface)}
+.lk{padding:18px 4px;border-top:1px solid var(--line);display:flex;flex-direction:column;align-items:center;gap:14px;transition:opacity .2s}
+.lk:first-of-type{border-top:0}
+.lk.done{opacity:.45}.lk.done:hover,.lk.active{opacity:1}
+.lk-q{font:600 clamp(16px,2.2vw,19px)/1.45 var(--display);text-align:center;max-width:46ch;letter-spacing:-.01em}
+.lk-scale{display:flex;align-items:center;gap:clamp(6px,1.6vw,14px)}
+.lk-end{font:600 13px var(--display);width:64px}
+.lk-end.ag{color:var(--brand);text-align:right}.lk-end.dg{color:var(--sn)}
+.dot{border-radius:50%;background:transparent;cursor:pointer;padding:0;border:2px solid;transition:background .15s,transform .1s}
+.dot:hover{transform:scale(1.08)}
+.d0,.d6{width:46px;height:46px}.d1,.d5{width:38px;height:38px}.d2,.d4{width:30px;height:30px}.d3{width:24px;height:24px}
+.d0,.d1,.d2{border-color:var(--brand)}.d4,.d5,.d6{border-color:var(--sn)}.d3{border-color:var(--line-strong)}
+.d0:hover,.d1:hover,.d2:hover,.d0[aria-checked="true"],.d1[aria-checked="true"],.d2[aria-checked="true"]{background:var(--brand)}
+.d4:hover,.d5:hover,.d6:hover,.d4[aria-checked="true"],.d5[aria-checked="true"],.d6[aria-checked="true"]{background:var(--sn)}
+.d3:hover,.d3[aria-checked="true"]{background:var(--muted)}
+@media (max-width:480px){.lk-end{display:none}.lk-scale{gap:7px}.d0,.d6{width:40px;height:40px}.d1,.d5{width:34px;height:34px}.d2,.d4{width:28px;height:28px}.d3{width:22px;height:22px}
+}
+.lk-ctx{font:600 clamp(16px,2.1vw,18px)/1.5 var(--display);max-width:62ch;text-align:center;letter-spacing:-.01em}
+.bp{display:grid;grid-template-columns:minmax(0,1fr) auto minmax(0,1fr);gap:16px;align-items:center;width:100%}
+#app:has(.player){max-width:940px}
+.bp .lk-scale{gap:10px}
+.bp-opt{font-size:15px;line-height:1.45;padding:12px 14px;border-radius:12px;border:1px solid var(--line);transition:border-color .15s,background .15s}
+.bp-opt.l{text-align:right;border-color:color-mix(in srgb,var(--brand) 35%,var(--line))}
+.bp-opt.r{border-color:color-mix(in srgb,var(--sn) 35%,var(--line))}
+.bp-opt.l.on{background:var(--brand-soft);border-color:var(--brand)}
+.bp-opt.r.on{background:color-mix(in srgb,var(--sn) 12%,var(--surface));border-color:var(--sn)}
+@media (max-width:720px){.bp{grid-template-columns:1fr;gap:12px}.bp-opt.l{text-align:left}.lk-scale{justify-content:center}}
+/* single-question player */
+#app:has(.player){max-width:860px}
+.track2{position:relative;height:10px;border-radius:5px;background:var(--brand-soft);margin:18px 6px 4px}
+.fill2{position:absolute;left:0;top:0;bottom:0;border-radius:5px;background:linear-gradient(90deg,var(--brand),var(--lilac));transition:width .45s cubic-bezier(.2,.8,.2,1)}
+.flagm{position:absolute;top:50%;width:14px;height:14px;border-radius:50%;transform:translate(-50%,-50%);background:var(--surface);border:3px solid var(--brand-soft)}
+.flagm.hit{border-color:var(--lilac);background:var(--brand)}
+.runner{position:absolute;top:50%;transform:translate(-50%,-50%);transition:left .45s cubic-bezier(.2,.8,.2,1);display:flex;gap:2px;align-items:center}
+.runner i{width:10px;height:24px;border-radius:5px;background:var(--brand)}.runner b{width:12px;height:12px;border-radius:50%;background:var(--lilac)}
+.cheer{font:700 14px var(--display);color:var(--brand);animation:fadeup .4s both}
+@keyframes fadeup{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:none}}
+.q2{align-items:center;text-align:center;gap:22px;padding:32px clamp(18px,4vw,40px)}
+.scene{width:220px;max-width:70%;height:auto}
+.scene .float{animation:bob 3.5s ease-in-out infinite;transform-origin:center}
+@keyframes bob{0%,100%{transform:translateY(0)}50%{transform:translateY(-5px)}}
+.sit{font:600 clamp(18px,2.6vw,22px)/1.45 var(--display);max-width:40ch;letter-spacing:-.01em;text-wrap:pretty}
+.opts2{display:grid;grid-template-columns:1fr 1fr;gap:14px;width:100%;text-align:left}
+.o2{display:flex;gap:12px;align-items:flex-start;padding:16px;border-radius:16px;border:2px solid var(--line);font-size:15.5px;line-height:1.5;transition:all .2s}
+.o2 .ob{flex:none;width:28px;height:28px;border-radius:50%;display:grid;place-items:center;font:700 13px var(--display);color:var(--surface)}
+.o2.l .ob{background:var(--brand)}.o2.r .ob{background:var(--sn)}
+.o2.l.on{border-color:var(--brand);background:var(--brand-soft);transform:translateY(-2px)}
+.o2.r.on{border-color:var(--sn);background:color-mix(in srgb,var(--sn) 12%,var(--surface));transform:translateY(-2px)}
+.scale2{display:flex;align-items:center;justify-content:center;gap:clamp(8px,2vw,16px);width:100%}
+.se{font:700 12px var(--display);letter-spacing:.06em;text-transform:uppercase;width:72px}
+.se.l{color:var(--brand);text-align:right}.se.r{color:var(--sn);text-align:left}
+.dot2{border-radius:50%;cursor:pointer;padding:0;border:3px solid;background:transparent;transition:transform .12s,background .15s}
+.dot2:hover{transform:scale(1.12)}
+.k0,.k6{width:54px;height:54px}.k1,.k5{width:44px;height:44px}.k2,.k4{width:34px;height:34px}.k3{width:24px;height:24px}
+.k0,.k1,.k2{border-color:var(--brand)}.k4,.k5,.k6{border-color:var(--sn)}.k3{border-color:var(--line-strong)}
+.k0:hover,.k1:hover,.k2:hover,.k0[aria-checked="true"],.k1[aria-checked="true"],.k2[aria-checked="true"]{background:var(--brand)}
+.k4:hover,.k5:hover,.k6:hover,.k4[aria-checked="true"],.k5[aria-checked="true"],.k6[aria-checked="true"]{background:var(--sn)}
+.k3:hover,.k3[aria-checked="true"]{background:var(--muted)}
+.dot2.pop{animation:popd .35s cubic-bezier(.2,.9,.3,1.5)}
+@keyframes popd{0%{transform:scale(.7)}100%{transform:scale(1)}}
+.hint{font-size:14px;color:var(--muted)}
+@media (max-width:640px){.opts2{grid-template-columns:1fr}.se{display:none}.k0,.k6{width:44px;height:44px}.k1,.k5{width:37px;height:37px}.k2,.k4{width:30px;height:30px}.k3{width:22px;height:22px}.scale2{gap:8px}.q2{padding:24px 16px}}
+.subtabs{display:inline-flex;gap:4px;padding:4px;border-radius:12px;background:var(--brand-soft)}
+.subtabs button{background:none;border:0;border-radius:9px;padding:7px 14px;font:600 13px var(--display);color:var(--muted);cursor:pointer}
+.subtabs button[aria-pressed="true"]{background:var(--surface);color:var(--brand)}
+</style>
+
+</head>
+<body>
+<header class="topbar"><div class="in">
+  <span class="brand"><svg viewBox="0 0 2790 3360" aria-hidden="true"><rect x="0" y="37" width="1258" height="3278" rx="629" fill="#93a5ff"/><circle cx="2158" cy="1676" r="629" fill="#93a5ff"/></svg><span class="a">SkillArbitrage</span></span>
+  <span class="pill-tag">Work Style Profile</span>
+</div></header>
+
+<div class="wrap" id="app">
+  <div class="tabs" id="tabs" hidden>
+    <button id="tabMe" aria-selected="true">My profile</button>
+    <button id="tabTeam" aria-selected="false">Team results</button>
+  </div>
+  <section id="view"><div class="panel empty">Loading…</div></section>
+</div>
+<canvas id="confetti" aria-hidden="true"></canvas>
+<script>
+const BANK=[
+["w01", "You are attending a two-day external workshop where you know nobody. The networking could be useful later, but the content is dense and you want to get the most out of it.", "You spend the breaks meeting people and suggest a WhatsApp group to stay in touch afterwards.", "You use the breaks to go over your notes and talk mainly to the one or two people sitting near you."],
+["w02", "You’ve had a full day of back-to-back meetings. Several decisions were made and you’re now aligned with three teams, but you got no time on your own work.", "You feel the day was productive. The conversations moved things forward.", "You feel drained and cluttered, and the day doesn’t feel productive until you’ve had some time alone."],
+["w03", "Your team is given a new problem to solve. A meeting gets everyone’s input early. A written document gives everyone a clearer starting point.", "You organise a meeting to gather ideas first, then write up the plan.", "You first write a detailed document with a clear outcome, then present your view to the team."],
+["w04", "A colleague from another team needs an answer that will take some explaining. A call would be quicker. A written reply leaves a record and lets you choose your words.", "You call them and talk it through.", "You write them a clear message or email."],
+["w05", "Your manager asks for ideas in a meeting and the room goes quiet. Speaking early gets the discussion moving. A considered idea later may be stronger.", "You share a first thought right away and build on it as others respond.", "You wait until your idea is worked out, even if that means sending it after the meeting."],
+["w06", "You have a big piece of work due this week. The team sits together and people sometimes need your input on their own work.", "You work where the team is and take questions as they come. The buzz keeps you going.", "You block your calendar, mute notifications and work alone, then catch up with people later."],
+["w07", "There’s a team lunch on a busy day. You have a lot to finish, but it’s a chance to catch up with colleagues you rarely see.", "You join, and come back with more energy for the afternoon.", "You eat quickly on your own and use the quiet time to reset."],
+["w08", "You get a task you’ve never done before. A colleague has done similar work, but they are busy this week.", "You ask them for ten minutes to get pointed in the right direction.", "You research it yourself first and go to them only with specific questions."],
+["w09", "A company offsite has just ended. You met many people briefly and a few properly.", "You follow up with several new people on LinkedIn or WhatsApp.", "You stay in touch mainly with the one or two you had a real conversation with."],
+["w10", "Think about your work conversations over the past month. A broad network and a few close working relationships are both useful.", "You spoke with people across many teams.", "Most of your conversations were with the same two or three people."],
+["w11", "Your manager hands you a new task on a busy day. Either detailed instructions or a clear goal would work.", "You ask for a checklist or an example of what “done” looks like, so you get it right the first time.", "You ask what the goal is and work out the approach yourself."],
+["w12", "You’re running a routine project that is going fine. Nobody has asked for changes.", "You focus on delivering it well and on time.", "You find yourself thinking about how it could grow or change, and suggest ideas."],
+["w13", "You need to make a call with limited information. An approach you used last time worked reasonably well. A new approach might work better, but it is untested.", "You go with what worked last time.", "You try the new approach."],
+["w14", "The team has an hour-long brainstorm with no fixed agenda.", "You steer it towards a few practical ideas that can be done next month.", "You throw out lots of new ideas, even if most won’t be used."],
+["w15", "A mailer is being reviewed before it goes to 5,000 learners. It could have small errors, and the overall message could be off.", "You focus on catching typos, wrong dates and figures that don’t add up.", "You focus on whether the whole thing tells the right story."],
+["w16", "You’ve done the same task every day for a few months. You’re now quick and good at it.", "You appreciate the steadiness and keep refining the small steps.", "You start redesigning how it’s done, or ask for something new."],
+["w17", "Your team’s process works, but people complain about parts of it.", "You fix the steps that cause problems and keep the rest.", "You propose a completely new way of doing it."],
+["w18", "You’re learning a new software tool, and there is a detailed guide available.", "You follow the guide step by step.", "You explore on your own and look things up when you get stuck."],
+["w19", "The team is choosing a tool. One is established, with many users. The other is new, with promising features but few reviews.", "You back the established one.", "You back the new one."],
+["w20", "You’re reviewing last month’s results with the team.", "You go through the numbers line by line and check what changed and why.", "You look for the bigger trends and what they mean for next quarter."],
+["w21", "The team has to choose between two reasonable options by Friday.", "You build a comparison of costs, numbers and risks, and go with what it shows.", "You talk to the people affected and go with what works best for them."],
+["w22", "Your decision will change how three colleagues work. You’re confident it’s right, but consulting each of them will take a week.", "You announce it with clear reasons and handle questions afterwards.", "You speak to each of them before announcing it."],
+["w23", "A colleague’s work has a clear mistake. They’re new and already nervous, and the client sees the work tomorrow.", "You point out the mistake plainly, with specifics, so it gets fixed.", "You start with what’s good and raise the mistake gently."],
+["w24", "A team discussion gets heated. You think you’re right, but the team has to keep working together.", "You keep making your case until the facts are settled.", "You step back to calm things down, even if your point gets dropped."],
+["w25", "A team member asks for an exception to a rule. Their reason is genuine, but others have been refused before.", "You say no, because the rule must apply the same way to everyone.", "You allow it, because their situation is different."],
+["w26", "You need to give critical feedback to someone who works hard but keeps missing the mark.", "You give it promptly and clearly. Delaying helps no one.", "You pick the timing carefully and soften it so they stay motivated."],
+["w27", "Two colleagues argue for different approaches. One has better data. The other has more support from the team.", "You back the one with better data.", "You look for a middle path both can accept."],
+["w28", "A big project has just finished. The targets were hit, but the team was stretched and morale dipped.", "You count it a success, because the results were delivered.", "You feel it wasn’t fully a success, because of what it cost the team."],
+["w29", "Two people disagree on a fact in a meeting. Settling it now will embarrass one of them.", "You check the data right then and settle it.", "You let it go for now and sort it out privately afterwards."],
+["w30", "A colleague is visibly upset about a work problem, and the problem is urgent.", "You help them fix the problem first. That’s what will make them feel better.", "You check how they’re doing first, then deal with the problem."],
+["w31", "You get a task that is due in two weeks. Other work may come up, and if you start early you might have to redo parts when requirements change.", "You finish it in the first week to get it off your plate.", "You gather inputs over time and finish it nearer the deadline, when the picture is clearer."],
+["w32", "You planned a focused day. At 11 am something urgent and interesting comes up that someone else could also handle.", "You stick to your plan and pass it on, or schedule it for later.", "You switch to it and rework the rest of your day around it."],
+["w33", "It’s the start of the week. You know some of your tasks, but things often change midweek.", "You still map out the full week in your calendar and adjust only if needed.", "You set two or three priorities and decide the rest day by day."],
+["w34", "A report is due in three days. You could finish it today, but more information may arrive before the deadline.", "You finish and submit it now, and send an update later if needed.", "You wait and work on it in the last day or two, using the latest information."],
+["w35", "It’s the end of the day and a few small tasks are open. None is urgent, and you’re tired.", "You stay twenty minutes to close them, so tomorrow starts clean.", "You leave them for tomorrow without worrying about it."],
+["w36", "The team needs to fix a date for next month’s event, but people’s schedules aren’t clear yet.", "You fix a date now so people can plan around it.", "You keep it open and fix it closer to the time, when more people can confirm."],
+["w37", "It’s Friday afternoon. Next week has a few fixed meetings and several unknowns.", "You plan the week before you leave for the weekend.", "You plan it on Monday morning, once you see what has come in."],
+["w38", "A standard process doesn’t quite fit your task. Following it exactly is slower but safe. Adapting it is faster but untested.", "You follow the process as written and raise the issue for later.", "You adapt it to fit and carry on."],
+["w39", "You have enough information to make a decision. A better option might turn up if you wait a week, but the team is waiting on you.", "You decide now and move on.", "You wait a week to see if something better comes up."],
+["w40", "A new project is starting and the scope is still a little unclear.", "You write a plan with steps and dates first, and update it as you learn.", "You start on the first piece and let the plan take shape as you go."]
+];
+const NAMES={ISTJ:"The Anchor",ISFJ:"The Steward",INFJ:"The Counsel",INTJ:"The Architect",ISTP:"The Fixer",ISFP:"The Craftsperson",INFP:"The Idealist",INTP:"The Analyst",ESTP:"The Closer",ESFP:"The Energiser",ENFP:"The Spark",ENTP:"The Challenger",ESTJ:"The Organiser",ESFJ:"The Connector",ENFJ:"The Mentor",ENTJ:"The Driver"};
+const FUN={
+ISTJ:["Steady, exact, and the reason things don’t break.","Spotting the missing clause in a 40-page agreement.","“Let’s just wing it.”","Same chai, same cup, 4:00 pm sharp.","“What does the SOP say?”","Busy. Will reply in the order received.","ENFP"],
+ISFJ:["Quietly holds the whole team together.","Remembering every learner’s issue and every colleague’s birthday.","Being asked to say no.","Makes chai for the whole floor without being asked.","“Did everyone get lunch?”","Here for you 🙂","ENTJ"],
+INFJ:["Reads the room before the room knows it.","Knowing what a learner really needs before they say it.","Meetings with no clear purpose.","Green tea by the window, thinking.","“What are we actually trying to achieve here?”","Thinking deeply. Interrupt only if it matters.","ESTP"],
+INTJ:["Has a three-year plan for the three-week project.","Turning chaos into a system that runs itself.","“We’ve always done it this way.”","Black coffee. Efficient.","“That won’t scale.”","Optimising.","ENFP"],
+ISTP:["Calm in a crisis, allergic to drama.","Fixing the broken projector, the broken sheet and the broken process.","Long meetings about feelings.","Whatever’s available. Doesn’t matter.","“Let me just try something.”","On it.","ESFJ"],
+ISFP:["Makes things beautiful, and means it.","Making a boring slide look brilliant.","Harsh criticism in front of everyone.","Masala chai, extra elaichi, in a nice cup.","“Can we make this look nicer?”","In my creative zone 🎨","ESTJ"],
+INFP:["Works for meaning, not just targets.","Writing copy that makes learners feel understood.","Targets with no reason behind them.","Herbal tea and a good playlist.","“But does this actually help anyone?”","Lost in a good idea.","ENTJ"],
+INTP:["Has 14 tabs open and every one of them is relevant.","Finding the bug nobody else could.","“Just do it, don’t ask why.”","Forgot it on the desk. It’s cold now.","“Technically…”","Researching. Will resurface.","ESTJ"],
+ESTP:["Acts first, gets results, asks questions later.","Closing the deal on the first call.","A 30-slide strategy deck.","Cutting chai on the go.","“Let’s just call them right now.”","Out in the field 🚀","INFJ"],
+ESFP:["The reason the office is fun.","Turning a dull webinar into a show.","Spreadsheets on a Friday evening.","Chai and samosa, shared with everyone.","“Who’s up for chai?”","Online and vibing ✨","INTJ"],
+ENFP:["Ten ideas before lunch, three of them brilliant.","Getting people excited about anything.","Repetitive admin work.","A new café drink every week.","“Ooh, what if we…”","Just had an idea 💡","ISTJ"],
+ENTP:["Will argue the other side just to test it.","Finding the flaw in the plan before the market does.","Rules with no reason behind them.","Strong coffee, refilled mid-debate.","“Devil’s advocate here, but…”","Debating something, probably.","ISFJ"],
+ESTJ:["Runs the show, on time, every time.","Getting twelve people to deliver by the deadline.","Missed deadlines and vague answers.","Chai at 11, blocked on the calendar.","“Who owns this, and by when?”","In a meeting. Next one at 3.","INFP"],
+ESFJ:["Knows everyone, helps everyone.","Making a new joiner feel at home on day one.","Office conflict left unresolved.","Orders chai for the team and remembers who takes less sugar.","“Have you met…?”","Here if you need anything!","INTP"],
+ENFJ:["Brings out the best in people.","Turning a struggling teammate into a star.","Cold decisions that ignore people.","Chai over a long one-to-one chat.","“I know you can do this.”","Cheering you on 📣","ISTP"],
+ENTJ:["Sets the goal, sets the pace, gets there.","Making the big call when everyone else is stuck.","Slow progress and endless discussion.","Double espresso. No time.","“What’s the plan, and what’s the deadline?”","Executing. Results by Friday.","ISFP"]
+};
+const WORK={
+ E:["Thinks out loud and gets energy from people. Quick to speak up, call, and pull others in.","Give them airtime: discussions, calls and team-facing work. Don’t leave them isolated for long."],
+ I:["Thinks before speaking and does deep work best in focus time. Often prefers writing to meetings.","Share agendas before meetings, accept written input, and protect their focus hours."],
+ S:["Practical and detail-sharp. Trusts facts, checklists and what has worked before.","Give clear steps, concrete examples and accurate data. Strong in execution, quality checks and operations."],
+ N:["Sees patterns and possibilities. Drawn to new ideas, strategy and the long view.","Explain the why and the goal, then let them shape the how. Pair them with a detail person for delivery."],
+ T:["Decides on logic, evidence and consistency. Comfortable giving and taking direct feedback.","Bring data and reasons. Be direct, and remind them to consider how decisions land on people."],
+ F:["Decides with people in mind. Builds trust, harmony and strong relationships.","Give feedback warmly and in private. Value their read on how the team or learners will react."],
+ J:["Plans ahead, likes closure, finishes before deadlines. Values structure and process.","Give clear timelines and early warning of changes. They will keep projects on track."],
+ P:["Flexible and adaptable. Keeps options open and handles last-minute change well.","Set firm checkpoints on long projects, and use them where plans change fast."]
+};
+const DIMS={
+  EI:{l:"I",r:"E",ln:"Introverted",rn:"Extroverted",c:"--ei",t:"Where you get your energy",ic:"people"},
+  SN:{l:"S",r:"N",ln:"Sensing",rn:"Intuition",c:"--sn",t:"How you take in information",ic:"bulb"},
+  FT:{l:"F",r:"T",ln:"Feeling",rn:"Thinking",c:"--tf",t:"How you make decisions",ic:"scale"},
+  PJ:{l:"P",r:"J",ln:"Perceiving",rn:"Judging",c:"--jp",t:"How you organise your work",ic:"calendar"}
+};
+const IC={
+ chat:"M4 5h11a2 2 0 0 1 2 2v6a2 2 0 0 1-2 2H9l-4 3v-3H4a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2zM19 9h1a2 2 0 0 1 2 2v5a2 2 0 0 1-2 2h-1v2l-3-2",
+ list:"M9 6h11M9 12h11M9 18h11M3.5 6l1.2 1.2L7 5M3.5 12l1.2 1.2L7 11M3.5 18l1.2 1.2L7 17",
+ box:"M3 7l9-4 9 4-9 4-9-4zM3 7v10l9 4 9-4V7M12 11v10",
+ heart:"M12 20s-7-4.5-7-10a4 4 0 0 1 7-2.6A4 4 0 0 1 19 10c0 5.5-7 10-7 10z",
+ calendar:"M4 6h16v14H4zM4 10h16M8 3v4M16 3v4M8 14h3",
+ mic:"M12 3a3 3 0 0 1 3 3v6a3 3 0 0 1-6 0V6a3 3 0 0 1 3-3zM5 11a7 7 0 0 0 14 0M12 18v3",
+ chart:"M4 20V4M4 20h16M8 16v-4M12 16V8M16 16v-6",
+ cup:"M4 9h12v5a5 5 0 0 1-5 5H9a5 5 0 0 1-5-5V9zM16 11h2a2 2 0 0 1 0 4h-2M8 3v3M12 3v3",
+ bulb:"M9 18h6M10 21h4M12 3a6 6 0 0 0-4 10.5c.7.7 1 1.5 1 2.5h6c0-1 .3-1.8 1-2.5A6 6 0 0 0 12 3z",
+ people:"M8 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM16 11a3 3 0 1 0 0-6 3 3 0 0 0 0 6zM2 20a6 6 0 0 1 12 0M13 15.5a6 6 0 0 1 9 4.5",
+ clock:"M12 21a9 9 0 1 0 0-18 9 9 0 0 0 0 18zM12 7v5l3 2",
+ scale:"M12 3v18M5 7h14M5 7l-3 7a3 3 0 0 0 6 0L5 7zM19 7l-3 7a3 3 0 0 0 6 0l-3-7zM8 21h8",
+ bag:"M4 8h16v12H4zM9 8V5h6v3M4 13h16",
+ book:"M4 5a2 2 0 0 1 2-2h13v16H6a2 2 0 0 0-2 2V5zM4 21h15",
+ spark:"M12 2l2.5 6.5L21 11l-6.5 2.5L12 20l-2.5-6.5L3 11l6.5-2.5z",
+ pen:"M4 20h4L19 9l-4-4L4 16v4zM13 7l4 4",
+ bolt:"M13 2L4 14h7l-1 8 9-12h-7l1-8z",
+ shield:"M12 3l8 3v6c0 5-3.5 8-8 9-4.5-1-8-4-8-9V6l8-3z",
+ phone:"M7 2h10v20H7zM11 18h2",
+ handshake:"M2 11l4-4 4 2 3-2 4 1 5 3M2 11l6 6 2-1 2 2 2-1 2 1 4-5M9 13l2 2"
+};
+const svg=(k,cls="")=>`<svg viewBox="0 0 24 24" ${cls}><path d="${IC[k]}"/></svg>`;
+const PAGE=1;
+const QI={w01:"people",w02:"clock",w03:"bulb",w04:"phone",w05:"chat",w06:"bolt",w07:"cup",w08:"book",w09:"handshake",w10:"chat",w11:"list",w12:"chart",w13:"scale",w14:"spark",w15:"pen",w16:"clock",w17:"box",w18:"book",w19:"shield",w20:"chart",w21:"scale",w22:"people",w23:"pen",w24:"chat",w25:"shield",w26:"mic",w27:"handshake",w28:"spark",w29:"chart",w30:"heart",w31:"calendar",w32:"bolt",w33:"list",w34:"pen",w35:"clock",w36:"calendar",w37:"bag",w38:"box",w39:"scale",w40:"spark"};
+const TONES=["--ei","--sn","--tf","--jp"];
+const CHEERS=["Nice.","Got it.","Noted.","Good one.","Onwards.","Love it.","Next!","Smooth."];
+const CHAPTERS=[["people","Warm-up"],["chat","Meetings and messages"],["bulb","Ideas"],["cup","Coffee break energy"],["scale","Decisions"],["handshake","Working together"],["calendar","Plans and deadlines"],["clock","Time and focus"],["spark","Almost there"],["bolt","Final page"]];
+const KEYENC="RUk6RXxFSTpFfEVJOkV8RUk6RXxFSTpFfEVJOkV8RUk6RXxFSTpFfEVJOkV8RUk6RXxTTjpTfFNOOlN8U046U3xTTjpTfFNOOlN8U046U3xTTjpTfFNOOlN8U046U3xTTjpTfEZUOlR8RlQ6VHxGVDpUfEZUOlR8RlQ6VHxGVDpUfEZUOlR8RlQ6VHxGVDpUfEZUOlR8UEo6SnxQSjpKfFBKOkp8UEo6SnxQSjpKfFBKOkp8UEo6SnxQSjpKfFBKOkp8UEo6Sg==";
+const KEYS=(()=>{const p=atob(KEYENC).split("|"),m={};BANK.forEach((b,i)=>m[b[0]]=p[i]);return m})();
+const dimOf=id=>KEYS[id].split(":")[0];
+const BY=Object.fromEntries(BANK.map(b=>[b[0],b]));
+const MILE={10:["Quarter done!","Faster than a Monday stand-up. Keep going.","cup"],20:["Halfway there.","Your type is already taking shape…","spark"],30:["Final stretch!","Ten more, then the big reveal.","bolt"]};
+
+/* seeded order: warm-ups first, then the four areas interleaved, sides shuffled */
+function hash(s){let h=1779033703;for(let i=0;i<s.length;i++){h=Math.imul(h^s.charCodeAt(i),3432918353);h=h<<13|h>>>19}return h>>>0}
+function rng(seed){let a=seed;return()=>{a|=0;a=a+0x6D2B79F5|0;let t=Math.imul(a^a>>>15,1|a);t=t+Math.imul(t^t>>>7,61|t)^t;return((t^t>>>14)>>>0)/4294967296}}
+function shuffle(a,r){for(let i=a.length-1;i>0;i--){const j=Math.floor(r()*(i+1));[a[i],a[j]]=[a[j],a[i]]}return a}
+function buildOrder(seedStr){
+  const r=rng(hash(seedStr)),by={EI:[],SN:[],FT:[],PJ:[]};
+  BANK.forEach(b=>by[dimOf(b[0])].push(b[0]));Object.values(by).forEach(a=>shuffle(a,r));
+  const seq=[];let last=null;
+  for(let k=0;k<10;k++){const ds=shuffle(Object.keys(by),r);if(ds[0]===last)ds.push(ds.shift());ds.forEach(d=>{const x=by[d].pop();if(x)seq.push(x)});last=dimOf(seq[seq.length-1])}
+  const flip={};seq.forEach(id=>flip[id]=r()<.5);return{seq,flip};
+}
+function analyse(ans){
+  const s={EI:0,SN:0,FT:0,PJ:0},n={EI:0,SN:0,FT:0,PJ:0};
+  BANK.forEach(b=>{const[d,pole]=KEYS[b[0]].split(":"),v=ans[b[0]];if(v==null)return;s[d]+=pole===DIMS[d].r?v:-v;n[d]++});
+  const pct={};for(const d in s)pct[d]=n[d]?Math.round(50+s[d]/(3*n[d])*50):50;
+  return{pct,type:["EI","SN","FT","PJ"].map(d=>pct[d]>=50?DIMS[d].r:DIMS[d].l).join("")};
+}
+function analyseRec(r){if(r.v===5)return analyse(r.answers||{});return{type:r.type,pct:r.pct||{EI:50,SN:50,FT:50,PJ:50},legacy:true}}
+
+/* state */
+const S={tab:"me",sub:"people",mode:"loading",db:null,uid:null,isEditor:false,isOwner:false,dl:null,
+  name:"",org:"SkillArbitrage",dept:"",answers:{},page:0,startedAt:null,order:null,mine:null,team:[],filter:"All",confirm:null,err:"",preview:false,saved:null,prevRes:null,dir:"in",mile:null};
+const $=s=>document.querySelector(s);
+const esc=s=>String(s??"").replace(/[&<>"']/g,c=>({"&":"&amp;","<":"&lt;",">":"&gt;",'"':"&quot;","'":"&#39;"}[c]));
+const dkey=()=>(S.preview?"lsws5p-":"lsws5-")+(S.uid||"x");
+function saveDraft(){try{localStorage.setItem(dkey(),JSON.stringify({name:S.name,org:S.org,dept:S.dept,answers:S.answers,page:S.page,startedAt:S.startedAt,seenMile:S.seenMile}))}catch(e){}}
+function loadDraft(){try{const d=JSON.parse(localStorage.getItem(dkey())||"null");if(d)Object.assign(S,d)}catch(e){}}
+
+function render(){
+  const v=$("#view");$("#tabs").hidden=!S.isEditor;
+  $("#tabMe").setAttribute("aria-selected",S.tab==="me");$("#tabTeam").setAttribute("aria-selected",S.tab==="team");
+  $("#app").classList.toggle("wide",S.tab==="team");
+  if(S.tab==="team"){v.innerHTML=teamView();bindTeam();return}
+  const pb=S.preview?`<div class="lock" style="justify-content:space-between;flex-wrap:wrap;margin-bottom:16px"><span><strong>Preview mode.</strong> Nothing is saved or shown to anyone.</span><button class="btn ghost sm" id="exitPrev">Exit preview</button></div>`:"";
+  if(S.mode==="loading")v.innerHTML=`<div class="panel empty">Loading…</div>`;
+  else if(S.mode==="nosign")v.innerHTML=introView(true);
+  else if(S.mode==="result"){v.innerHTML=pb+resultView(S.preview?S.prevRes:S.mine)}
+  else if(S.mode==="quiz"){v.innerHTML=pb+(S.mile?mileView():quizView());S.mile?bindMile():bindQuiz()}
+  else{v.innerHTML=pb+introView(false);bindIntro()}
+  if(S.isEditor&&!S.preview&&S.mode!=="quiz"){v.insertAdjacentHTML("afterbegin",`<div class="lock" style="justify-content:space-between;flex-wrap:wrap;margin-bottom:16px;border-style:solid;background:var(--brand-soft)"><span><strong>Admin:</strong> check the test before sending it to your team.</span><span class="row" style="gap:8px"><button class="btn sm" id="goQ">See all 40 questions</button><button class="btn ghost sm" id="goP">Preview the test</button></span></div>`);
+    $("#goQ").onclick=()=>{S.tab="team";S.sub="questions";render();window.scrollTo(0,0)};$("#goP").onclick=startPreview}
+  const x=$("#exitPrev");if(x)x.onclick=exitPreview;
+}
+
+function introView(blocked){
+  const done=Object.keys(S.answers).length;
+  return `<div class="stack" style="gap:24px">
+  <div class="hero stack" style="gap:14px"><div class="motif" aria-hidden="true"><i class="p"></i><i class="d"></i></div>
+   <span class="eyebrow">SkillArbitrage · LawSikho team</span><h1 style="max-width:16ch">How do you really work?</h1>
+   <p style="max-width:52ch;font-size:17px">40 everyday work situations, each with two reasonable ways to handle it. Show which is closer to you, and at the end you get your four-letter work style, your office superpower, your chai order and more.</p>
+   <div class="steps" style="color:var(--navy-fg)"><div><b>1</b>About 10 minutes</div><div><b>2</b>One situation at a time</div><div><b>3</b>Big reveal at the end</div></div></div>
+  <div class="dims4">${Object.keys(DIMS).map(k=>{const d=DIMS[k];return `<div class="dimc"><div class="ic" style="background:color-mix(in srgb,var(${d.c}) 14%,transparent)">${svg(d.ic,`style="stroke:var(${d.c})"`)}</div><div class="t">${d.t}</div><div class="s">${d.rn} or ${d.ln}</div></div>`}).join("")}</div>
+  <div class="panel stack" style="gap:12px"><h3>Before you start</h3>
+   <ul class="plain">
+    <li>Every style is useful. There’s no better or worse type, and nobody is hoping for a particular answer.</li>
+    <li>Answer for how you usually are at work, not how you’d like to be or how you think you should be.</li>
+    <li>Both options in every question are fine ways to work. Go with your first instinct, and use the middle circle only if you truly do both equally.</li>
+    <li>Find a quiet ten minutes and answer in one sitting.</li>
+   </ul></div>
+  ${blocked?`<div class="panel"><p class="err">Sign in to Claude and open this link again to take the test. Your result is saved to your account.</p></div>`:`
+  <div class="panel stack">
+   <div class="row" style="align-items:flex-end">
+    <div class="field"><label for="nm">Your full name</label><input id="nm" value="${esc(S.name)}" autocomplete="name"></div>
+    <div class="field" style="flex:0 1 180px"><label for="org">Company</label><select id="org">${["SkillArbitrage","LawSikho","Both"].map(o=>`<option ${o===S.org?"selected":""}>${o}</option>`).join("")}</select></div>
+    <div class="field"><label for="dept">Team or role</label><input id="dept" value="${esc(S.dept)}" placeholder="e.g. Sales, Content, Ops"></div>
+   </div>
+   <div class="row"><button class="btn" id="start">${done?`Continue (${done}/40 answered)`:"Let’s go"}</button></div>
+   <p class="err">${esc(S.err)}</p>
+  </div>`}
+  <p class="note">A self-awareness and team-working tool built on the same four preferences as Myers-Briggs. It is not the official MBTI®, and results are not used for hiring, appraisal or promotion. ${S.local?"Your answers stay in your own browser.":"Your result is visible to you and to the people who manage this page."}</p>
+  </div>`;
+}
+function bindIntro(){
+  $("#nm").oninput=e=>{S.name=e.target.value;saveDraft()};$("#dept").oninput=e=>{S.dept=e.target.value;saveDraft()};$("#org").onchange=e=>{S.org=e.target.value;saveDraft()};
+  $("#start").onclick=()=>{if(S.name.trim().length<3){S.err="Enter your full name to start.";render();$("#nm").focus();return}
+    S.err="";if(!S.startedAt)S.startedAt=Date.now();const first=S.order.seq.findIndex(id=>S.answers[id]==null);S.page=first<0?Math.ceil(S.order.seq.length/PAGE)-1:Math.floor(first/PAGE);S.mode="quiz";S.dir="in";saveDraft();render();window.scrollTo(0,0)};
+}
+
+const SCALE=[3,2,1,0,-1,-2,-3],SLAB=["Strongly the first option","Mostly the first option","Slightly the first option","In between","Slightly the second option","Mostly the second option","Strongly the second option"];
+function scene(id,i){const t=`var(${TONES[i%4]})`,ic=QI[id]||"spark";
+  return `<svg class="scene" viewBox="0 0 240 150" aria-hidden="true">
+  <circle cx="160" cy="76" r="62" style="fill:color-mix(in srgb,${t} 16%,transparent)"/>
+  <rect x="38" y="20" width="46" height="112" rx="23" style="fill:color-mix(in srgb,${t} 28%,transparent)"/>
+  <circle cx="214" cy="24" r="7" style="fill:${t};opacity:.55"/><circle cx="26" cy="128" r="5" style="fill:${t};opacity:.7"/><circle cx="222" cy="122" r="3.5" style="fill:var(--lilac)"/>
+  <path d="M58 6l2.6 6.4L67 15l-6.4 2.6L58 24l-2.6-6.4L49 15l6.4-2.6z" style="fill:var(--lilac)"/>
+  <g class="float"><rect x="78" y="27" width="96" height="96" rx="28" style="fill:var(--surface);stroke:color-mix(in srgb,${t} 30%,var(--line));stroke-width:1.5"/>
+  <g transform="translate(98 47) scale(2.333)"><path d="${IC[ic]}" style="fill:none;stroke:${t};stroke-width:1.6;stroke-linecap:round;stroke-linejoin:round"/></g></g></svg>`}
+function quizView(){
+  const seq=S.order.seq,i=S.page,id=seq[i],b=BY[id],f=S.order.flip[id],L=f?b[3]:b[2],R=f?b[2]:b[3],cv=S.answers[id],v=cv==null?null:(f?-cv:cv);
+  const done=Object.keys(S.answers).length,pct=done/seq.length*100,t=`var(${TONES[i%4]})`;
+  return `<div class="player">
+   <div class="track2" aria-hidden="true"><div class="fill2" style="width:${pct}%"></div>${[25,50,75].map(m=>`<span class="flagm ${pct>=m?"hit":""}" style="left:${m}%"></span>`).join("")}<span class="runner" style="left:${pct}%"><i></i><b></b></span></div>
+   <div class="ptop"><span class="counter"><b>${i+1}</b> of ${seq.length}</span><span class="cheer" id="cheer">${S.cheer||""}</span></div>
+   <div class="card q2 ${S.dir}" style="--tone:${t}">
+    ${scene(id,i)}
+    <p class="sit">${esc(b[1])}</p>
+    <div class="opts2"><div class="o2 l ${v>0?"on":""}"><span class="ob">1</span><span>${esc(L)}</span></div><div class="o2 r ${v<0?"on":""}"><span class="ob">2</span><span>${esc(R)}</span></div></div>
+    <div class="scale2" role="radiogroup" aria-label="Which is closer to you?">
+     <span class="se l">Option 1</span>
+     ${SCALE.map((x,k)=>`<button class="dot2 k${k}" data-v="${x}" role="radio" aria-checked="${v===x}" aria-label="${SLAB[k]}" title="${SLAB[k]}"></button>`).join("")}
+     <span class="se r">Option 2</span>
+    </div>
+    ${i===0&&v==null?`<p class="hint">Tap a circle. The bigger the circle, the stronger your lean. Both options are fine ways to work.</p>`:""}
+   </div>
+   <div class="pnav"><button class="btn ghost" id="back" ${i===0?"disabled":""}>← Back</button>
+    ${i===seq.length-1&&v!=null?`<button class="btn" id="finish">Reveal my style ✨</button>`:v!=null?`<button class="btn ghost" id="fwd">Next →</button>`:`<span class="kbd">Tip: keys <kbd>1</kbd>–<kbd>7</kbd> work too</span>`}</div>
+   <p class="err">${esc(S.err)}</p></div>`;
+}
+let advT=null;
+function pick(dv){
+  const id=S.order.seq[S.page];S.answers[id]=S.order.flip[id]?-dv:dv;S.cheer=CHEERS[Math.floor(Math.random()*CHEERS.length)];saveDraft();S.dir="";clearTimeout(advT);render();
+  const btn=document.querySelector(`.dot2[aria-checked="true"]`);if(btn)btn.classList.add("pop");
+  if(S.page<S.order.seq.length-1)advT=setTimeout(()=>{S.page++;S.dir="in";S.cheer="";const n=Object.keys(S.answers).length;if(MILE[n]&&!S.seenMile?.[n]&&S.page===n)S.mile=n;saveDraft();render()},480);
+}
+function bindQuiz(){
+  document.querySelectorAll(".dot2").forEach(b=>b.onclick=()=>pick(+b.dataset.v));
+  $("#back").onclick=()=>{clearTimeout(advT);if(S.page>0){S.page--;S.dir="back";S.cheer="";saveDraft();render()}};
+  const fw=$("#fwd");if(fw)fw.onclick=()=>{clearTimeout(advT);S.page++;S.dir="in";S.cheer="";render()};
+  const fn=$("#finish");if(fn)fn.onclick=async()=>{fn.disabled=true;await submit()};
+}
+document.addEventListener("keydown",e=>{if(S.tab!=="me"||S.mode!=="quiz"||S.mile||/INPUT|SELECT|TEXTAREA/.test(e.target.tagName))return;
+  const k="1234567".indexOf(e.key);if(k>=0){pick(SCALE[k]);return}
+  if(e.key==="ArrowLeft"&&S.page>0){clearTimeout(advT);S.page--;S.dir="back";render()}});
+function mileView(){const m=MILE[S.mile];return `<div class="card in milestone stack" style="gap:14px">
+  <div style="margin-inline:auto;width:220px">${scene(["w07","w14","w32"][[10,20,30].indexOf(S.mile)]||"w07",[10,20,30].indexOf(S.mile)+1).replace(/QIPLACE/,"")}</div>
+  <div class="big">${S.mile}/40</div><h2>${m[0]}</h2><p class="muted">${m[1]}</p><button class="btn" id="cont">Keep going →</button></div>`}
+function bindMile(){$("#cont").onclick=()=>{S.seenMile={...(S.seenMile||{}),[S.mile]:1};S.mile=null;saveDraft();render()};$("#cont").focus();miniBurst()}
+function miniBurst(){if(matchMedia("(prefers-reduced-motion: reduce)").matches)return;const c=$("#confetti"),x=c.getContext("2d"),d=devicePixelRatio,W=c.width=innerWidth*d,H=c.height=innerHeight*d;c.style.width=innerWidth+"px";c.style.height=innerHeight+"px";
+  const cols=["#2941ba","#93a5ff","#d97a2b","#178f80","#7a52d8"],ps=Array.from({length:60},()=>({x:W/2,y:H*.45,vx:(Math.random()-.5)*22,vy:-Math.random()*20-6,s:(5+Math.random()*6)*d,c:cols[Math.floor(Math.random()*5)]}));
+  let t=0;(function f(){x.clearRect(0,0,W,H);ps.forEach(p=>{p.vy+=.8;p.x+=p.vx;p.y+=p.vy;x.fillStyle=p.c;x.beginPath();x.arc(p.x,p.y,p.s/2,0,7);x.fill()});if(++t<90)requestAnimationFrame(f);else x.clearRect(0,0,W,H)})()}
+
+async function submit(){
+  const secs=Math.round((Date.now()-(S.startedAt||Date.now()))/1000),a=analyse(S.answers);
+  const rec={name:S.name.trim(),org:S.org,dept:S.dept.trim(),type:a.type,pct:a.pct,answers:{...S.answers},secs,takenAt:new Date().toISOString(),v:5};
+  if(S.local){try{localStorage.setItem("ws-result",JSON.stringify(rec))}catch(e){}S.mine=rec}
+  else if(!S.preview){try{await S.db.doc("results/"+S.uid).set(rec)}catch(e){S.err="Couldn’t save your answers. Ask the page owner to give you Contributor access, then try again.";render();return}S.mine=rec}
+  else S.prevRes=rec;
+  try{localStorage.removeItem(dkey())}catch(e){}
+  S.mode="result";S.err="";render();window.scrollTo(0,0);confetti();
+}
+
+function meter(k,p){const d=DIMS[k],right=p>=50,shown=right?p:100-p,c=`var(${d.c})`,fill=right?`left:50%;width:${p-50}%`:`left:${p}%;width:${50-p}%`;
+  return `<div class="meter"><div class="ends"><span class="${right?"":"on"}">${d.ln}</span><span class="${right?"on":""}">${d.rn}</span></div>
+  <div class="track"><span class="fill" style="${fill};background:${c}"></span><span class="dot" style="left:${p}%;background:${c}"></span></div>
+  <div class="pct" style="color:${c}">${shown}% ${right?d.rn:d.ln}${shown<60?' <span class="muted" style="font-weight:500">· close to balanced</span>':""}</div></div>`}
+function resultView(r){
+  const a=analyseRec(r),t=a.type,f=FUN[t],L=t.split("");
+  const fc=(ic,k,v)=>`<div class="funcard"><span class="ic">${svg(ic)}</span><span class="k">${k}</span><span class="v">${v}</span></div>`;
+  return `<div class="stack" style="gap:24px">
+  <div class="hero stack" style="gap:10px"><div class="motif" aria-hidden="true"><i class="p"></i><i class="d"></i></div>
+   <span class="eyebrow">${esc(r.name)} · ${esc(r.org)}${r.dept?" · "+esc(r.dept):""}</span>
+   <div class="reveal">${L.map(x=>`<span>${x}</span>`).join("")}</div>
+   <div class="typename">${NAMES[t]}</div><p style="font-size:17px;max-width:46ch">${f[0]}</p>
+   ${S.preview||a.legacy?"":`<div class="row"><button class="btn sm" id="again" style="background:var(--lilac);border-color:var(--lilac);color:var(--navy)">Replay the reveal 🎉</button></div>`}</div>
+  <div class="fun">${fc("bolt","Office superpower",f[1])}${fc("shield","Kryptonite",f[2])}${fc("cup","Chai order",f[3])}${fc("chat","Most likely to say in a meeting",f[4])}${fc("phone","WhatsApp status",f[5])}${fc("handshake","Best work buddy",`<strong>${f[6]}</strong>, ${NAMES[f[6]]}. They cover your blind spots.`)}</div>
+  <div class="panel stack" style="gap:22px"><h3>Your four preferences</h3>${Object.keys(DIMS).map(k=>meter(k,a.pct[k])).join("")}</div>
+  <div class="panel stack"><h3>How you work</h3><ul class="plain">${L.map(l=>`<li>${WORK[l][0]}</li>`).join("")}</ul></div>
+  <div class="panel stack"><h3>How others can work best with you</h3><ul class="plain">${L.map(l=>`<li>${WORK[l][1]}</li>`).join("")}</ul></div>
+  <p class="note">Scores between 50% and 60% mean you use both sides fairly evenly. Preferences describe what comes naturally, not what you can do.</p>
+  ${S.preview?`<div class="lock" style="justify-content:space-between;flex-wrap:wrap">This was a preview. Nothing was saved. <button class="btn ghost sm" id="exitPrev2">Exit preview</button></div>`
+   :a.legacy?`<div class="lock">This result is from the earlier version of the test. ${S.isOwner?"Reset it from the Team results tab to take the new version.":"Ask the page owner to reset it so you can take the new version."}</div>`
+   :S.local?`<div class="lock" style="justify-content:space-between;flex-wrap:wrap"><span>Share your result with your manager by copying it below.</span><span class="row" style="gap:8px"><button class="btn sm" id="copyRes">Copy my result</button><button class="btn ghost sm" id="retakeL">Retake</button></span></div><textarea id="resTxt" readonly style="width:100%;min-height:120px;font:14px var(--body);padding:12px;border-radius:12px;border:1px solid var(--line);background:var(--surface);color:var(--fg)">${esc(shareText(r,a))}</textarea>`
+   :`<div class="lock">🔒 Your result is saved. To retake, ask the page owner to reset it.</div>`}
+  </div>`;
+}
+
+/* confetti in brand colours */
+function confetti(){
+  if(matchMedia("(prefers-reduced-motion: reduce)").matches)return;
+  const c=$("#confetti"),x=c.getContext("2d"),W=c.width=innerWidth*devicePixelRatio,H=c.height=innerHeight*devicePixelRatio;c.style.width=innerWidth+"px";c.style.height=innerHeight+"px";
+  const cols=["#2941ba","#93a5ff","#d97a2b","#178f80","#7a52d8","#ffd166"];
+  const ps=Array.from({length:160},()=>({x:W*(.2+Math.random()*.6),y:H*.35,vx:(Math.random()-.5)*26,vy:-Math.random()*26-8,s:(6+Math.random()*8)*devicePixelRatio,r:Math.random()*6,vr:(Math.random()-.5)*.4,c:cols[Math.floor(Math.random()*cols.length)],pill:Math.random()<.4}));
+  let t=0;(function f(){x.clearRect(0,0,W,H);ps.forEach(p=>{p.vy+=.9;p.vx*=.99;p.x+=p.vx;p.y+=p.vy;p.r+=p.vr;x.save();x.translate(p.x,p.y);x.rotate(p.r);x.fillStyle=p.c;
+    if(p.pill){x.beginPath();x.arc(0,0,p.s/2,0,7);x.fill()}else x.fillRect(-p.s/2,-p.s/4,p.s,p.s/2);x.restore()});
+    if(++t<150)requestAnimationFrame(f);else x.clearRect(0,0,W,H)})();
+}
+function shareText(r,a){return `Work Style Profile – ${r.name} (${r.org}${r.dept?", "+r.dept:""})\nType: ${a.type} – ${NAMES[a.type]}\n`+Object.keys(DIMS).map(k=>{const p=a.pct[k],d=DIMS[k];return `${d.t}: ${p>=50?p+"% "+d.rn:(100-p)+"% "+d.ln}`}).join("\n")+`\nTaken: ${new Date(r.takenAt).toLocaleDateString("en-IN")}`}
+document.addEventListener("click",async e=>{if(e.target.id==="copyRes"){const t=$("#resTxt");try{await navigator.clipboard.writeText(t.value);e.target.textContent="Copied ✓"}catch(err){t.select()}}
+  if(e.target.id==="retakeL"){try{localStorage.removeItem("ws-result")}catch(err){}S.mine=null;S.answers={};S.page=0;S.startedAt=null;S.seenMile={};S.order=buildOrder(S.uid+Date.now());S.mode="intro";render();window.scrollTo(0,0)}
+  if(e.target.id==="again"){render();confetti()}if(e.target.id==="exitPrev2")exitPreview()});
+
+/* admin */
+function teamView(){
+  const all=S.team.map(r=>({...r,calc:analyseRec(r)}));
+  const rows=S.filter==="All"?all:all.filter(r=>r.org===S.filter);
+  const counts={};rows.forEach(r=>counts[r.calc.type]=(counts[r.calc.type]||0)+1);
+  const split=k=>{const d=DIMS[k],R=rows.filter(r=>r.calc.type.includes(d.r)).length,Lc=rows.length-R;
+    return `<div class="stat"><span class="eyebrow">${d.t}</span><div class="split"><span style="flex:${R||1e-4};background:var(${d.c})">${R?d.r+" "+R:""}</span><span style="flex:${Lc||1e-4};background:var(--muted)">${Lc?d.l+" "+Lc:""}</span></div></div>`};
+  const order=["ISTJ","ISFJ","INFJ","INTJ","ISTP","ISFP","INFP","INTP","ESTP","ESFP","ENFP","ENTP","ESTJ","ESFJ","ENFJ","ENTJ"];
+  const head=`<div class="hero stack" style="gap:18px"><div class="motif" aria-hidden="true"><i class="p"></i><i class="d"></i></div>
+   <div class="stack" style="gap:6px"><span class="eyebrow">Admin · visible only to you</span><h2 style="color:var(--navy-fg)">Team results</h2></div>
+   <div class="kpis"><div class="kpi"><b>${all.length}</b><span>completed</span></div><div class="kpi"><b>${Object.keys(counts).length}</b><span>different types</span></div><div class="kpi"><b>${rows.length?Object.entries(counts).sort((a,b)=>b[1]-a[1])[0][0]:"–"}</b><span>most common</span></div></div></div>
+  <div class="panel stack" style="gap:10px"><div class="row" style="justify-content:space-between"><h3>Before you send it out</h3><button class="btn sm" id="prev">Preview the test</button></div>
+   <p class="muted" style="font-size:15px">Try it yourself with <strong>Preview the test</strong> (nothing is saved), and read every question in the <strong>Questions</strong> tab below. When you’re happy, click <strong>Share</strong> at the top of the page, add your team as <strong>Contributor</strong>, and send them the link. Each person gets one attempt and sees only their own result. ${S.isOwner?"Use <strong>Reset</strong> to let someone retake it.":""}</p></div>
+  <div class="row" style="justify-content:space-between"><div class="subtabs">${[["people","People"],["map","Type map"],["questions","Questions"]].map(([k,l])=>`<button data-sub="${k}" aria-pressed="${S.sub===k}">${l}</button>`).join("")}</div>
+   ${S.sub!=="questions"?`<div class="row"><select id="flt" style="width:auto" aria-label="Filter by company">${["All","SkillArbitrage","LawSikho","Both"].map(o=>`<option ${o===S.filter?"selected":""}>${o}</option>`).join("")}</select>${S.dl&&rows.length?`<button class="btn ghost sm" id="csv">Download CSV</button>`:""}</div>`:""}</div>`;
+  if(S.sub==="questions")return `<div class="stack" style="gap:20px">${head}${questionsView()}</div>`;
+  if(!rows.length)return `<div class="stack" style="gap:20px">${head}<div class="panel empty">No results yet. They appear here as soon as people submit.</div></div>`;
+  if(S.sub==="map")return `<div class="stack" style="gap:20px">${head}<div class="stats">${Object.keys(DIMS).map(split).join("")}</div>
+   <div class="typegrid">${order.map(t=>{const n=counts[t]||0,max=Math.max(...Object.values(counts));return `<div class="tg ${n?"has":"zero"}" style="${n?`background:color-mix(in srgb,var(--brand) ${Math.round(6+n/max*22)}%,var(--surface))`:""}"><span class="c">${t}</span><span class="n">${NAMES[t]}</span>${n?`<span class="k">${n}</span>`:""}</div>`}).join("")}</div>
+   <p class="note">Each box is one of the 16 types. The darker the box, the more people with that type.</p></div>`;
+  return `<div class="stack" style="gap:20px">${head}
+  <div class="tablewrap"><table><thead><tr><th>Name</th><th>Company</th><th>Team / role</th><th>Type</th><th>E / I</th><th>N / S</th><th>T / F</th><th>J / P</th><th>Time</th><th>Taken</th>${S.isOwner?"<th></th>":""}</tr></thead><tbody>
+  ${rows.map(r=>`<tr><td>${esc(r.name)}</td><td>${esc(r.org)}</td><td>${esc(r.dept)}</td><td><span class="chip">${r.calc.type}</span> <span class="muted">${NAMES[r.calc.type]}</span>${r.calc.legacy?' <span class="muted" style="font-size:12px">(old version)</span>':""}</td>
+   ${Object.keys(DIMS).map(k=>{const p=r.calc.pct[k],d=DIMS[k];return `<td>${p>=50?d.r+" "+p:d.l+" "+(100-p)}%</td>`}).join("")}
+   <td>${r.secs!=null?Math.max(1,Math.round(r.secs/60))+" min":""}</td><td>${r.takenAt?new Date(r.takenAt).toLocaleDateString("en-IN",{day:"numeric",month:"short"}):""}</td>
+   ${S.isOwner?`<td><button class="btn ghost sm rm" data-id="${esc(r._id)}">${S.confirm===r._id?"Confirm reset":"Reset"}</button></td>`:""}</tr>`).join("")}
+  </tbody></table></div></div>`;
+}
+function questionsView(){
+  return `<div class="tablewrap"><table class="qtable"><thead><tr><th>#</th><th>Situation</th><th>One end</th><th>Other end</th><th>Area</th></tr></thead><tbody>
+  ${BANK.map((b,i)=>{const[d,pole]=KEYS[b[0]].split(":"),D=DIMS[d],other=pole===D.r?D.l:D.r;
+   return `<tr><td>${i+1}</td><td>${esc(b[1])}</td><td>${esc(b[2])} <span class="mtag" style="background:var(${D.c})">${pole}</span></td><td>${esc(b[3])} <span class="mtag" style="background:var(${D.c})">${other}</span></td><td>${D.t}</td></tr>`}).join("")}
+  </tbody></table></div><p class="note">Each person sees the 40 situations one at a time, in a different order, with the two options swapped at random.</p>`;
+}
+function bindTeam(){
+  bindCsv();
+  document.querySelectorAll("[data-sub]").forEach(b=>b.onclick=()=>{S.sub=b.dataset.sub;render()});
+  const fl=$("#flt");if(fl)fl.onchange=e=>{S.filter=e.target.value;render()};
+  document.querySelectorAll(".rm").forEach(b=>b.onclick=async()=>{const id=b.dataset.id;if(S.confirm!==id){S.confirm=id;render();return}
+    S.confirm=null;try{await S.db.doc("results/"+id).delete()}catch(e){}render()});
+  $("#prev").onclick=startPreview;
+}
+function startPreview(){{S.preview=true;S.saved={answers:S.answers,page:S.page,startedAt:S.startedAt,mode:S.mode,seenMile:S.seenMile};
+    S.answers={};S.page=0;S.startedAt=null;S.seenMile={};S.mile=null;S.order=buildOrder(S.uid+"-preview-"+Date.now());S.mode="intro";S.tab="me";render();window.scrollTo(0,0)}}
+function bindCsv(){
+  const c=$("#csv");if(c)c.onclick=async()=>{
+    const all=S.team.map(r=>({...r,calc:analyseRec(r)})),rows=S.filter==="All"?all:all.filter(r=>r.org===S.filter);
+    const q=s=>`"${String(s??"").replace(/"/g,'""')}"`;
+    const csv=[["Name","Company","Team","Type","Style","% Extroverted","% Intuition","% Thinking","% Judging","Minutes","Taken"].join(",")]
+      .concat(rows.map(r=>[r.name,r.org,r.dept,r.calc.type,NAMES[r.calc.type],r.calc.pct.EI,r.calc.pct.SN,r.calc.pct.FT,r.calc.pct.PJ,r.secs!=null?Math.round(r.secs/60):"",r.takenAt].map(q).join(","))).join("\n");
+    try{await S.dl.save({filename:"work-style-results.csv",data:csv})}catch(e){}};
+}
+function exitPreview(){try{localStorage.removeItem(dkey())}catch(e){}S.preview=false;Object.assign(S,S.saved||{});S.order=buildOrder(S.uid);S.prevRes=null;S.mile=null;S.tab=S.isEditor?"team":"me";render();window.scrollTo(0,0)}
+$("#tabMe").onclick=()=>{S.tab="me";render()};$("#tabTeam").onclick=()=>{S.tab="team";render()};
+
+render();
+(async()=>{
+  let db=null,user=null,dl=null;
+  try{[db,user,dl]=await Promise.all([claude.use("db"),claude.use("user"),claude.use("downloads")])}catch(e){}
+  S.db=db;S.dl=dl;
+  if(user){try{S.uid=await user.id()}catch(e){}try{S.isOwner=!!(await user.isOwner())}catch(e){}S.isEditor=S.isOwner}
+  if(!db||!S.uid){S.local=true;try{S.uid=localStorage.getItem("ws-id")||("local-"+Math.random().toString(36).slice(2));localStorage.setItem("ws-id",S.uid)}catch(e){S.uid="local-"+Math.random().toString(36).slice(2)}
+    S.order=buildOrder(S.uid);loadDraft();try{const m=JSON.parse(localStorage.getItem("ws-result")||"null");if(m){S.mine=m;S.mode="result"}}catch(e){}
+    if(S.mode!=="result")S.mode=Object.keys(S.answers).length?"quiz":"intro";render();return}
+  S.order=buildOrder(S.uid);loadDraft();
+  try{const snap=await db.doc("results/"+S.uid).get();if(snap.exists){S.mine=snap.data();S.mode="result"}}catch(e){}
+  if(S.mode!=="result")S.mode=Object.keys(S.answers).length?"quiz":"intro";
+  if(S.isEditor){S.tab="team";db.collection("results").onSnapshot(s=>{S.team=s.docs.filter(d=>d.exists).map(d=>({_id:d.id,...d.data()})).sort((a,b)=>String(a.name).localeCompare(String(b.name)));
+    if(!S.preview&&!S.team.find(r=>r._id===S.uid)&&S.mode==="result"){S.mine=null;S.mode="intro"}
+    if(S.tab==="team"||S.mode==="intro")render()},()=>{})}
+  render();
+})();
+</script>
+
+</body>
+</html>
