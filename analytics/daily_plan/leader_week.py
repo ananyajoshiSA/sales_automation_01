@@ -207,7 +207,7 @@ def html_doc(F: dict, near: dict[str, dict], N: dict, meta: dict) -> str:
     used = set()
     H = [f"<!doctype html><html><head><meta charset='utf-8'><title>Weekly note to the team leader</title><style>{css}"
          " .move{border:1px solid #d6dcda;border-radius:8px;padding:10px 14px;margin:12px 0;page-break-inside:avoid}"
-         " .move h3{margin:0 0 6px} .eg{border-left:4px solid #B8860B;background:#FFF8E6;padding:6px 10px;margin:6px 0}</style></head><body>"]
+         " .move h3{margin:0 0 6px} h2{page-break-before:auto;margin-top:22px} h2.brk{page-break-before:always} .eg{border-left:4px solid #B8860B;background:#FFF8E6;padding:6px 10px;margin:6px 0}</style></head><body>"]
     H.append(f"<div class='cover'><div class='k'>{_e(meta['team'])} · week {_e(meta['period'])} · for {_e(meta['leader'])}</div>"
              f"<h1>{_e(N.get('title') or 'More enrollments were possible this week')}</h1><p>{N.get('headline', '')}</p></div>")
     H.append("<div class='tiles'>"
@@ -215,28 +215,16 @@ def html_doc(F: dict, near: dict[str, dict], N: dict, meta: dict) -> str:
              f"<div class='tile'><b>{C['likely']}</b><span>more leads ready to pay that a team-leader action would likely have saved</span></div>"
              f"<div class='tile'><b>{C['possible']}</b><span>more that could possibly have been saved</span></div></div>")
     if N.get("moves"):
-        H.append("<h2 style='page-break-before:auto'>Five things to do from Monday</h2>")
+        H.append("<h2>Five things to do from Monday</h2>")
         for i, m in enumerate(N["moves"], 1):
             eg = [by_id[x] for x in m.get("examples", []) if x in by_id]
             used.update(r["lead_id"] for r in eg)
             H.append(f"<div class='move'><h3>{i}. {m.get('title', '')}</h3><p>{m.get('do', '')}</p><p class='sub'><b>Why:</b> {m.get('why', '')}</p>"
                      + "".join(f"<div class='eg'><b>{_e(r.get('name'))}</b> ({_e(r.get('owner'))}): {_e(r.get('story'))}</div>" for r in eg)
                      + (f"<p class='sub'><b>How you'll know it worked:</b> {m['check']}</p>" if m.get("check") else "") + "</div>")
-    H.append("<h2>Leads that were ready, and how each could have been saved</h2>"
-             f"<p>Claude read every open, lost or part-paid lead that had a conversation this week ({C['judged']} leads) and marked the "
-             "ones that showed a buying signal (agreed a price or seat block, asked how to pay, got a link, or fixed a decision time) "
-             f"and slipped for a reason a team leader can fix. <b>{C['likely']}</b> would likely have enrolled this week with that action, "
-             f"<b>{C['possible']}</b> possibly. These are judgements from the calls, not certainties.</p>")
-    if C["levers"]:
-        H.append("<table><tr><th>What went wrong</th><th>Leads (likely + possible)</th></tr>" + "".join(
-            f"<tr><td>{_e(LEVERS.get(k, k))}</td><td>{n}</td></tr>" for k, n in C["levers"]) + "</table>")
-    for k, label in LEVERS.items():
-        rs = [r for r in hot if r.get("tl_lever") == k and r["lead_id"] not in used]
-        if rs:
-            H.append(f"<h3>{_e(label)} ({len(rs)})</h3>" + "".join(_story(r) for r in rs))
     S = F.get("sources")
     if N.get("sources") or S:
-        H.append("<h2>Not all leads are equal</h2>" + "".join(f"<p>{x}</p>" for x in N.get("sources", [])))
+        H.append("<h2 class='brk'>Not all leads are equal</h2>" + "".join(f"<p>{x}</p>" for x in N.get("sources", [])))
     if S:
         H.append(f"<p class='sub'>Leads that came to the team {_e(S['period'])}. Enrolled = checked against the calls in the week's review.</p>"
                  "<table><tr><th>Lead</th><th>Leads</th><th>Median first dial</th><th>Dialled in 5 min</th><th>Never dialled</th>"
@@ -283,10 +271,29 @@ def html_doc(F: dict, near: dict[str, dict], N: dict, meta: dict) -> str:
              "<tr><td>Dials</td>" + "".join(f"<td>{v['dials']:,}</td>" for v in F["hours"].values()) + "</tr>"
              "<tr><td>Real conversations per 100 dials</td>" + "".join(f"<td>{v['real_per_100']}</td>" for v in F["hours"].values()) + "</tr></table>")
     if N.get("day_plan"):
-        H.append("<h3>Suggested day</h3><table><tr><th>Time</th><th>What the team does</th></tr>"
+        H.append("<h3>Suggested day</h3><table><tr><th style='width:16%'>Time</th><th>What the team does</th></tr>"
                  + "".join(f"<tr><td>{_e(t)}</td><td>{x}</td></tr>" for t, x in N["day_plan"]) + "</table>")
     if N.get("checklist"):
         H.append("<h2>Next week, day by day</h2><ul>" + "".join(f"<li>{x}</li>" for x in N["checklist"]) + "</ul>")
+    rest = [r for r in hot if r["lead_id"] not in used]
+    likely = [r for r in rest if r["saveable"] == "likely"]
+    H.append("<h2 class='brk'>Every lead that was ready, and what to do now</h2>"
+             f"<p>Claude read every open, lost or part-paid lead that had a conversation this week ({C['judged']} leads) and marked the "
+             "ones that showed a buying signal (agreed a price or seat block, asked how to pay, got a link, or fixed a decision time) "
+             f"and slipped for a reason a team leader can fix. <b>{C['likely']}</b> would likely have enrolled this week with that action, "
+             f"<b>{C['possible']}</b> possibly. These are judgements from the calls, not certainties.</p>")
+    if C["levers"]:
+        H.append("<table><tr><th>What went wrong</th><th>Leads (likely + possible)</th></tr>" + "".join(
+            f"<tr><td>{_e(LEVERS.get(k, k))}</td><td>{n}</td></tr>" for k, n in C["levers"]) + "</table>")
+    if likely:
+        H.append(f"<h3>The other leads who would likely have enrolled ({len(likely)})</h3>" + "".join(_story(r) for r in likely))
+    possible = [r for r in rest if r["saveable"] == "possible"]
+    if possible:
+        H.append(f"<h3>Could possibly have been saved ({len(possible)})</h3><table><tr><th style='width:15%'>Lead (caller)</th>"
+                 "<th style='width:28%'>What they said or did</th><th style='width:25%'>What went wrong</th><th>Do now</th></tr>" + "".join(
+                     f"<tr><td><b>{_e(r.get('name'))}</b><br><span class='sub'>{_e(r.get('owner'))}</span></td><td>{_e(r.get('signal_text'))}</td>"
+                     f"<td>{_e(r.get('miss_text'))}</td><td>{_e(r.get('next_step') if r.get('still_open') else 'Closed for now')}</td></tr>"
+                     for r in sorted(possible, key=lambda r: (r.get("tl_lever") or "", r.get("owner") or ""))) + "</table>")
     H.append(f"<p class='small'>Built {_e(meta['built'])} IST from every connected call of the week and its transcript. Enrollment = first-time "
              "Course Enrolled or a lead saying on a call that they paid. \"Likely\" and \"possible\" are judgements, not forecasts; "
              f"for scale, {F['won_after_talk']} of the {F['prospects_talked']} prospects who had a real conversation this week enrolled.</p>")
