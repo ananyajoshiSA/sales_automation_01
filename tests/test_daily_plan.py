@@ -559,3 +559,49 @@ def test_lead_flow_section_splits_fresh_from_reassigned_leads():
                phone="", arrived=datetime(2026, 10, 10, 10, 0), last="") for r in rs]
     html = leadflow.section("Lead flow", rs, leads=False)
     assert "3 leads came to the team: 1 created in this period (fresh leads) and 2 older leads" in html
+
+
+def _weekly_fixture(tmp_path):
+    from analytics.daily_plan import weekly
+    root = tmp_path / "daily"
+    for day, calls, fetched in (("2026-10-09", [call("u1", "L1", "2026-10-09 05:00:00", "Answered", 300), call("u1", "L2", "2026-10-09 06:00:00")],
+                                 "2026-10-09T16:00:00+00:00"),
+                                ("2026-10-10", [call("u1", "L1", "2026-10-09 05:00:00", "Answered", 310),
+                                                call("u2", "L2", "2026-10-10 07:00:00", "Answered", 25)], "2026-10-10T16:00:00+00:00")):
+        (root / day).mkdir(parents=True)
+        json.dump({"group": "Team X", "users": USERS, "leads": LEADS, "calls": calls, "zip_activities": [], "fetched_at": fetched},
+                  open(root / day / "snap.json", "w"))
+        json.dump([], open(root / day / "snap_enrolled.json", "w"))
+    return weekly, Snap(weekly.gather(str(root), "2026-10-09", "2026-10-10"), leader="Tara L")
+
+
+def test_weekly_review_keeps_each_call_once_and_matches_its_recording(tmp_path):
+    weekly, s = _weekly_fixture(tmp_path)
+    calls = weekly.connected(s)
+    assert [(c["lead_id"], c["duration"]) for c in calls] == [("L1", 310), ("L2", 25)]      # newest pull wins; unanswered left out
+    rec = {"start_time": "2026-10-09T05:01:00Z", "call_duration": 305, "transcript": {"text": "caller: fee is 50k. lead: ok"},
+           "s3_audio_file_url": "https://acefone/x"}
+    tx = {"919000000001": {"sales_call": [rec]}}
+    recs = weekly.match(s, calls, tx)
+    assert list(recs) == [calls[0]["activity_id"]]
+    rows = weekly.ledger(s, calls, recs, set(tx))
+    assert [r["transcript"] for r in rows] == ["transcript", "not searched"]
+    index = weekly.build_dossiers(s, calls, recs, str(tmp_path / "dossiers"), {})
+    text = open(index[0]["path"]).read() if index[0]["lead_id"] == "L1" else open(index[1]["path"]).read()
+    assert "fee is 50k" in text and calls[0]["activity_id"] in text
+
+
+def test_weekly_review_checks_every_call_was_read_and_rolls_up(tmp_path):
+    weekly, s = _weekly_fixture(tmp_path)
+    calls = weekly.connected(s)
+    rows = weekly.ledger(s, calls, {}, set())
+    index = [{"lead_id": c["lead_id"], "call_ids": [c["activity_id"]]} for c in calls]
+    reads = {"L1": {"lead_id": "L1", "outcome": "open", "primary_reason": "ASK",
+                    "calls": [{"call_id": calls[0]["activity_id"], "ask_made": False, "mistake": "no ask"}]}}
+    chk = weekly.check(index, reads)
+    assert chk["missing_leads"] == ["L2"] and chk["read"] == 1
+    reads["L2"] = {"lead_id": "L2", "outcome": "lost", "primary_reason": "L3", "calls": []}
+    assert weekly.check(index, reads)["missing_calls"] == [calls[1]["activity_id"]]       # a lead read, one call skipped
+    R = weekly.roll_up(rows, reads)
+    assert R["outcomes"] == {"open": 1, "lost": 1} and dict(R["reasons"]) == {"ASK": 1, "L3": 1}
+    assert R["per_caller"]["Asha K"]["real_read"] == 1 and R["mistakes"] == [("no ask", 1)]

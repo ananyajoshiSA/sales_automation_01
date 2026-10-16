@@ -12,11 +12,15 @@
     python -m analytics.daily_plan fetch 2026-10-12 --days-back 3 && python -m analytics.daily_plan pipeline-prepare 2026-10-12
     #   ... Claude reads every batch -> data/daily/<date>/pipeline/reads/out_*.jsonl ...
     python -m analytics.daily_plan pipeline-build 2026-10-12 [--mail] [--publish-state]   # nightly pipeline to month end
+    python -m analytics.daily_plan weekly-prepare 2026-10-08 2026-10-16   # every connected call of the week, transcripts, dossiers
+    #   ... Claude reads every call -> data/weekly/<start>_<end>/reads/out_*.jsonl, writes narrative.json ...
+    python -m analytics.daily_plan weekly-build 2026-10-08 2026-10-16     # weekly review PDF + workbook, call ledger with readings
 """
 
 from __future__ import annotations
 
 import argparse
+import glob
 import json
 import os
 import sys
@@ -313,6 +317,89 @@ def html_escape(s: str) -> str:
     return html.escape(s)
 
 
+def weekly_dir(a) -> str:
+    return os.path.join("data", "weekly", f"{a.start}_{a.end}")
+
+
+def cmd_weekly_prepare(a):
+    """Every connected call of the week: ledger, transcripts (searching what is missing), one dossier per lead, batches."""
+    from analytics.daily_plan import weekly
+
+    d = weekly_dir(a)
+    os.makedirs(d, exist_ok=True)
+    snap = Snap(weekly.gather("data/daily", a.start, a.end))
+    calls = weekly.connected(snap)
+    tx, when = weekly.load_tx("data/daily", "data/weekly")
+    todo = weekly.to_search(snap, calls, when)
+    if todo and not a.no_transcripts:
+        print(f"searching transcripts for {len(todo)} numbers", file=sys.stderr, flush=True)
+        transcripts.fetch(todo, os.path.join(d, "tx"), pause=a.pause)
+        tx, when = weekly.load_tx("data/daily", "data/weekly")
+    recs = weekly.match(snap, calls, tx)
+    rows = weekly.ledger(snap, calls, recs, set(tx))
+    with open(os.path.join(d, "calls.jsonl"), "w") as f:
+        f.writelines(json.dumps(r) + "\n" for r in rows)
+    enrolled = {}
+    for f in sorted(glob.glob("data/daily/*/enrolled.json")):
+        enrolled.update({l["ProspectID"]: l.get("first_enrolled") for l in json.load(open(f))})
+    index = weekly.build_dossiers(snap, calls, recs, os.path.join(d, "dossiers"), enrolled)
+    json.dump(index, open(os.path.join(d, "index.json"), "w"))
+    files = weekly.write_batches(index, os.path.join(d, "reads"))
+    open(os.path.join(d, "brief.md"), "w").write(open("docs/weekly_brief.md").read().replace("{start}", a.start).replace("{end}", a.end))
+    from collections import Counter
+    info = {"period": f"{a.start} to {a.end}", "connected_calls": len(rows), "leads": len(index),
+            "transcripts": dict(Counter(r["transcript"] for r in rows)), "batches": len(files), "brief": os.path.join(d, "brief.md"),
+            "reads": os.path.join(d, "reads")}
+    json.dump(info, open(os.path.join(d, "prepare.json"), "w"), indent=1)
+    print(json.dumps(info, indent=1))
+
+
+def cmd_weekly_build(a):
+    """Check every call was read, then the weekly review PDF and workbook, and the ledger with each call's reading."""
+    from analytics.daily_plan import weekly
+    from analytics.daily_plan.stats import day_stats
+
+    d = weekly_dir(a)
+    index = json.load(open(os.path.join(d, "index.json")))
+    reads = weekly.load_reads(os.path.join(d, "reads"))
+    chk = weekly.check(index, reads)
+    if chk["missing_leads"] or chk["missing_calls"]:
+        print(f"not finished: {len(chk['missing_leads'])} leads and {len(chk['missing_calls'])} calls have no reading", file=sys.stderr)
+        if not a.allow_missing:
+            sys.exit(2)
+    rows = [json.loads(ln) for ln in open(os.path.join(d, "calls.jsonl"))]
+    by_call = {c.get("call_id"): c for r in reads.values() for c in r.get("calls") or []}
+    with open(os.path.join(d, "calls.jsonl"), "w") as f:
+        f.writelines(json.dumps({**r, "reading": by_call.get(r["call_id"])}) + "\n" for r in rows)
+    snap = Snap(weekly.gather("data/daily", a.start, a.end))
+    days = []
+    for day in sorted({r["t"][:10] for r in rows}):
+        plan = state.resolve(state.load(a.state_dir, day), snap.leads)
+        st = day_stats(snap, day, plan)
+        T, C = st["team"], st["callers"]
+        act = [c for c in C.values() if c["dials"] >= 20]
+        sheet = sorted(c["on_sheet_pct"] for c in act if c.get("sheet_leads"))
+        days.append({"label": datetime.strptime(day, "%Y-%m-%d").strftime("%a %-d %b"), "callers": f"{T['callers_dialling']} of {T['callers']}",
+                     "dials": T["dials"], "real": T["real"], "unret": sum(c["missed_unreturned"] for c in C.values()),
+                     "sheet": f"{sheet[len(sheet) // 2]}%" if sheet else "no plan",
+                     "once": f"{100 * T['single_unanswered'] / T['leads_dialled']:.0f}%" if T["leads_dialled"] else "—"})
+    R = weekly.roll_up(rows, reads)
+    N = json.load(open(os.path.join(d, "narrative.json"))) if os.path.exists(os.path.join(d, "narrative.json")) else {}
+    json.dump({"roll_up": R, "days": days, "check": {k: v if isinstance(v, int) else len(v) for k, v in chk.items()}},
+              open(os.path.join(d, "facts.json"), "w"), indent=1, default=str)
+    out = os.path.join("exports", "weekly", f"{a.start}_{a.end}")
+    os.makedirs(out, exist_ok=True)
+    period = f"{datetime.strptime(a.start, '%Y-%m-%d'):%a %-d %b} to {datetime.strptime(a.end, '%Y-%m-%d'):%a %-d %b %Y}"
+    meta = {"team": a.team, "period": period, "built": now_ist().strftime("%a %-d %b %H:%M")}
+    leads = list(reads.values())
+    stem = os.path.join(out, "Elite_weekly_review")
+    from analytics.daily_plan.pdf import render
+    render(weekly.html_doc(R, N, days, leads, meta), stem + ".html", stem + ".pdf")
+    weekly.workbook(leads, rows, reads, stem + ".xlsx")
+    print(json.dumps({"pdf": stem + ".pdf", "xlsx": stem + ".xlsx", "connected": R["connected"], "with_transcript": R["with_transcript"],
+                      "read": R["read"], "outcomes": R["outcomes"], "reasons": R["reasons"][:8]}, indent=1))
+
+
 def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m analytics.daily_plan")
     ap.add_argument("--team", default=TEAM)
@@ -334,9 +421,13 @@ def main(argv=None):
     fm = sub.add_parser("fetch-month"); fm.add_argument("date"); fm.add_argument("--full", action="store_true")
     pp = sub.add_parser("pipeline-prepare"); pp.add_argument("date"); pp.add_argument("--pause", type=int, default=60)
     pb = sub.add_parser("pipeline-build"); pb.add_argument("date"); pb.add_argument("--mail", action="store_true"); pb.add_argument("--publish-state", action="store_true")
+    wp = sub.add_parser("weekly-prepare"); wp.add_argument("start"); wp.add_argument("end"); wp.add_argument("--pause", type=int, default=60)
+    wp.add_argument("--no-transcripts", action="store_true")
+    wb = sub.add_parser("weekly-build"); wb.add_argument("start"); wb.add_argument("end"); wb.add_argument("--allow-missing", action="store_true")
     a = ap.parse_args(argv)
     {"revival-prepare": cmd_revival_prepare, "revival-build": cmd_revival_build, "share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
-     "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build}[a.cmd](a)
+     "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build,
+     "weekly-prepare": cmd_weekly_prepare, "weekly-build": cmd_weekly_build}[a.cmd](a)
 
 
 if __name__ == "__main__":
