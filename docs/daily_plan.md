@@ -92,6 +92,35 @@ The horizon is month end (the end of next month in a month's last 3 days). The r
 since last night. A section on **fresh leads allocated that day** (assigned or created today, split into new and reassigned) shows,
 per caller, how many were dialled, reached, had a real conversation, got a dated follow-up, and entered the pipeline, and lists those leads. The expected range is the sum of the chances, up to 2.4x that.
 
+## Weekly review (Fridays after the nightly pipeline)
+
+Why enrollments did or did not come through this week, from every connected call (the user, 16 Oct: "make sure
+all the calls, connected calls, transcripts are read through the week").
+
+```bash
+.venv/bin/python -m analytics.daily_plan weekly-prepare <first day> <last day>   # e.g. 2026-10-08 2026-10-16
+```
+
+It gathers the week's calls from the daily pulls in `data/daily/` (newest pull wins per call), searches the
+transcripts of numbers whose last search came before one of their connected calls (at most 9 requests of 10 numbers
+per run), matches each connected call to its recording, and writes under `data/weekly/<first>_<last>/`:
+`calls.jsonl` (the call ledger: every connected call with its transcript status), one dossier per lead with every
+call of the week and its transcript, `brief.md` (from `docs/weekly_brief.md`) and the reading batches.
+
+Claude reads every batch with parallel subagents (waves of up to 8) and writes `reads/out_<k>.jsonl`: one row per
+lead with a reading of every call (what happened, fee and ask, link sent, next step fixed, objection, slip, what to do
+better), the lead's outcome (enrolled, paying, open, lost, not a prospect), one main reason for an open or lost lead
+(GOAL.md leak codes L3–L13 plus ASK, DECIDER, BUDGET, TIMING, NOT_INTERESTED, DECIDING) and what would have closed it.
+Then write `narrative.json` (`headline`, `fixes`, `why`, `calls`, `callers`, `leader`) from `facts.json`, and:
+
+```bash
+.venv/bin/python -m analytics.daily_plan weekly-build <first day> <last day>
+```
+
+`weekly-build` stops while any lead or call lacks a reading. It writes the PDF and workbook to
+`exports/weekly/<first>_<last>/` and adds each call's reading to the ledger. Reasons are judgements, one per lead,
+and are not priced: rupee figures wait for payment data and a 20-lead hand check (GOAL.md section 5).
+
 ## Email settings (environment variables in the cloud environment's settings)
 
 `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`; `REPORT_TO`: full reports with lead phone
