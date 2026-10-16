@@ -9,25 +9,31 @@ git-ignored `data/` folder. This page says what it does, how to set it, what it 
 
 From LeadSquared's API usage page (Super plan, read by the user on 15 Oct 2026):
 
-- **35 requests every 5 seconds** for the whole account.
+- **30 requests every 5 seconds** for the whole account (the user's figure on 16 Oct 2026; an earlier reading
+  of the page said 35).
 - **474,000 requests a day** (100,000 plus 1,000 per user).
 - On 15 Oct 2026 the account had made 72,170 requests by 16:23 IST (15% of the day). This repo's scheduled jobs
   made roughly 5,000 of them; the rest come from other tools connected to the account (dialers, Zipteams,
   TimePay, lead forms and so on), which this gate can't see or limit. That traffic averages about 6 requests
-  every 5 seconds, so it shares the 35 with whatever this repo sends.
+  every 5 seconds, so it shares the 30 with whatever this repo sends.
 
 Both limits apply to the account as a whole: every machine, chat and tool that uses it counts towards them.
 
 ## What the gate does
 
-- **One request at a time** (`LEADSQUARED_MAX_IN_FLIGHT`, default 1) across every Python process using the
-  same store, for the same LeadSquared account.
-- **A 6-second pause** after each request finishes before the next one starts (`LEADSQUARED_COOLDOWN_SECONDS`).
-  The pause is kept in the store, so it survives a restart and is shared by processes.
+- **At most two requests at once** (`LEADSQUARED_MAX_IN_FLIGHT`, default 2) across every Python process using
+  the same store, for the same LeadSquared account. Only code that sends requests in parallel (the lead-history
+  reads in `analytics/daily_plan/revival.py` and `scripts/fetch_lead_histories.py`) or two scripts running
+  together use the second slot; everything else still sends one request after another.
+- **A half-second pause** after each request finishes before the next one starts (`LEADSQUARED_COOLDOWN_SECONDS`,
+  default 0.5). The pause is shared: when either request ends, nothing starts for 0.5 s, so two parallel readers
+  start in pairs. It spreads requests out instead of letting them go back to back, and on its own allows at
+  most one start every 0.5 s per slot. The pause is kept in the store, so it survives a restart and is shared
+  by processes.
 - **At most 10 requests start in any 5 seconds** (`LEADSQUARED_MAX_REQUESTS_PER_WINDOW`,
-  `LEADSQUARED_WINDOW_SECONDS`), retries included, on a rolling window. With the 6-second pause and one request
-  at a time this never binds (under 1 request per 5 s); it is the ceiling that still holds if the pause is lowered
-  or more requests are allowed at once. LeadSquared's own account limit is 35 per 5 s, so this keeps 25 per 5 s
+  `LEADSQUARED_WINDOW_SECONDS`), retries included, on a rolling window. With requests taking about 1 s, one
+  reader runs at about 3 per 5 s and two parallel readers at about 6-7 per 5 s (estimates), so the ceiling binds
+  only when replies come back very fast. LeadSquared's own account limit is 30 per 5 s, so this keeps 20 per 5 s
   free for other users of the account. It is per machine like the rest of the gate: two machines running at once
   can each send 10.
 - **Retries go through the gate too.** A retry waits for the later of its own backoff (1, 2, 4 s) and the
@@ -81,10 +87,10 @@ an error naming the variable.
 
 | Variable | Default | Meaning |
 |---|---|---|
-| `LEADSQUARED_COOLDOWN_SECONDS` | `6` | Pause after each request finishes. `0` = no pause (still one at a time). |
+| `LEADSQUARED_COOLDOWN_SECONDS` | `0.5` | Pause after each request finishes. `0` = no pause. Was `6` until 16 Oct 2026. |
 | `LEADSQUARED_MAX_REQUESTS_PER_WINDOW` | `10` | Most requests (retries included) that start in any window. Whole number, or `off`. |
 | `LEADSQUARED_WINDOW_SECONDS` | `5` | Length of that window in seconds. Above 0. |
-| `LEADSQUARED_MAX_IN_FLIGHT` | `1` | Requests allowed at once across processes. Whole number, 1 or more. |
+| `LEADSQUARED_MAX_IN_FLIGHT` | `2` | Requests allowed at once across processes. Whole number, 1 or more. Was `1` until 16 Oct 2026. |
 | `LEADSQUARED_MAX_REQUESTS_PER_HOUR` | off | Attempts in any 60 minutes. Whole number, or `off`. |
 | `LEADSQUARED_MAX_REQUESTS_PER_DAY` | off | Attempts in any 24 hours. Whole number, or `off`. |
 | `LEADSQUARED_MAX_RECORDS_PER_DAY` | off | Records asked for in any 24 hours (IDs in a bulk read, else the page size, else 1). |
@@ -140,8 +146,9 @@ full reads safely.
 
 ## Turning it down or off
 
-- **Back to no pause:** `LEADSQUARED_COOLDOWN_SECONDS=0` and leave the budgets unset. Requests still go
-  one at a time. The 10-per-5-seconds ceiling still applies; `LEADSQUARED_MAX_REQUESTS_PER_WINDOW=off` removes it.
+- **Back to the old pace (before 16 Oct 2026):** `LEADSQUARED_COOLDOWN_SECONDS=6` and
+  `LEADSQUARED_MAX_IN_FLIGHT=1`: one request at a time, about one every 7 s.
+- **No pause:** `LEADSQUARED_COOLDOWN_SECONDS=0` and leave the budgets unset. The 10-per-5-seconds ceiling still applies; `LEADSQUARED_MAX_REQUESTS_PER_WINDOW=off` removes it.
 - **Re-read every enrolment history:** `LEADSQUARED_ENROLMENT_STORE=off`, or delete the file.
 - **Forget the gate's history:** delete `data/leadsquared/admission.sqlite3` while no fetch is running.
 - **Undo the code:** `git revert` the commit that added this page. That brings back the earlier per-process

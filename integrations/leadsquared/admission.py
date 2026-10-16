@@ -3,8 +3,8 @@ Python process on this machine through a SQLite file in the git-ignored ``data/`
 
 ``LeadSquaredClient.request`` takes a slot here before every HTTP attempt, retries included:
 
-- at most ``LEADSQUARED_MAX_IN_FLIGHT`` attempts (default 1) run at a time across all processes using the file;
-- each starts no sooner than ``LEADSQUARED_COOLDOWN_SECONDS`` (default 6) after the previous one finished;
+- at most ``LEADSQUARED_MAX_IN_FLIGHT`` attempts (default 2) run at a time across all processes using the file;
+- none starts sooner than ``LEADSQUARED_COOLDOWN_SECONDS`` (default 0.5) after the last one finished;
 - at most ``LEADSQUARED_MAX_REQUESTS_PER_WINDOW`` attempts (default 10) start in any ``LEADSQUARED_WINDOW_SECONDS``
   (default 5), a ceiling that still holds when the cooldown is lowered or more attempts may run at once;
 - optional rolling budgets (operator-set, off unless set): attempts per hour and per day, requested records
@@ -156,8 +156,8 @@ def _endpoint_budgets(raw: str) -> dict[str, int]:
 
 @dataclass(frozen=True)
 class AdmissionConfig:
-    cooldown: float = 6.0
-    max_in_flight: int = 1
+    cooldown: float = 0.5
+    max_in_flight: int = 2
     per_window: int | None = 10          # attempts started in any `window` seconds; None = off
     window: float = 5.0
     per_hour: int | None = None          # None = off
@@ -171,8 +171,8 @@ class AdmissionConfig:
     @classmethod
     def from_env(cls) -> "AdmissionConfig":
         return cls(
-            cooldown=_env_number("LEADSQUARED_COOLDOWN_SECONDS", 6.0, minimum=0),
-            max_in_flight=_env_number("LEADSQUARED_MAX_IN_FLIGHT", 1, minimum=1, integer=True),
+            cooldown=_env_number("LEADSQUARED_COOLDOWN_SECONDS", 0.5, minimum=0),
+            max_in_flight=_env_number("LEADSQUARED_MAX_IN_FLIGHT", 2, minimum=1, integer=True),
             per_window=_env_number("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", 10, minimum=1, integer=True,
                                    allow_off=True),
             window=_env_number("LEADSQUARED_WINDOW_SECONDS", 5.0, minimum=0, strict_min=True),

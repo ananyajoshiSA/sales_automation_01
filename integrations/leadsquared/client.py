@@ -9,8 +9,8 @@ Credentials are read from the environment, never hard-coded:
     LEADSQUARED_SECRET_KEY
 
 Every HTTP attempt (retries included) first takes a slot from the shared admission gate
-(``admission.py``): one attempt at a time per LeadSquared account across the Python processes on this
-machine, a cooldown after each (default 6 s), at most 10 starts in any 5 s, optional request and record budgets,
+(``admission.py``): at most two attempts at once per LeadSquared account across the Python processes on this
+machine, a cooldown after each (default 0.5 s), at most 10 starts in any 5 s, optional request and record budgets,
 and Retry-After holds.
 It limits this integration's demand on LeadSquared; it doesn't cut the number of requests a job needs.
 Settings and limits: docs/leadsquared_load_control.md.

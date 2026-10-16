@@ -39,14 +39,15 @@ def fake_clock() -> FakeClock:
 
 @pytest.fixture(autouse=True)
 def lsq_gate(monkeypatch, tmp_path, fake_clock):
-    """Each test gets its own LeadSquared admission store (no cooldown, no per-window limit, no budgets, fake clock), so none waits
+    """Each test gets its own LeadSquared admission store (one at a time, no cooldown, no per-window limit, no budgets, fake clock), so none waits
     for real, touches data/ or leaks state. The first-enrolment store is per test too."""
-    for name in ("LEADSQUARED_MAX_IN_FLIGHT", "LEADSQUARED_MAX_REQUESTS_PER_HOUR", "LEADSQUARED_MAX_REQUESTS_PER_DAY",
+    for name in ("LEADSQUARED_MAX_REQUESTS_PER_HOUR", "LEADSQUARED_MAX_REQUESTS_PER_DAY",
                  "LEADSQUARED_MAX_RECORDS_PER_DAY", "LEADSQUARED_ENDPOINT_HOURLY_BUDGETS",
                  "LEADSQUARED_MAX_ADMISSION_WAIT_SECONDS", "LEADSQUARED_LEASE_SECONDS",
                  "LEADSQUARED_MAX_IDS_PER_BULK_REQUEST", "LEADSQUARED_ACCOUNT_LABEL"):
         monkeypatch.delenv(name, raising=False)
     monkeypatch.setenv("LEADSQUARED_COOLDOWN_SECONDS", "0")
+    monkeypatch.setenv("LEADSQUARED_MAX_IN_FLIGHT", "1")
     monkeypatch.setenv("LEADSQUARED_MAX_REQUESTS_PER_WINDOW", "off")
     monkeypatch.delenv("LEADSQUARED_WINDOW_SECONDS", raising=False)
     monkeypatch.setenv("LEADSQUARED_ADMISSION_DB", str(tmp_path / "admission.sqlite3"))
