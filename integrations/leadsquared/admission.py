@@ -8,7 +8,7 @@ Python process on this machine through a SQLite file in the git-ignored ``data/`
 - at most ``LEADSQUARED_MAX_REQUESTS_PER_WINDOW`` attempts (default 10) start in any ``LEADSQUARED_WINDOW_SECONDS``
   (default 5), a ceiling that still holds when the cooldown is lowered or more attempts may run at once;
 - one endpoint category may get its own, lower rate in that same window (``LEADSQUARED_ENDPOINT_MAX_PER_WINDOW``,
-  default ``activity_bulk=2``: the company-wide activity read starts at most once every 2.5 s);
+  default ``activity_bulk=1``: the company-wide activity read starts at most once every 5 s);
 - optional rolling budgets (operator-set, off unless set): attempts per hour and per day, requested records
   per day, and attempts per hour for one endpoint category;
 - a 429's ``Retry-After`` holds every caller (the client calls ``hold_until`` before freeing its slot).
@@ -176,9 +176,9 @@ def _endpoint_rates(raw: str) -> dict[str, float]:
     return out
 
 
-# LeadSquared allows 2.5 per 5 s on the company-wide activity read (16 Oct 2026); 2 keeps a 20% cushion and never
-# puts more than 2 starts in any 5 s, however LeadSquared counts its windows.
-DEFAULT_ENDPOINT_RATES = "activity_bulk=2"
+# LeadSquared allows 2.5 per 5 s on the company-wide activity read (16 Oct 2026). The gate is per machine, so 1 per
+# 5 s keeps two chats fetching at once (2 per 5 s together) under that limit.
+DEFAULT_ENDPOINT_RATES = "activity_bulk=1"
 
 
 @dataclass(frozen=True)

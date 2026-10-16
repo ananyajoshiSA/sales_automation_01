@@ -116,15 +116,15 @@ def test_window_limit_off(monkeypatch, fake_clock):
 BULK = "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
 
 
-def test_the_company_wide_activity_read_starts_at_most_twice_per_5_seconds(monkeypatch, fake_clock):
-    monkeypatch.delenv("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW")             # the default: activity_bulk=2
+def test_the_company_wide_activity_read_starts_at_most_once_per_5_seconds(monkeypatch, fake_clock):
+    monkeypatch.delenv("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW")             # the default: activity_bulk=1
     configure(monkeypatch, LEADSQUARED_MAX_REQUESTS_PER_WINDOW=10, LEADSQUARED_MAX_IN_FLIGHT=2)
     s = StubSession(fake_clock)
     c = mk(s)
     for _ in range(6):
         c.request("POST", BULK, json={})
-    assert s.starts == [0, 2.5, 5, 7.5, 10, 12.5]                  # one every 2.5 s: never 3 in any 5 s
-    assert c.admission.status()["settings"]["endpoint_max_per_window"] == {"activity_bulk": 2}
+    assert s.starts == [0, 5, 10, 15, 20, 25]                      # one every 5 s: two machines together stay at 2
+    assert c.admission.status()["settings"]["endpoint_max_per_window"] == {"activity_bulk": 1}
 
 
 def test_the_endpoint_rate_leaves_other_reads_alone_and_counts_retries(monkeypatch, fake_clock):
@@ -471,7 +471,7 @@ def test_defaults_leave_budgets_off_explicitly(monkeypatch):
     assert (c.per_window, c.window) == (10, 5.0)
     assert (c.per_hour, c.per_day, c.records_per_day, c.endpoint_per_hour) == (None, None, None, {})
     monkeypatch.delenv("LEADSQUARED_ENDPOINT_MAX_PER_WINDOW")
-    assert admission.AdmissionConfig.from_env().endpoint_per_window == {"activity_bulk": 2}
+    assert admission.AdmissionConfig.from_env().endpoint_per_window == {"activity_bulk": 1}
     monkeypatch.setenv("LEADSQUARED_MAX_REQUESTS_PER_HOUR", "off")
     monkeypatch.setenv("LEADSQUARED_ENDPOINT_HOURLY_BUDGETS", "lead_history=600, activity_bulk=200")
     c = admission.AdmissionConfig.from_env()
