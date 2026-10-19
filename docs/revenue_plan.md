@@ -69,6 +69,10 @@ Summary") as "Discovery so far", and new leads the bot already discovered come f
 leader's focus list: every Tier A lead, Tier B at 15%+, and Tier B at 12%+ whose promised date has come, as a
 workbook with day-by-day outcome columns and a short page to print as PDF.
 
+`python scripts/build_top_leads.py rows.json data/snapshot.json exports/plans/top --backlog rows_backlog.json --meta meta.json --top 100`
+ranks every lead in the plan (sheets and backlog) by its estimated chance of enrolling and lists the top N with
+the lead's current LeadSquared owner and who should call it (the closer, for a counsellor's lead).
+
 Several groups are planned as one team. `--since` widens the window: every lead with a conversation since that
 day is tiered and every lead created since then without a real conversation is a new lead (F). `--sheet-cap`
 keeps each sheet to a day's work: M, P, A, B and promises now due always stay; the other F, R and C leads go to
