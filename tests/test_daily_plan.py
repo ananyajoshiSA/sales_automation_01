@@ -535,3 +535,16 @@ def test_dossier_reads_a_zero_second_callfailure_note_as_not_picked_up(tmp_path)
     text = (tmp_path / "L1.txt").read_text()
     assert "NotAnswered 0s" in text and "note: CallFailure" not in text   # the lead didn't pick up; not a line fault
     assert "note: Network error" in text                                    # a real failure keeps its note
+
+
+def test_another_team_gets_its_own_file_names_and_plan_state(monkeypatch):
+    from analytics.daily_plan import __main__ as cli
+    from analytics.daily_plan.common import short_name
+
+    assert short_name("Team Elite Calling") == "Elite" and short_name("ID Closure") == "ID_Closure"
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_fetch", lambda a: seen.update(state=a.state_dir, leader=a.leader))
+    cli.main(["--team", "ID Closure", "--leader", "Darshan Gowda", "fetch", "2026-10-20"])
+    assert seen == {"state": "plan_state/ID_Closure", "leader": "Darshan Gowda"}
+    cli.main(["fetch", "2026-10-20"])
+    assert seen["state"] == "plan_state"

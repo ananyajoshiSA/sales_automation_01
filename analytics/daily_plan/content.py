@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from analytics.daily_plan.common import LEADER, TEAM
+from analytics.daily_plan.common import LEADER, TEAM, short_name
 
 SLOTS = {"P": "10:00–11:30, balance first", "M": "10:00–10:30; new missed calls within 15 min",
          "A": "10:30–11:30, redial in 10–15 min, retry 15:00 & 19:00", "B": "11:30–13:00, retry 15:30",
@@ -241,7 +241,7 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
                    "Counting enrollments:", "Choose Outcome 'Paid – new enrollment' when the lead says they have paid (a note of what they paid is enough), then move the lead to Course Enrolled. Leads already enrolled never appear on the sheets. Existing students: 'Already a student', send to support, don't change the stage.",
                    "Chances:", "'Est. chance (3 days)' is a judgement-based estimate from the lead's calls and transcripts, not a target.",
                    "Data:", f"LeadSquared pulled {rows['built_at']} IST; {rows['reads']} leads re-read from {pl}'s calls, Zipteams notes and Salesa transcripts."],
-        "pdf_title": f"Elite call plan {d.strftime('%a %-d %b')}", "cover_kicker": f"{team} · for {leader}, team leader",
+        "pdf_title": f"{short_name(team).replace('_', ' ')} call plan {d.strftime('%a %-d %b')}", "cover_kicker": f"{team} · for {leader}, team leader",
         "cover_h1": f"Call plan and workflow {d.strftime('%A %-d %B %Y')}",
         "cover_sub": f"A review of {pl} first (what worked, what did not, missed opportunities), then your priority leads and checks, the feedback to give each caller, the dialling changes, then each caller's list.",
         "contents": [f"{pl} review: what worked, what didn't, missed opportunities", "Your priority leads", "What you check, and when", "Feedback to give each caller",
