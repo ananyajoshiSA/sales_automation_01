@@ -57,6 +57,18 @@ def _hhmm(txt):
 
 LATER_DAY = 5  # priority group of leads who asked to be called on another day
 NOT_TODAY = re.compile(r"\b(?:do not|don't|dont|not to|no)\s+(?:call\s+)?today\b|\bnot today\b", re.I)
+DATE = re.compile(r"\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*", re.I)
+
+
+def _future_date(text: str, day: datetime) -> bool:
+    """True when ``text`` names a calendar date after ``day`` ("after 21 Oct", "~21-22 Oct")."""
+    for dd, mon in DATE.findall(text or ""):
+        try:
+            if datetime.strptime(f"{dd} {mon[:3]} {day.year}", "%d %b %Y") > day:
+                return True
+        except ValueError:
+            pass
+    return False
 
 
 def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict]:
@@ -70,7 +82,7 @@ def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict
     for o, rs in rows["by_owner"].items():
         for r in rs:
             cb = r.get("callback_requested") or ""
-            later = bool(later_rx.search(cb)) and (not today_rx.search(cb) or bool(NOT_TODAY.search(cb)))
+            later = bool(later_rx.search(cb) or _future_date(cb, d)) and (not today_rx.search(cb) or bool(NOT_TODAY.search(cb)))
             if later:
                 g = 5 if r["tier"] in "AB" and r["chance"] >= 10 else None
             elif r["tier"] == "A" and re.search(r"pay|link|emi|block|token|today", (r.get("exact_ask") or "") + " " + cb, re.I) and r["chance"] >= 30:

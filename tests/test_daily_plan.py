@@ -103,9 +103,12 @@ def test_priority_groups_respect_the_day_the_lead_asked_for():
         {"lead_id": "c", "name": "C", "tier": "B", "chance": 12, "callback_requested": "Monday evening"},
         {"lead_id": "d", "name": "D", "tier": "A", "chance": 40, "callback_requested": "", "exact_ask": "Send the payment link today"},
         {"lead_id": "f", "name": "F", "tier": "B", "chance": 12, "callback_requested": "Monday 12 Oct (on a train Saturday; do not call today)"},
+        {"lead_id": "g", "name": "G", "tier": "A", "chance": 18, "callback_requested": "after 12 Oct (asked on 9 Oct)"},
+        {"lead_id": "h", "name": "H", "tier": "A", "chance": 20, "callback_requested": "Document in 2-3 days (~12-13 Oct)"},
         {"lead_id": "e", "name": "E", "tier": "C", "chance": 2, "callback_requested": ""}]}}
     g = {p["lead_id"]: (p["group"], p["check_by"]) for p in content.priority(R, "2026-10-10")}
-    assert g == {"d": (0, "12:00"), "a": (1, "11:30"), "b": (2, "18:00"), "c": (5, "later"), "f": (5, "later")}
+    assert g == {"d": (0, "12:00"), "a": (1, "11:30"), "b": (2, "18:00"), "c": (5, "later"), "f": (5, "later"),
+                 "g": (5, "later"), "h": (5, "later")}
 
 
 def test_workbook_counts_paid_without_asking_for_proof(tmp_path):
