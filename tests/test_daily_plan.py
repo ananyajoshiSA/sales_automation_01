@@ -826,3 +826,16 @@ def test_missed_calls_sheet_separates_dropped_lines_call_backs_and_waiting_leads
     workbook.missed_sheet(wb.active, {"label": "Fri 9 Oct", "rows": list(got.values()), "lines": missed_calls.by_line(s, ["2026-10-09"])})
     cells = [c.value for row in wb.active.iter_rows() for c in row if c.value]
     assert "3 missed calls from 3 leads; 1 not called back" in cells and "Not called back" in cells
+
+
+def test_another_team_gets_its_own_file_names_and_plan_state(monkeypatch):
+    from analytics.daily_plan import __main__ as cli
+    from analytics.daily_plan.common import short_name
+
+    assert short_name("Team Elite Calling") == "Elite" and short_name("ID Closure") == "ID_Closure"
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_fetch", lambda a: seen.update(state=a.state_dir, leader=a.leader))
+    cli.main(["--team", "ID Closure", "--leader", "Darshan Gowda", "fetch", "2026-10-20"])
+    assert seen == {"state": "plan_state/ID_Closure", "leader": "Darshan Gowda"}
+    cli.main(["fetch", "2026-10-20"])
+    assert seen["state"] == "plan_state"

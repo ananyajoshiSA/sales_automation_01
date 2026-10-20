@@ -30,7 +30,7 @@ import sys
 from datetime import datetime
 
 from analytics.daily_plan import content, dossiers, leadflow, mailer, missed_calls, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
-from analytics.daily_plan.common import LEADER, MAIL_LIST, TEAM, Snap, load_snapshots, previous_working_day
+from analytics.daily_plan.common import LEADER, MAIL_LIST, TEAM, Snap, load_snapshots, previous_working_day, short_name
 from integrations.timeutil import now_ist
 
 
@@ -41,8 +41,8 @@ def paths(date: str) -> dict:
             "content": f"{d}/content.json", "prepare": f"{d}/prepare.json", "out": f"exports/daily/{date}"}
 
 
-def _snap(p: dict) -> Snap:
-    return Snap(load_snapshots([p["snap"]]))
+def _snap(p: dict, leader: str = LEADER) -> Snap:
+    return Snap(load_snapshots([p["snap"]]), leader)
 
 
 def cmd_fetch(a):
@@ -105,7 +105,7 @@ def load_month(date: str) -> Snap | None:
 
 def cmd_prepare(a):
     p = paths(a.date)
-    snap = _snap(p)
+    snap = _snap(p, a.leader)
     prev = previous_working_day(snap, a.date)
     st = state.load(a.state_dir, prev)
     prev_plan = state.resolve(st, snap.leads)
@@ -128,7 +128,7 @@ def cmd_prepare(a):
 
 def cmd_build(a):
     p = paths(a.date)
-    snap = _snap(p)
+    snap = _snap(p, a.leader)
     info = json.load(open(p["prepare"])) if os.path.exists(p["prepare"]) else {}
     prev = info.get("previous_day") or previous_working_day(snap, a.date)
     before = previous_working_day(snap, prev)
@@ -150,7 +150,7 @@ def cmd_build(a):
     for k, v in (("rows", R), ("facts", F), ("content", C)):
         json.dump(v, open(p[k], "w"), indent=1, default=str)
     os.makedirs(p["out"], exist_ok=True)
-    stem = os.path.join(p["out"], f"Elite_call_plan_{datetime.strptime(a.date, '%Y-%m-%d'):%a_%-d_%b}")
+    stem = os.path.join(p["out"], f"{short_name(a.team)}_call_plan_{datetime.strptime(a.date, '%Y-%m-%d'):%a_%-d_%b}")
     workbook.write(R, C, stem + ".xlsx")
     n, errors = recalc.check(stem + ".xlsx")
     if errors:
@@ -188,12 +188,12 @@ def cmd_status(a):
         fetch.enrolled(a.date, enr_path, cache={} if a.full else fetch.cached_enrolled())
     else:
         snap_path, enr_path = a.snapshot or p["snap"], a.enrolled or p["enrolled"]
-    snap = Snap(load_snapshots([snap_path]))
+    snap = Snap(load_snapshots([snap_path]), a.leader)
     plan = state.resolve(state.load(a.state_dir, a.date), snap.leads)
     enrolled = json.load(open(enr_path)) if os.path.exists(enr_path) else []
     S = status.build(snap, a.date, plan, enrolled, a.leader)
     os.makedirs(p["out"], exist_ok=True)
-    stem = os.path.join(p["out"], f"Elite_status_{S['at'].replace(':', '')}")
+    stem = os.path.join(p["out"], f"{short_name(a.team)}_status_{S['at'].replace(':', '')}")
     pdf.render(status.html_doc(S, a.team), stem + ".html", stem + ".pdf")
     text = status.text_summary(S, a.team)
     print(text)
@@ -261,7 +261,7 @@ def cmd_pipeline_prepare(a):
     d = os.path.join(p["dir"], "pipeline")
     a.full = False
     cmd_fetch_month(a)  # month lead flow for tonight's pipeline and tomorrow's morning report (about a minute once seeded)
-    snap = _snap(p)
+    snap = _snap(p, a.leader)
     last = state.latest_before(a.state_dir, a.date, "pipeline_")
     last_night = state.resolve(last, snap.leads)
     plan = state.resolve(state.load(a.state_dir, a.date), snap.leads)
@@ -296,7 +296,7 @@ def cmd_pipeline_build(a):
     d = os.path.join(p["dir"], "pipeline")
     rws = pipeline.load(os.path.join(d, "reads"))
     last = state.latest_before(a.state_dir, a.date, "pipeline_")
-    snap = _snap(p)
+    snap = _snap(p, a.leader)
     F = pipeline.fresh_outcomes(snap, a.date, pipeline.fresh(snap, a.date), rws)
     res = pipeline.build(rws, a.date, now_ist().strftime("%a %-d %b %H:%M"), (last or {}).get("leads", {}), p["out"], a.team, F,
                          flow_sections(snap, a.date, a.date, datetime.strptime(a.date, "%Y-%m-%d").strftime("%a %-d %b") + " (today)"))
@@ -481,6 +481,8 @@ def main(argv=None):
     lp = sub.add_parser("weekly-leader-prepare"); lp.add_argument("start"); lp.add_argument("end"); lp.add_argument("--per-batch", type=int, default=175)
     lb = sub.add_parser("weekly-leader-build"); lb.add_argument("start"); lb.add_argument("end")
     a = ap.parse_args(argv)
+    if a.team != TEAM and a.state_dir == "plan_state":  # another team's plan must not overwrite Elite's state
+        a.state_dir = os.path.join("plan_state", short_name(a.team))
     {"revival-prepare": cmd_revival_prepare, "revival-build": cmd_revival_build, "share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
      "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build,
      "weekly-prepare": cmd_weekly_prepare, "weekly-build": cmd_weekly_build,

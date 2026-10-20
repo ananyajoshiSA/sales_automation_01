@@ -18,6 +18,11 @@ DEAD = ("Not Interested", "Irrelevant", "Irrelevant lead", "Invalid", "Invalid l
 SHELVED = DEAD + ("May buy later",)  # the caller closed the lead for now: off the call sheets unless it calls us or is about to pay
 
 
+def short_name(team: str) -> str:
+    """File-name prefix for a team's reports: "Elite" for the default team, else the group name with underscores."""
+    return "Elite" if team == TEAM else re.sub(r"\W+", "_", team).strip("_")
+
+
 def p10(x) -> str | None:
     """Last 10 digits of a phone number, or None."""
     d = re.sub(r"\D", "", str(x or ""))
