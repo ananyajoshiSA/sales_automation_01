@@ -1,4 +1,4 @@
-"""Workbook: team leader sheet, Team summary, How to use, one sheet per caller. A row counts as Enrolled when its Outcome or Payment status says paid."""
+"""Workbook: team leader sheet, Team summary, How to use, Missed calls, one sheet per caller. A row counts as Enrolled when its Outcome or Payment status says paid."""
 
 from __future__ import annotations
 
@@ -29,6 +29,40 @@ def put(ws, r, c, v, bold=False, wrap=True, fill=None, size=9, italic=False, col
 def title(ws, r, text, size=12):
     x = ws.cell(row=r, column=1, value=text); x.font = Font(name=F, bold=True, size=size, color="1F4E46")
 
+
+
+MISSED = {"Not called back": "F8D7D3", "Called back, not reached yet": "FFF0C2", "Lead rang again and got through": "E8F0FA",
+          "Called back and reached": "DCEFE6", "Dropped call, reached again": "F2F2F2"}
+
+
+def missed_sheet(ws, M: dict) -> None:
+    """Every unanswered call from a lead (``missed_calls.rows``), with totals by line on top."""
+    ws["A1"] = f"Missed calls — calls from leads that nobody answered ({M['label']})"; ws["A1"].font = Font(name=F, bold=True, size=14)
+    ws["A2"] = ("Return every 'Not called back' row first. A dropped call is a lead ringing straight back within 5 minutes of an answered "
+                "call. A lead who rings back the outbound Airtel or Jio number does not reach a caller, so those misses are a line problem, "
+                "not a caller ignoring the call. Times are IST.")
+    ws["A2"].font = Font(name=F, size=10); ws["A2"].alignment = Alignment(wrap_text=True, vertical="top")
+    ws.merge_cells("A2:N2"); ws.row_dimensions[2].height = 44
+    hdr(ws, 4, ["Line the lead rang", "Calls from leads", "Answered", "Missed"])
+    r = 5
+    for line, n, a, m in M["lines"]:
+        for j, v in enumerate((line, n, a, m), 1): put(ws, r, j, v, bold=j == 1, size=10)
+        r += 1
+    rs = M["rows"]
+    left = sum(x["result"] == "Not called back" for x in rs)
+    r += 1; title(ws, r, f"{len(rs)} missed calls from {len({x['lead_id'] for x in rs})} leads; {left} not called back"); r += 1
+    H = [("Day", 10), ("Time", 7), ("Lead", 22), ("Phone", 15), ("Lead owner", 16), ("Rang (caller)", 16), ("Line", 26), ("Logged as", 12),
+         ("Dropped call?", 9), ("Called back at", 11), ("Called back by", 16), ("Minutes to call back", 9), ("Reached at", 11),
+         ("Result", 22), ("Stage now", 16), ("Action taken", 30), ("Lead ID", 36)]
+    hdr(ws, r, [h for h, _ in H], [w for _, w in H]); ws.row_dimensions[r].height = 30
+    top = r
+    for x in rs:
+        r += 1
+        vals = [x["day"], x["time"], x["name"], x["phone"], x["owner"], x["rang"], x["line"], x["logged_as"], "Yes" if x["dropped"] else "",
+                x["back_at"], x["back_by"], x["back_mins"], x["reached_at"], x["result"], x["stage"], None, x["lead_id"]]
+        for j, v in enumerate(vals, 1): put(ws, r, j, v, bold=j in (3, 14), fill=MISSED.get(x["result"]) if j == 14 else None)
+        put(ws, r, 16, None, fill="FFF4CC")
+    ws.freeze_panes = ws.cell(row=top + 1, column=4); ws.auto_filter.ref = f"A{top}:{L(len(H))}{max(r, top + 1)}"
 
 
 def write(R: dict, C: dict, out: str) -> str:
@@ -167,6 +201,8 @@ def write(R: dict, C: dict, out: str) -> str:
         c = put(summ, tr, j, f"=SUM({L(j)}4:{L(j)}{tr-1})", bold=True, size=10)
         if j == 15: c.number_format = "0.0"
     summ.cell(row=tr + 2, column=1, value="Enrolled counts rows with Outcome 'Paid – new enrollment' or Payment status 'Paid' (the lead saying they paid is enough). Leads already enrolled are never on the sheets. 'Already a student' is never counted. Expected enrollments are judgement-based estimates, not targets.").font = Font(name=F, italic=True, size=9)
+    if C.get("missed_calls"):
+        missed_sheet(wb.create_sheet("Missed calls", 3), C["missed_calls"])
     guide["A1"] = "How to use this workbook"; guide["A1"].font = Font(name=F, bold=True, size=14); guide.column_dimensions["A"].width = 130
     for k, ln in enumerate(C["how_to"], 3):
         x = guide.cell(row=k, column=1, value=ln); x.font = Font(name=F, size=10, bold=ln.endswith(":")); x.alignment = Alignment(wrap_text=True)

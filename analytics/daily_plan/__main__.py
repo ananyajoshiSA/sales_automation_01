@@ -29,7 +29,7 @@ import os
 import sys
 from datetime import datetime
 
-from analytics.daily_plan import content, dossiers, leadflow, mailer, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
+from analytics.daily_plan import content, dossiers, leadflow, mailer, missed_calls, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
 from analytics.daily_plan.common import LEADER, TEAM, Snap, load_snapshots, previous_working_day
 from integrations.timeutil import now_ist
 
@@ -140,6 +140,9 @@ def cmd_build(a):
     N = json.load(open(p["narrative"])) if os.path.exists(p["narrative"]) else None
     C = content.build(R, F, N, a.team, a.leader)
     C["leadflow_html"] = flow_sections(snap, prev, a.date, f"{datetime.strptime(prev, '%Y-%m-%d'):%A %-d %b}")
+    days = [prev, a.date]
+    C["missed_calls"] = {"label": f"{datetime.strptime(prev, '%Y-%m-%d'):%a %-d %b} and {datetime.strptime(a.date, '%Y-%m-%d'):%a %-d %b} so far",
+                         "rows": missed_calls.rows(snap, days), "lines": missed_calls.by_line(snap, days)}
     if info:
         C["data_note"] = (f"Data: LeadSquared pulled {R['built_at']} IST. Salesa transcripts: {info.get('transcript_numbers')} numbers searched "
                           f"(≤10 numbers per request, ≤9 requests per run); {info.get('with_transcript')} had a transcript, {info.get('without_transcript')} did not. "

@@ -665,3 +665,28 @@ def test_leader_note_separates_bulk_handouts_from_best_leads(monkeypatch):
     assert types["Bulk handout of old leads"]["leads"] == 4 and types["High Priority (fresh)"]["enrolled"] == 1
     assert S["handouts"][0]["by"] == "Amit R" and S["handouts"][0]["leads"] == 4
     assert S["best_by_caller"]["Asha K"]["in5"] == 1 and S["bulk_dial_share"] == {}                                 # under 100 dials: no share
+
+
+def test_missed_calls_sheet_separates_dropped_lines_call_backs_and_waiting_leads(tmp_path):
+    from analytics.daily_plan import missed_calls
+
+    def inb(lead, utc, status="Missed", line="LawSikho_Incoming"):
+        return dict(call("u1", lead, utc, status, 30 if status == "Answered" else 0, "inbound"), display_number=line, call_notes="CallFailure")
+    s = snap([inb("L1", "2026-10-09 05:00:00", "Answered"), inb("L1", "2026-10-09 05:02:00"),       # dropped line, rang straight back
+              call("u1", "L1", "2026-10-09 05:06:00", "Answered", 200),
+              inb("L3", "2026-10-09 06:00:00"), call("u2", "L3", "2026-10-09 06:20:00", "Answered", 90),  # returned 20 min later
+              inb("L5", "2026-10-09 07:00:00", line="Sales_Outbound_Airtel"),                         # rang the outbound number, never returned
+              inb("L7", "2026-10-08 07:00:00")])                                                       # another day
+    got = {r["lead_id"]: r for r in missed_calls.rows(s, ["2026-10-09"])}
+    assert set(got) == {"L1", "L3", "L5"}
+    assert got["L1"]["dropped"] and got["L1"]["result"] == "Dropped call, reached again"
+    assert got["L3"]["result"] == "Called back and reached" and got["L3"]["back_mins"] == 20 and got["L3"]["back_by"] == "Ravi S"
+    assert got["L5"]["result"] == "Not called back" and got["L5"]["line"] == "Rang back the outbound Airtel number"
+    assert "90000000" not in json.dumps(missed_calls.by_line(s, ["2026-10-09"]))
+    assert missed_calls.by_line(s, ["2026-10-09"])[0] == ("LawSikho incoming line", 3, 1, 2)
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    workbook.missed_sheet(wb.active, {"label": "Fri 9 Oct", "rows": list(got.values()), "lines": missed_calls.by_line(s, ["2026-10-09"])})
+    cells = [c.value for row in wb.active.iter_rows() for c in row if c.value]
+    assert "3 missed calls from 3 leads; 1 not called back" in cells and "Not called back" in cells

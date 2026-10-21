@@ -234,7 +234,8 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
         "caller_note": "Work top to bottom: P (collect balance) and M (missed calls) first, then A, then B. Yellow cells are yours to fill after every attempt. "
                        "Status shows 'Enrolled' when Outcome is 'Paid – new enrollment' or Payment status is 'Paid'. Leads already enrolled are never on this sheet.",
         "targets": {},
-        "how_to": ["Who this is for:", f"{leader} uses the first sheet all day. Each caller uses their own sheet. Team summary updates by itself.",
+        "how_to": ["Who this is for:", f"{leader} uses the first sheet all day. Each caller uses their own sheet. Team summary updates by itself. "
+                   "Missed calls lists every call from a lead that nobody answered and whether someone called back.",
                    "Order of work:", "P = paid booking, collect the balance. M = the lead called us and nobody called back. A = can close today. B = hot follow-up. "
                    "F = new lead, first real conversation. R = closure-stage lead gone quiet (WhatsApp first). C = nurture (WhatsApp first).",
                    "After every attempt:", "Fill the attempt time and outcome. After the call: Next step date/time, Payment status, Notes (who decides, blocker, next step, time).",
