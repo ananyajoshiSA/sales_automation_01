@@ -11,6 +11,7 @@ from integrations.timeutil import IST, utc
 
 TEAM = "Team Elite Calling"
 LEADER = "Shivangi Sahu"
+MAIL_LIST = "elite"  # the report mailer's LIST_ELITE (Apps Script settings) gets this team's emails
 REAL_SECS = 120
 CLOSED = ("Course Enrolled",)
 DEAD = ("Not Interested", "Irrelevant", "Irrelevant lead", "Invalid", "Invalid lead", "Duplicate")  # LeadSquared says "Irrelevant lead"

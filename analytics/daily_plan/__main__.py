@@ -30,7 +30,7 @@ import sys
 from datetime import datetime
 
 from analytics.daily_plan import content, dossiers, leadflow, mailer, missed_calls, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
-from analytics.daily_plan.common import LEADER, TEAM, Snap, load_snapshots, previous_working_day
+from analytics.daily_plan.common import LEADER, MAIL_LIST, TEAM, Snap, load_snapshots, previous_working_day
 from integrations.timeutil import now_ist
 
 
@@ -169,10 +169,10 @@ def cmd_build(a):
                 f"<p>The full plan (PDF) and the call sheets (workbook) are attached.</p>")
         mailer.send(f"{a.team}: plan for {C['day_label']} + review of {RV['day_label']}", body,
                     f"{a.team}: plan for {C['day_label']} and review of {RV['day_label']} attached.", mailer.recipients("REPORT_TO"),
-                    [stem + ".pdf", stem + ".xlsx"])
+                    [stem + ".pdf", stem + ".xlsx"], to_list=a.mail_list)
         if mailer.recipients("REPORT_TO_SUMMARY"):  # leadership copy without lead details, only when a list is set
             mailer.send(f"{a.team}: {RV['day_label']} summary", f"<p>{RV['headline']}</p>{summary}", "See the HTML version.",
-                        mailer.recipients("REPORT_TO_SUMMARY"))
+                        mailer.recipients("REPORT_TO_SUMMARY"), to_list=a.mail_list)
 
 
 def cmd_status(a):
@@ -200,7 +200,7 @@ def cmd_status(a):
     print(f"status -> {stem}.pdf")
     if a.mail:
         mailer.send(f"{a.team}: status at {S['at']}", "<pre style='font-family:Arial'>" + text + "</pre>", text,
-                    mailer.recipients("REPORT_TO"), [stem + ".pdf"])
+                    mailer.recipients("REPORT_TO"), [stem + ".pdf"], to_list=a.mail_list)
 
 
 def cmd_revival_prepare(a):
@@ -314,7 +314,7 @@ def cmd_pipeline_build(a):
         state.publish(a.state_dir, f"pipeline {a.date}")
     if a.mail:
         mailer.send(f"{a.team}: enrollment pipeline to {res['horizon']}", "<pre style='font-family:Arial'>" + html_escape(text) + "</pre>", text,
-                    mailer.recipients("REPORT_TO"), [res["pdf"], res["xlsx"]])
+                    mailer.recipients("REPORT_TO"), [res["pdf"], res["xlsx"]], to_list=a.mail_list)
 
 
 def html_escape(s: str) -> str:
@@ -457,6 +457,7 @@ def main(argv=None):
     ap = argparse.ArgumentParser(prog="python -m analytics.daily_plan")
     ap.add_argument("--team", default=TEAM)
     ap.add_argument("--leader", default=LEADER)
+    ap.add_argument("--mail-list", default=MAIL_LIST, help="the report mailer's recipient list for --mail (LIST_<NAME>)")
     ap.add_argument("--state-dir", default="plan_state")
     sub = ap.add_subparsers(dest="cmd", required=True)
     f = sub.add_parser("fetch"); f.add_argument("date"); f.add_argument("--days-back", type=int, default=4)

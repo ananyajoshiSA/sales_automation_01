@@ -288,3 +288,33 @@ def test_list_shows_newest_first_and_sends_nothing(repo, capsys):
         assert er.main(["--list"]) == 0
     lines = capsys.readouterr().out.splitlines()
     assert [l.split(" (")[0].rsplit("/", 1)[1] for l in lines] == ["newer.pdf", "older.csv"]
+
+
+@responses.activate
+def test_to_list_names_the_mailers_list_and_never_addresses(repo, capsys):
+    path = put(repo, "repo/exports/daily/2026-10-21/Elite_call_plan_Wed_21_Oct.pdf", PDF, 120)
+    responses.add(responses.POST, URL, status=302, headers={"Location": ECHO})
+    responses.add(responses.GET, ECHO, json={"ok": True, "status": "ready", "mode": "live", "recipients": 5, "multi": True,
+                                             "list": "elite", "lists": ["deepanshi", "elite"]})
+    mailer_sent = {"ok": True, "status": "sent", "detail": "emailed to 5 recipient(s) in live mode, list elite"}
+    responses.add(responses.POST, URL, status=302, headers={"Location": ECHO + "s"})
+    responses.add(responses.GET, ECHO + "s", json=mailer_sent)
+    assert er.main([path, "--to-list", "Elite"]) == 0
+    check, send = bodies()
+    assert check["list"] == "elite" and send["list"] == "elite" and "to" not in send
+    assert "5 approved recipient(s) on list elite" in capsys.readouterr().out
+
+
+@responses.activate
+def test_to_list_stops_on_a_mailer_without_lists_or_an_unknown_list(repo, capsys):
+    path = put(repo, "repo/exports/daily/2026-10-21/Elite_status_1350.pdf", PDF, 120)
+    mailer()  # an older Code.gs ignores the list and would email its default RECIPIENTS
+    assert er.main([path, "--to-list", "elite"]) == 2
+    assert "mailer: outdated" in capsys.readouterr().out and len(bodies()) == 1
+    responses.add(responses.POST, URL, status=302, headers={"Location": ECHO + "u"})
+    responses.add(responses.GET, ECHO + "u", json={"ok": False, "status": "unknown_list", "detail": "there is no LIST_SANA"})
+    assert er.main([path, "--to-list", "sana"]) == 2
+    assert "unknown_list - there is no LIST_SANA" in capsys.readouterr().out
+    assert er.main([path, "--to-list", "a@b.in"]) == 2
+    assert "refused" in capsys.readouterr().out
+    assert all(b["action"] == "check" for b in bodies())
