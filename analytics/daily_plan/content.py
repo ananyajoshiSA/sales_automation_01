@@ -234,7 +234,8 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
         "caller_note": "Work top to bottom: P (collect balance) and M (missed calls) first, then A, then B. Yellow cells are yours to fill after every attempt. "
                        "Status shows 'Enrolled' when Outcome is 'Paid – new enrollment' or Payment status is 'Paid'. Leads already enrolled are never on this sheet.",
         "targets": {},
-        "how_to": ["Who this is for:", f"{leader} uses the first sheet all day. Each caller uses their own sheet. Team summary updates by itself.",
+        "how_to": ["Who this is for:", f"{leader} uses the first sheet all day. Each caller uses their own sheet. Team summary updates by itself. "
+                   "Missed calls lists every call from a lead that nobody answered and whether someone called back.",
                    "Order of work:", "P = paid booking, collect the balance. M = the lead called us and nobody called back. A = can close today. B = hot follow-up. "
                    "F = new lead, first real conversation. R = closure-stage lead gone quiet (WhatsApp first). C = nurture (WhatsApp first).",
                    "After every attempt:", "Fill the attempt time and outcome. After the call: Next step date/time, Payment status, Notes (who decides, blocker, next step, time).",
@@ -270,7 +271,8 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
         "hours_note": "Standard day. The 14:00 and 17:00 status reports arrive by email with the to-do list for the next block.",
         "hours": HOURS, "ab_rules": AB_RULES,
         "excluded_note": (f"Removed from the call order after re-reading {pl}'s calls: {cnt('not_interested')} clear not-interested, {cnt('irrelevant')} irrelevant/invalid, "
-                          f"{cnt('21day')} 21-day course (Rs 100 community — pass to support), {cnt('already_student')} existing students (support), {cnt('dnc', 'support')} do-not-call/support."),
+                          f"{cnt('21day')} 21-day course (Rs 100 community — pass to support), {cnt('already_student')} existing students (support), {cnt('dnc', 'support')} do-not-call/support, "
+                          f"{cnt('shelved')} marked Not Interested, May buy later or Irrelevant in LeadSquared (back on the sheet only if they ring us)."),
         "overview_note": "'Likely today' takes about 60% of each A lead's 3-day chance, 35% of B and 30% of the rest; P leads have already paid a booking and count 0. Judgement-based estimates.",
         "review": {"title": f"{pl} review: what worked, what didn't, missed opportunities",
                    "headline": N.get("headline") or f"<b>{pl}: {len(confirmed)} confirmed enrollment(s).</b> {T['dials']:,} dials, {T['answer_pct']}% answered, {T['real']} real conversations; full ask in {ask} of {conv}.",

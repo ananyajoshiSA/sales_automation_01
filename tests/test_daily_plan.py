@@ -71,6 +71,20 @@ def test_enrolled_or_paid_leads_never_go_back_on_a_sheet():
     assert flat["L7"]["source"] == "carried" and flat["L7"]["tier"] == "C"
 
 
+def test_leads_marked_not_interested_or_later_stay_off_the_sheets_unless_they_ring_us():
+    stage = {"L1": "Not Interested", "L2": "May buy later", "L3": "Irrelevant lead", "L4": "May buy later", "L5": "May buy later", "L6": "Not Interested"}
+    leads = [dict(l, ProspectStage=stage.get(l["ProspectID"], l["ProspectStage"])) for l in LEADS]
+    reads = {lid: {"lead_id": lid, "name": lid, "status": "active", "tier": t, "chance": 5}
+             for lid, t in (("L1", "C"), ("L2", "B"), ("L4", "C"), ("L5", "A"))}
+    prev = {"L3": {"owner": "Asha K", "tier": "C", "chance": 2}, "L6": {"owner": "Ravi S", "tier": "B", "chance": 8}}
+    cs = [call("u0", "L4", "2026-10-10 03:00:00", "Missed", 0, "inbound")]                # L4 rang us and is still waiting
+    R = rows.build_rows(snap(cs, leads=leads), "2026-10-10", reads, prev, [])
+    flat = {r["lead_id"] for rs in R["by_owner"].values() for r in rs}
+    assert not {"L1", "L2", "L3", "L6"} & flat                                             # caller's disposition respected
+    assert {"L4", "L5"} <= flat                                                            # rang us since / about to pay
+    assert sorted(d["lead_id"] for d in R["dropped"] if d["status"] == "shelved") == ["L1", "L2"]
+
+
 def test_rs10_bootcamp_registration_is_a_prospect_not_an_enrollment():
     from analytics.daily_plan import review
     leads = [dict(l, ProspectStage="Course Enrolled") if l["ProspectID"] in ("L1", "L3") else l for l in LEADS]
@@ -642,3 +656,144 @@ def test_dossier_reads_a_zero_second_callfailure_note_as_not_picked_up(tmp_path)
     text = (tmp_path / "L1.txt").read_text()
     assert "NotAnswered 0s" in text and "note: CallFailure" not in text   # the lead didn't pick up; not a line fault
     assert "note: Network error" in text                                    # a real failure keeps its note
+
+
+def test_lead_flow_section_splits_fresh_from_reassigned_leads():
+    from analytics.daily_plan import leadflow
+
+    rs = [{"new": True}, {"new": False}, {"new": False}]
+    rs = [dict(r, type="Other", owner="Asha K", mins=3, waiting=None, attempts=1, reached=False, real=False, stage="", name="x",
+               phone="", arrived=datetime(2026, 10, 10, 10, 0), last="") for r in rs]
+    html = leadflow.section("Lead flow", rs, leads=False)
+    assert "3 leads came to the team: 1 created in this period (fresh leads) and 2 older leads" in html
+
+
+def _weekly_fixture(tmp_path):
+    from analytics.daily_plan import weekly
+    root = tmp_path / "daily"
+    for day, calls, fetched in (("2026-10-09", [call("u1", "L1", "2026-10-09 05:00:00", "Answered", 300), call("u1", "L2", "2026-10-09 06:00:00")],
+                                 "2026-10-09T16:00:00+00:00"),
+                                ("2026-10-10", [call("u1", "L1", "2026-10-09 05:00:00", "Answered", 310),
+                                                call("u2", "L2", "2026-10-10 07:00:00", "Answered", 25)], "2026-10-10T16:00:00+00:00")):
+        (root / day).mkdir(parents=True)
+        json.dump({"group": "Team X", "users": USERS, "leads": LEADS, "calls": calls, "zip_activities": [], "fetched_at": fetched},
+                  open(root / day / "snap.json", "w"))
+        json.dump([], open(root / day / "snap_enrolled.json", "w"))
+    return weekly, Snap(weekly.gather(str(root), "2026-10-09", "2026-10-10"), leader="Tara L")
+
+
+def test_weekly_review_keeps_each_call_once_and_matches_its_recording(tmp_path):
+    weekly, s = _weekly_fixture(tmp_path)
+    calls = weekly.connected(s)
+    assert [(c["lead_id"], c["duration"]) for c in calls] == [("L1", 310), ("L2", 25)]      # newest pull wins; unanswered left out
+    rec = {"start_time": "2026-10-09T05:01:00Z", "call_duration": 305, "transcript": {"text": "caller: fee is 50k. lead: ok"},
+           "s3_audio_file_url": "https://acefone/x"}
+    tx = {"919000000001": {"sales_call": [rec]}}
+    recs = weekly.match(s, calls, tx)
+    assert list(recs) == [calls[0]["activity_id"]]
+    rows = weekly.ledger(s, calls, recs, set(tx))
+    assert [r["transcript"] for r in rows] == ["transcript", "not searched"]
+    index = weekly.build_dossiers(s, calls, recs, str(tmp_path / "dossiers"), {})
+    text = open(index[0]["path"]).read() if index[0]["lead_id"] == "L1" else open(index[1]["path"]).read()
+    assert "fee is 50k" in text and calls[0]["activity_id"] in text
+
+
+def test_weekly_review_checks_every_call_was_read_and_rolls_up(tmp_path):
+    weekly, s = _weekly_fixture(tmp_path)
+    calls = weekly.connected(s)
+    rows = weekly.ledger(s, calls, {}, set())
+    index = [{"lead_id": c["lead_id"], "call_ids": [c["activity_id"]]} for c in calls]
+    reads = {"L1": {"lead_id": "L1", "outcome": "open", "primary_reason": "ASK",
+                    "calls": [{"call_id": calls[0]["activity_id"], "ask_made": False, "mistake": "no ask"}]}}
+    chk = weekly.check(index, reads)
+    assert chk["missing_leads"] == ["L2"] and chk["read"] == 1
+    reads["L2"] = {"lead_id": "L2", "outcome": "lost", "primary_reason": "L3", "calls": []}
+    assert weekly.check(index, reads)["missing_calls"] == [calls[1]["activity_id"]]       # a lead read, one call skipped
+    assert weekly.roll_up(rows, reads)["per_caller"]["Asha K"].get("real_read", 0) == 0     # no transcript: the ask isn't judged
+    rows[0]["transcript"] = "transcript"
+    rows[1]["caller"] = "+91-9000000002"
+    R = weekly.roll_up(rows, reads)
+    assert R["outcomes"] == {"open": 1, "lost": 1} and dict(R["reasons"]) == {"ASK": 1, "L3": 1}
+    assert R["per_caller"]["Asha K"]["real_read"] == 1 and R["mistakes"] == [("no ask", 1)]
+    assert "Not a LeadSquared user" in R["per_caller"] and not any("9000" in k for k in R["per_caller"])
+
+
+def test_weekly_review_counts_an_earlier_enrollment_apart():
+    from analytics.daily_plan import weekly
+    reads = {"A": {"outcome": "enrolled"}, "B": {"outcome": "enrolled"}, "C": {"outcome": "enrolled"}}
+    weekly.settle(reads, {"A": "2026-10-06T10:00:00", "B": "2026-10-09T10:00:00"}, "2026-10-08")
+    assert [reads[k]["outcome"] for k in "ABC"] == ["enrolled earlier", "enrolled", "enrolled"]   # C said on a call they paid
+
+
+def test_weekly_review_gives_a_recording_to_the_call_of_its_length(tmp_path):
+    from datetime import timedelta
+    weekly, s = _weekly_fixture(tmp_path)
+    long_call = weekly.connected(s)[0]                                                      # L1, 310 s at 05:00 UTC
+    short = dict(long_call, activity_id="short", duration=5, t=long_call["t"] - timedelta(minutes=1))
+    rec = {"start_time": "2026-10-09T04:59:30Z", "call_duration": 305, "transcript": {"text": "caller: fee is 50k"},
+           "s3_audio_file_url": "https://acefone/x"}
+    recs = weekly.match(s, [short, long_call], {"919000000001": {"sales_call": [rec]}})
+    assert list(recs) == [long_call["activity_id"]]                    # closer to the 5 s call, but the length says the long one
+
+
+def test_weekly_review_spreads_examples_across_callers():
+    from analytics.daily_plan import weekly
+    leads = [{"owner": "A", "name": f"a{i}"} for i in range(5)] + [{"owner": "B", "name": "unknown"}, {"owner": "B", "name": "b1"}]
+    assert [l["name"] for l in weekly._spread(leads, 4)] == ["a0", "b1", "a1", "unknown"]
+
+
+def test_leader_note_picks_candidates_counts_near_misses_and_renders(tmp_path):
+    from analytics.daily_plan import leader_week
+    weekly, s = _weekly_fixture(tmp_path)
+    reads = {"L1": {"lead_id": "L1", "outcome": "open", "primary_reason": "L6", "owner": "Asha K"},
+             "L2": {"lead_id": "L2", "outcome": "lost", "primary_reason": "L3"},
+             "L3": {"lead_id": "L3", "outcome": "paying"}, "L4": {"lead_id": "L4", "outcome": "enrolled", "owner": "Asha K"}}
+    assert [r["lead_id"] for r in leader_week.candidates(reads)] == ["L3", "L1"]     # unreached and enrolled leads are not near misses
+    near = {"L1": {"lead_id": "L1", "name": "Ravi", "owner": "Asha K", "signal": "strong", "saveable": "likely", "tl_lever": "callback_check",
+                   "story": "Said yes on Tue; the 2 pm call was never made.", "tl_action": "Check due callbacks at 14:00."},
+            "L3": {"lead_id": "L3", "signal": "none", "saveable": "unlikely", "tl_lever": "none"}}
+    C = leader_week.near_counts(near)
+    assert (C["likely"], C["possible"], C["levers"]) == (1, 0, [("callback_check", 1)])
+    F = leader_week.ops(s, "2026-10-09", "2026-10-10", reads)
+    assert F["enrolled"] == 1 and set(F["callers"]) == set(s.callers)
+    doc = leader_week.html_doc(F, near, {"headline": "x", "moves": [{"title": "Keep callbacks", "do": "d", "why": "w", "examples": ["L1"]}]},
+                               {"team": "Team X", "leader": "Tara L", "period": "Fri 9 Oct to Sat 10 Oct", "built": "Sat"})
+    assert "Keep callbacks" in doc and doc.count("the 2 pm call was never made") == 1      # an example in a move isn't repeated below
+
+
+def test_leader_note_separates_bulk_handouts_from_best_leads(monkeypatch):
+    from analytics.daily_plan import leader_week
+    monkeypatch.setattr(leader_week, "BULK", 3)
+    leads = [dict(l, mx_Assigned_On="2026-10-07 04:40:00", mx_Assigned_By="Amit R") for l in LEADS[:4]]          # 4 old leads, one hour
+    leads += [dict(LEADS[4], CreatedOn="2026-10-09 05:00:00", mx_Report_Type="High Priority")]                     # a fresh best lead
+    s = snap([call("u1", "L1", "2026-10-09 06:00:00", "Answered", 300), call("u1", "L5", "2026-10-09 05:02:00", "Answered", 200)], leads=leads)
+    S = leader_week.sources(s, "2026-10-01", "2026-10-10", {"L5": {"outcome": "enrolled"}}, "2026-10-08")
+    types = dict(S["types"])
+    assert types["Bulk handout of old leads"]["leads"] == 4 and types["High Priority (fresh)"]["enrolled"] == 1
+    assert S["handouts"][0]["by"] == "Amit R" and S["handouts"][0]["leads"] == 4
+    assert S["best_by_caller"]["Asha K"]["in5"] == 1 and S["bulk_dial_share"] == {}                                 # under 100 dials: no share
+
+
+def test_missed_calls_sheet_separates_dropped_lines_call_backs_and_waiting_leads(tmp_path):
+    from analytics.daily_plan import missed_calls
+
+    def inb(lead, utc, status="Missed", line="LawSikho_Incoming"):
+        return dict(call("u1", lead, utc, status, 30 if status == "Answered" else 0, "inbound"), display_number=line, call_notes="CallFailure")
+    s = snap([inb("L1", "2026-10-09 05:00:00", "Answered"), inb("L1", "2026-10-09 05:02:00"),       # dropped line, rang straight back
+              call("u1", "L1", "2026-10-09 05:06:00", "Answered", 200),
+              inb("L3", "2026-10-09 06:00:00"), call("u2", "L3", "2026-10-09 06:20:00", "Answered", 90),  # returned 20 min later
+              inb("L5", "2026-10-09 07:00:00", line="Sales_Outbound_Airtel"),                         # rang the outbound number, never returned
+              inb("L7", "2026-10-08 07:00:00")])                                                       # another day
+    got = {r["lead_id"]: r for r in missed_calls.rows(s, ["2026-10-09"])}
+    assert set(got) == {"L1", "L3", "L5"}
+    assert got["L1"]["dropped"] and got["L1"]["result"] == "Dropped call, reached again"
+    assert got["L3"]["result"] == "Called back and reached" and got["L3"]["back_mins"] == 20 and got["L3"]["back_by"] == "Ravi S"
+    assert got["L5"]["result"] == "Not called back" and got["L5"]["line"] == "Rang back the outbound Airtel number"
+    assert "90000000" not in json.dumps(missed_calls.by_line(s, ["2026-10-09"]))
+    assert missed_calls.by_line(s, ["2026-10-09"])[0] == ("LawSikho incoming line", 3, 1, 2)
+
+    from openpyxl import Workbook
+    wb = Workbook()
+    workbook.missed_sheet(wb.active, {"label": "Fri 9 Oct", "rows": list(got.values()), "lines": missed_calls.by_line(s, ["2026-10-09"])})
+    cells = [c.value for row in wb.active.iter_rows() for c in row if c.value]
+    assert "3 missed calls from 3 leads; 1 not called back" in cells and "Not called back" in cells

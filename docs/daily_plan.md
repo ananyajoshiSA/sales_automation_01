@@ -92,6 +92,54 @@ The horizon is month end (the end of next month in a month's last 3 days). The r
 since last night. A section on **fresh leads allocated that day** (assigned or created today, split into new and reassigned) shows,
 per caller, how many were dialled, reached, had a real conversation, got a dated follow-up, and entered the pipeline, and lists those leads. The expected range is the sum of the chances, up to 2.4x that.
 
+## Weekly review (Fridays after the nightly pipeline)
+
+Why enrollments did or did not come through this week, from every connected call (the user, 16 Oct: "make sure
+all the calls, connected calls, transcripts are read through the week").
+
+```bash
+.venv/bin/python -m analytics.daily_plan weekly-prepare <first day> <last day>   # e.g. 2026-10-08 2026-10-16
+```
+
+It gathers the week's calls from the daily pulls in `data/daily/` (newest pull wins per call), searches the
+transcripts of numbers whose last search came before one of their connected calls (at most 9 requests of 10 numbers
+per run), matches each connected call to its recording, and writes under `data/weekly/<first>_<last>/`:
+`calls.jsonl` (the call ledger: every connected call with its transcript status), one dossier per lead with every
+call of the week and its transcript, `brief.md` (from `docs/weekly_brief.md`) and the reading batches.
+
+Claude reads every batch with parallel subagents (waves of up to 8) and writes `reads/out_<k>.jsonl`: one row per
+lead with a reading of every call (what happened, fee and ask, link sent, next step fixed, objection, slip, what to do
+better), the lead's outcome (enrolled, paying, open, lost, not a prospect), one main reason for an open or lost lead
+(GOAL.md leak codes L3–L13 plus ASK, DECIDER, BUDGET, TIMING, NOT_INTERESTED, DECIDING) and what would have closed it.
+Then write `narrative.json` (`headline`, `fixes`, `why`, `calls`, `callers`, `leader`) from `facts.json`, and:
+
+```bash
+.venv/bin/python -m analytics.daily_plan weekly-build <first day> <last day>
+```
+
+`weekly-build` stops while any lead or call lacks a reading. It writes the PDF and workbook to
+`exports/weekly/<first>_<last>/` and adds each call's reading to the ledger. Reasons are judgements, one per lead,
+and are not priced: rupee figures wait for payment data and a 20-lead hand check (GOAL.md section 5).
+
+### The team leader's weekly note (the main weekly deliverable)
+
+The owner, 16 Oct: "imagine you're writing a report to Shivangi that how can she improve enrollment numbers next week …
+give examples that this conversation happened, this could have been saved". After `weekly-build`:
+
+```bash
+.venv/bin/python -m analytics.daily_plan weekly-leader-prepare <first day> <last day>   # near-miss candidates + brief
+```
+
+Candidates are every part-paid lead and every open or lost lead with a conversation (not unreached, not a clear no).
+Claude judges each batch (`data/weekly/<first>_<last>/leader/cand_<k>.jsonl`, brief `docs/weekly_leader_brief.md`) and
+writes `leader/out_<k>.jsonl`: the buying signal, what went wrong, the team leader's lever (callbacks, joining to close,
+payment plans, the payer on the call, allocation and ownership, course and price, inbound calls, handovers, stages),
+whether it was likely saveable and a short story. Run `weekly-leader-build` once to get `leader/leader_facts.json`
+(attendance, start times, real conversations per 100 dials by hour, allocation per caller, first-dial speed, leads
+chased by many callers, near-miss counts), write `leader/leader.json` (`title`, `headline`, `moves`: five
+`{title, do, why, examples: [lead_id], check}`, `allocation`, `management`, `slots`, `day_plan`: `[[time, what]]`,
+`checklist`), and build again. The PDF is `exports/weekly/<first>_<last>/Elite_weekly_note_for_team_leader.pdf`.
+
 ## Email settings (environment variables in the cloud environment's settings)
 
 `SMTP_HOST`, `SMTP_PORT` (587), `SMTP_USER`, `SMTP_PASSWORD`, `SMTP_FROM`; `REPORT_TO`: full reports with lead phone
@@ -107,6 +155,13 @@ details. Never put these in the repo or in chat.
   A Rs 10 bootcamp registration (or a free bootcamp sign-up) is not an enrollment, even when staged Course Enrolled:
   the lead stays on the sheets as a prospect for the course.
 
+## Who is on the call sheets
+
+Leads in Course Enrolled, or who said on a call that they paid, never go on a sheet. Leads whose LeadSquared stage is
+Not Interested, May buy later, Irrelevant lead, Invalid or Duplicate stay off the sheets too (the caller's disposition
+stands), unless the lead has rung us since and is waiting for a call back, or the reader rates it tier A (about to pay).
+The morning report counts how many were left off.
+
 ## Lead flow (Shivangi's request, 11 Oct)
 
 Every report now shows, for the leads that came in, how fast each was first dialled, how many attempts it got, whether it
@@ -116,6 +171,8 @@ was reached, and its disposition (LeadSquared stage) now, by lead type: **High P
 - Type comes from the lead's Report_Type field (High Priority / Incoming / Chat/Email/Referral), else Lead Request type,
   else Source (Inbound Phone call → Incoming, a chat source → Chat). Incoming Missed has no field: the lead's first contact
   was a call to us that nobody answered.
+- Leads that came in = fresh leads (created in the period) plus older leads assigned to a caller again (re-enquiries,
+  reassignments). Each section states the split: on 1-14 Oct, 1,768 leads = 465 fresh + 1,303 older leads.
 - First dial is timed from when the lead came in (created; for a reassigned lead, when it was assigned). A lead arriving
   before 09:30 or after 20:30 IST is timed from the next 09:30.
 - Status checks (14:00, 17:00): today's leads, with to-do lines for leads not dialled, dialled but not reached, and leads

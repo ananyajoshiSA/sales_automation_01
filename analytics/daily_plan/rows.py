@@ -8,7 +8,7 @@ import os
 from collections import Counter, defaultdict
 from datetime import timedelta
 
-from analytics.daily_plan.common import CLOSED, DEAD, REAL_SECS, Snap, ist, p10
+from analytics.daily_plan.common import CLOSED, REAL_SECS, SHELVED, Snap, ist, p10
 
 TIERS = "MABFRC"
 PAID = {"paid_new", "enrolled_no_proof"}  # enrolled_no_proof: older reads, before stage = enrolled
@@ -28,6 +28,17 @@ def load_reads(directory: str) -> dict:
                 except (ValueError, KeyError):
                     pass
     return reads
+
+
+def _unreturned(cs, now) -> list:
+    """Calls from the lead in the last 3 days that nobody answered and nobody has returned."""
+    return [c for c in cs if c["direction"] == "inbound" and c["status"] != "Answered" and c["t"] >= now - timedelta(days=3)
+            and not any(d["t"] > c["t"] and (d["direction"] == "outbound" or d["status"] == "Answered") for d in cs)]
+
+
+def _shelved(stage: str, tier: str, cs, now) -> bool:
+    """Marked Not Interested, May buy later or Irrelevant: off the sheets, unless the lead rang us since or is tier A."""
+    return stage in SHELVED and tier != "A" and not _unreturned(cs, now)
 
 
 def _today_summary(cs) -> str:
@@ -59,6 +70,9 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         if st in EXCLUDE or r.get("tier") == "D":
             dropped.append({**r, "owner": owner, "stage": stage})
             continue
+        if _shelved(stage, r.get("tier") or "", snap.by_lead.get(lid, []), now):
+            dropped.append({**r, "owner": owner, "stage": stage, "status": "shelved"})
+            continue
         if owner not in team:
             continue
         rows[lid] = {**r, "owner": owner, "lead_id": lid, "stage": stage, "source": "re-read"}
@@ -71,7 +85,7 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         l = snap.leads[lid]
         owner = l.get("OwnerIdName")
         stage = l.get("ProspectStage") or ""
-        if owner not in team or stage in CLOSED + DEAD:
+        if owner not in team or stage in CLOSED or _shelved(stage, p["tier"], snap.by_lead.get(lid, []), now):
             continue
         if p["tier"] == "P" or p.get("verify"):
             continue
@@ -92,9 +106,9 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         created = ist(l.get("CreatedOn"))
         if owner not in team or lid in rows or lid in reads or not created or created < now - timedelta(days=4):
             continue
-        if (l.get("ProspectStage") or "") in CLOSED + DEAD:
-            continue
         cs = snap.by_lead.get(lid, [])
+        if (l.get("ProspectStage") or "") in CLOSED or _shelved(l.get("ProspectStage") or "", "F", cs, now):
+            continue
         if any(c["status"] == "Answered" and c["duration"] >= REAL_SECS for c in cs):
             continue
         rows[lid] = {"owner": owner, "lead_id": lid, "name": snap.lead_name(lid), "phone": p10(l.get("Phone")),
@@ -109,8 +123,7 @@ def build_rows(snap: Snap, today: str, reads: dict, prev_plan: dict, enrolled: l
         l = snap.leads.get(lid, {})
         r["phone"] = p10(r.get("phone")) or p10(l.get("Phone"))
         r["today"] = _today_summary([c for c in cs if c["t"].strftime("%Y-%m-%d") == today])
-        missed = [c for c in cs if c["direction"] == "inbound" and c["status"] != "Answered" and c["t"] >= now - timedelta(days=3)
-                  and not any(d["t"] > c["t"] and (d["direction"] == "outbound" or d["status"] == "Answered") for d in cs)]
+        missed = _unreturned(cs, now)
         r["missed"] = len(missed)
         r["missed_last"] = missed[-1]["t"].strftime("%a %H:%M") if missed else ""
         if missed and r["tier"] != "A":

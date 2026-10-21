@@ -13,7 +13,8 @@ TEAM = "Team Elite Calling"
 LEADER = "Shivangi Sahu"
 REAL_SECS = 120
 CLOSED = ("Course Enrolled",)
-DEAD = ("Not Interested", "Irrelevant", "Invalid", "Duplicate")
+DEAD = ("Not Interested", "Irrelevant", "Irrelevant lead", "Invalid", "Invalid lead", "Duplicate")  # LeadSquared says "Irrelevant lead"
+SHELVED = DEAD + ("May buy later",)  # the caller closed the lead for now: off the call sheets unless it calls us or is about to pay
 
 
 def p10(x) -> str | None:
