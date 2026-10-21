@@ -55,7 +55,7 @@ everything again (about 20 min), for example after a gap of several days or if a
    .venv/bin/python -m analytics.daily_plan build $D --publish-state --mail
    ```
    `build` stops if any workbook formula errors after the LibreOffice recalculation. Look at the first 6 pages of the PDF
-   (Read tool with `pages`) before sending. If SMTP isn't configured, `--mail` says so and sends nothing; then send both
+   (Read tool with `pages`) before sending. If no mail route is set up, `--mail` says so and sends nothing; then send both
    files to the user with SendUserFile.
 
 ## Status checks (14:00 and 17:00)
@@ -128,10 +128,17 @@ was reached, and its disposition (LeadSquared stage) now, by lead type: **High P
 
 ## Email with the reports attached
 
-Cloud sessions cannot reach SMTP ports, so the reports go out through a small Gmail relay: an Apps Script web app in
-the sender's Google account (`docs/mail_relay.gs`, setup steps at the top of the file). The code posts the email and
-the PDF/workbook to it; the script sends them from that Gmail account, only to the addresses listed in the script.
-Set `MAIL_RELAY_URL` and `MAIL_RELAY_KEY` in the cloud environment settings; every `--mail` run (morning build,
-status checks, nightly pipeline) then attaches the full report as built. Without them, `--mail` says so and sends
-nothing. SMTP settings still work where port 587 is open.
+Every `--mail` run (morning build, status checks, nightly pipeline) emails the report's files as soon as the build has
+passed its checks, through the first route that is set up:
+
+1. **The project's report mailer** (`REPORT_EMAIL_URL`, `REPORT_EMAIL_TOKEN`): the Apps Script that `/email-report`
+   uses (`email_report/Code.gs`, [docs/email_report.md](email_report.md)). It sends the exact files the run built
+   (the PDF and workbook in one email; one email per file on a script older than the multi-file Code.gs) to its own
+   approved recipients, and follows its off/test/live switch, daily cap and sent log. `REPORT_TO` is ignored and the
+   email body is the mailer's own. The run marks the files as sent, so a later `/email-report` in the same chat
+   doesn't pick them again. The log line `mail: ... sent via the report mailer (...)` gives the mode and the result.
+2. The older Gmail relay (`docs/mail_relay.gs`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`): its own script and recipient list.
+3. SMTP settings, where port 587 is open.
+
+Without any of them, `--mail` says so and sends nothing. The weekly review and the team leader's note have no `--mail`.
 
