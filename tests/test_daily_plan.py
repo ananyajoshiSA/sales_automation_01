@@ -1,5 +1,11 @@
 import json
+import os
+import time
 from datetime import datetime
+
+import pytest
+import responses as responses_lib
+
 
 from analytics.daily_plan import content, mailer, rows, state, status, transcripts, workbook
 from analytics.daily_plan.common import Snap, previous_working_day
@@ -151,7 +157,7 @@ def test_status_lists_untouched_tried_and_unreturned():
 
 
 def test_mailer_needs_settings_and_sends_attachments(tmp_path, monkeypatch):
-    for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "MAIL_RELAY_URL", "MAIL_RELAY_KEY"):
+    for k in ("SMTP_HOST", "SMTP_USER", "SMTP_PASSWORD", "MAIL_RELAY_URL", "MAIL_RELAY_KEY", "REPORT_EMAIL_URL", "REPORT_EMAIL_TOKEN"):
         monkeypatch.delenv(k, raising=False)
     assert mailer.send("s", "<p>h</p>", "t", ["a@x.in"]) is False
     monkeypatch.setenv("SMTP_HOST", "smtp.x.in"); monkeypatch.setenv("SMTP_USER", "r@x.in"); monkeypatch.setenv("SMTP_PASSWORD", "p")
@@ -469,6 +475,8 @@ def test_shareable_copy_has_no_phone_numbers_or_caller_lists():
 
 def test_mail_relay_sends_the_real_files(tmp_path, monkeypatch):
     import base64
+    for k in ("REPORT_EMAIL_URL", "REPORT_EMAIL_TOKEN"):
+        monkeypatch.delenv(k, raising=False)
     monkeypatch.setenv("MAIL_RELAY_URL", "https://script.google.com/macros/s/abc/exec")
     monkeypatch.setenv("MAIL_RELAY_KEY", "k")
     f = tmp_path / "plan.pdf"; f.write_bytes(b"%PDF-1.4 full report")
@@ -487,6 +495,105 @@ def test_mail_relay_sends_the_real_files(tmp_path, monkeypatch):
     assert base64.b64decode(body["attachments"][0]["content"]) == b"%PDF-1.4 full report"
     R.text = "forbidden"
     assert not mailer.send("Plan", "<p>h</p>", "t", [], [str(f)], post=post)
+
+
+MAILER_URL = "https://script.google.com/macros/s/AKfy-abc_123/exec"
+
+
+@pytest.fixture
+def report_mailer(tmp_path, monkeypatch):
+    """The project's report mailer (the one /email-report uses) set up, with a fresh PDF and workbook."""
+    from scripts import email_report as er
+
+    monkeypatch.setenv("REPORT_EMAIL_URL", MAILER_URL)
+    monkeypatch.setenv("REPORT_EMAIL_TOKEN", "t" * 40)
+    monkeypatch.setenv("MAIL_RELAY_URL", "https://script.google.com/macros/s/relay/exec")  # the mailer wins over the relay
+    monkeypatch.setenv("MAIL_RELAY_KEY", "k")
+    monkeypatch.setattr(er, "BLOCKED", str(tmp_path / "data"))
+    monkeypatch.setattr(er, "LAST_SENT", str(tmp_path / "data" / "email_report" / "last_sent.json"))
+    monkeypatch.setattr(er, "RETRY_SECS", 0)
+    out = tmp_path / "exports" / "daily" / "2026-10-21"
+    out.mkdir(parents=True)
+    pdf_, xlsx = out / "Elite_call_plan_Wed_21_Oct.pdf", out / "Elite_call_plan_Wed_21_Oct.xlsx"
+    pdf_.write_bytes(b"%PDF-1.7 plan"); xlsx.write_bytes(b"PK\x03\x04 sheets")
+    for f in (pdf_, xlsx):
+        os.utime(f, (time.time() - 60, time.time() - 60))
+    return er, [str(pdf_), str(xlsx)]
+
+
+def mailer_answers(*answers):
+    import responses
+    for a in answers:
+        responses.add(responses.POST, MAILER_URL, json=a)
+
+
+@responses_lib.activate
+def test_report_mailer_sends_the_reports_files_in_one_email(report_mailer):
+    import json as _json
+    er, files = report_mailer
+    waits = []
+
+    def sleep(secs):  # the files were just written; waiting lets them settle
+        waits.append(secs)
+        for f in files:
+            os.utime(f, (time.time() - 60, time.time() - 60))
+
+    for f in files:
+        os.utime(f)
+    mailer_answers({"ok": True, "status": "ready", "mode": "live", "recipients": 2, "multi": True},
+                   {"ok": True, "status": "sent", "detail": "emailed to 2 recipient(s)"})
+    assert mailer.send_report_mailer("Plan", files, sleep=sleep)
+    assert waits and 0 < waits[0] <= er.SETTLE_SECS + 1  # just written: waits until the mailer takes the files
+    body = _json.loads(responses_lib.calls[1].request.body)
+    assert body["action"] == "send" and [f["file_name"] for f in body["files"]] == [
+        "Elite_call_plan_Wed_21_Oct.pdf", "Elite_call_plan_Wed_21_Oct.xlsx"]
+    assert sorted(_json.load(open(er.LAST_SENT))["files"]) == sorted(files)  # /email-report won't pick them again
+
+
+@responses_lib.activate
+def test_report_mailer_route_wins_and_ignores_the_to_list(report_mailer, monkeypatch):
+    import json as _json
+    er, files = report_mailer
+    monkeypatch.setattr(mailer.time, "sleep", lambda s: None)
+    mailer_answers({"ok": True, "status": "ready", "mode": "test", "recipients": 1, "multi": True},
+                   {"ok": True, "status": "duplicate", "detail": "already sent"})
+    relay = []
+    assert mailer.send("Plan", "<p>h</p>", "t", ["someone@else.in"], files, post=lambda *a, **k: relay.append(a))
+    assert relay == [] and "someone@else.in" not in responses_lib.calls[1].request.body.decode()
+    assert _json.loads(responses_lib.calls[1].request.body)["resend"] is False
+
+
+@responses_lib.activate
+def test_report_mailer_older_script_gets_one_email_per_file(report_mailer):
+    import json as _json
+    er, files = report_mailer
+    mailer_answers({"ok": True, "status": "ready", "mode": "live", "recipients": 2},
+                   {"ok": True, "status": "sent"}, {"ok": True, "status": "sent"})
+    assert mailer.send_report_mailer("Plan", files, sleep=lambda s: None)
+    sent = [_json.loads(c.request.body)["file_name"] for c in responses_lib.calls[1:]]
+    assert sent == ["Elite_call_plan_Wed_21_Oct.pdf", "Elite_call_plan_Wed_21_Oct.xlsx"]
+
+
+@responses_lib.activate
+def test_report_mailer_sends_nothing_when_off_or_refused(report_mailer, tmp_path):
+    er, files = report_mailer
+    mailer_answers({"ok": True, "status": "off", "mode": "off", "recipients": 0})
+    assert not mailer.send_report_mailer("Plan", files, sleep=lambda s: None)
+    assert len(responses_lib.calls) == 1 and not os.path.exists(er.LAST_SENT)
+    raw = tmp_path / "data" / "daily" / "snap.csv"
+    raw.parent.mkdir(parents=True); raw.write_text("lead,phone\n")
+    assert not mailer.send_report_mailer("Plan", [str(raw)], sleep=lambda s: None)  # raw lead data never leaves
+    assert not mailer.send_report_mailer("Summary", [], sleep=lambda s: None)  # the mailer only sends files
+    assert len(responses_lib.calls) == 1
+
+
+@responses_lib.activate
+def test_report_mailer_reports_a_failed_send(report_mailer):
+    er, files = report_mailer
+    mailer_answers({"ok": True, "status": "ready", "mode": "live", "recipients": 2, "multi": True},
+                   {"ok": False, "status": "capped", "detail": "daily cap reached"})
+    assert not mailer.send_report_mailer("Plan", files, sleep=lambda s: None)
+    assert not os.path.exists(er.LAST_SENT)
 
 
 def test_restaged_students_and_old_payments_are_not_the_days_enrollments():

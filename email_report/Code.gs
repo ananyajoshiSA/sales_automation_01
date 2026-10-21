@@ -1,8 +1,9 @@
 /**
  * On-request report mailer (docs/email_report.md).
  *
- * Emails one completed report (PDF, Excel or CSV) to the approved recipients when the /email-report skill
- * posts it here, which happens only when someone asks "email this report". Nothing here runs on a timer.
+ * Emails a set of completed reports (PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG images, HTML), all in one email,
+ * to the approved recipients when the /email-report skill posts them here, which happens only when someone asks
+ * "email this report". Nothing here runs on a timer.
  *
  * Every setting lives in Script Properties (Project Settings), never in this file:
  *   DELIVERY_MODE      off (default) | test | live
@@ -13,18 +14,29 @@
  *   MAX_SENDS_PER_DAY  optional, default 20: a cap that limits the damage if the token ever leaks
  *
  * A request can never choose who gets an email. The sent log (User Properties) keeps one entry per mode
- * and file content, so the same file is never emailed twice unless the request says resend.
+ * and file content, so the same file is never emailed twice unless the request says resend. One email, however
+ * many files it carries, counts once toward MAX_SENDS_PER_DAY.
  */
 
+var ZIP = [0x50, 0x4b, 0x03, 0x04];
 var TYPES = {
-  pdf: {mime: 'application/pdf', magic: '%PDF-', label: 'PDF'},
-  xlsx: {mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', magic: 'PK\u0003\u0004', label: 'Excel'},
-  csv: {mime: 'text/csv', magic: null, label: 'CSV'}
+  pdf: {mime: 'application/pdf', magic: [0x25, 0x50, 0x44, 0x46, 0x2d], label: 'PDF'},
+  xlsx: {mime: 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet', magic: ZIP, label: 'Excel'},
+  xls: {mime: 'application/vnd.ms-excel', magic: [0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1], label: 'Excel'},
+  csv: {mime: 'text/csv', magic: null, label: 'CSV'},
+  docx: {mime: 'application/vnd.openxmlformats-officedocument.wordprocessingml.document', magic: ZIP, label: 'Word'},
+  pptx: {mime: 'application/vnd.openxmlformats-officedocument.presentationml.presentation', magic: ZIP, label: 'PowerPoint'},
+  png: {mime: 'image/png', magic: [0x89, 0x50, 0x4e, 0x47], label: 'PNG image'},
+  jpg: {mime: 'image/jpeg', magic: [0xff, 0xd8, 0xff], label: 'JPEG image'},
+  jpeg: {mime: 'image/jpeg', magic: [0xff, 0xd8, 0xff], label: 'JPEG image'},
+  html: {mime: 'text/html', magic: null, label: 'HTML'}
 };
-var FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|csv)$/i;
+var FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html)$/i;
+var NAME_RULE = 'file name must end in .pdf, .xlsx, .xls, .csv, .docx, .pptx, .png, .jpg or .html and use only letters, digits, spaces and . _ ( ) + -';
 var TZ = 'Asia/Kolkata';
 var MODES = ['off', 'test', 'live'];
-var MAX_BYTES = 20 * 1024 * 1024;  // Gmail's attachment cap is 25 MB; stay clear of it
+var MAX_BYTES = 20 * 1024 * 1024;  // Gmail's attachment cap is 25 MB per email; stay clear of it
+var MAX_FILES = 10;
 var MAX_RECIPIENTS = 50;
 var EMAIL = /^[^\s@,;<>"]+@([A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+)$/;
 
@@ -93,60 +105,86 @@ function hex_(bytes) {
   return bytes.map(function (b) { return ((b + 256) % 256).toString(16).replace(/^(.)$/, '0$1'); }).join('');
 }
 
-/** The file's type from its name, checked against its first bytes; null if it is not a PDF, Excel or CSV file. */
+/** The file's type from its name, checked against its first bytes; null if it is not an allowed report type. */
 function typeOf_(name, bytes) {
   var m = FILE_NAME.exec(name || '');
   if (!m) return null;
   var t = TYPES[m[1].toLowerCase()];
-  if (t.magic) return String.fromCharCode.apply(null, bytes.slice(0, t.magic.length)) === t.magic ? t : null;
-  return bytes.slice(0, 4096).indexOf(0) < 0 ? t : null;  // a CSV is text: no zero bytes
+  if (t.magic) {
+    return t.magic.every(function (b, i) { return i < bytes.length && (bytes[i] + 256) % 256 === b; }) ? t : null;
+  }
+  return bytes.slice(0, 4096).indexOf(0) < 0 ? t : null;  // CSV and HTML are text: no zero bytes
 }
 
-function message_(name, type, mode, liveCount) {
-  var lines = [
-    'Hello,',
+function message_(files, mode, liveCount) {
+  var one = files.length === 1;
+  var lines = ['Hello,', ''].concat(one ? ['The report ' + files[0].name + ' (' + files[0].type.label + ') is attached.'] :
+    ['These ' + files.length + ' reports are attached:'].concat(files.map(function (f) { return '- ' + f.name + ' (' + f.type.label + ')'; })), [
     '',
-    'The report ' + name + ' (' + type.label + ') is attached.',
-    'It was sent on request at ' + nowIst_('d MMM yyyy, h:mm a') + ' IST. The report itself says how fresh its data is.',
+    'Sent on request at ' + nowIst_('d MMM yyyy, h:mm a') + ' IST. Each report says how fresh its data is.',
     '',
-    'Please do not forward it outside the company: it may name callers and leads.'
-  ];
+    'Please do not forward ' + (one ? 'it' : 'them') + ' outside the company: ' + (one ? 'it' : 'they') + ' may name callers and leads.'
+  ]);
   if (mode === 'test') {
     lines.unshift('TEST EMAIL: only you received this. In live mode it goes to ' + liveCount + ' approved recipient(s).', '');
   }
-  return {subject: (mode === 'test' ? '[TEST] ' : '') + 'Report: ' + name, body: lines.join('\n')};
+  var subject = one ? 'Report: ' + files[0].name : 'Reports: ' + files.length + ' files, ' + nowIst_('d MMM yyyy');
+  return {subject: (mode === 'test' ? '[TEST] ' : '') + subject, body: lines.join('\n')};
+}
+
+/** Checks one uploaded file; returns {name, bytes, type, sha} or {rejected: reason}. */
+function checkFile_(f) {
+  var name = String(f.name || '');
+  if (!FILE_NAME.test(name)) return {rejected: name + ': ' + NAME_RULE};
+  if (!f.bytes.length) return {rejected: name + ': file is empty'};
+  var type = typeOf_(name, f.bytes);
+  if (!type) return {rejected: name + ': file content does not match its .' + name.split('.').pop() + ' name'};
+  var sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, f.bytes));
+  if (String(f.sha256 || '').toLowerCase() !== sha) {
+    return {rejected: name + ': checksum mismatch, the upload arrived incomplete'};
+  }
+  return {name: name, bytes: f.bytes, type: type, sha: sha};
 }
 
 /**
- * Email one file at most once per mode. Returns {status, detail}; status is one of
- * sent, duplicate, off, limit, rejected. Throws only when sending itself failed (safe to retry).
+ * Email a set of files together, each file at most once per mode: files already emailed are left out of the
+ * email (all of them already sent answers duplicate) unless the request says resend. Returns {status, detail};
+ * status is one of sent, duplicate, off, limit, rejected. Throws only when sending itself failed (safe to retry).
  */
-function deliver_(name, bytes, opts) {
+function deliver_(uploads, opts) {
   opts = opts || {};
   var cfg = readConfig_();
-  if (!FILE_NAME.test(name || '')) {
-    return {status: 'rejected', detail: 'file name must end in .pdf, .xlsx or .csv and use only letters, digits, spaces and . _ ( ) + -'};
-  }
+  if (!uploads.length) return {status: 'rejected', detail: 'no file was uploaded'};
+  if (uploads.length > MAX_FILES) return {status: 'rejected', detail: 'more than ' + MAX_FILES + ' files in one email'};
+  var bad = uploads.filter(function (f) { return !FILE_NAME.test(String(f.name || '')); })[0];
+  if (bad) return {status: 'rejected', detail: (uploads.length > 1 ? String(bad.name || '(no name)') + ': ' : '') + NAME_RULE};
   if (cfg.mode === 'off') return {status: 'off', detail: 'DELIVERY_MODE is off, so nothing was emailed'};
-  if (!bytes.length) return {status: 'rejected', detail: 'file is empty'};
-  if (bytes.length > MAX_BYTES) return {status: 'rejected', detail: 'file is over 20 MB, too large to email'};
-  var type = typeOf_(name, bytes);
-  if (!type) return {status: 'rejected', detail: 'file content does not match its .' + name.split('.').pop() + ' name'};
-  var sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes));
-  if (String(opts.sha256 || '').toLowerCase() !== sha) {
-    return {status: 'rejected', detail: 'checksum mismatch: the upload arrived incomplete, nothing was emailed'};
+  var total = uploads.reduce(function (n, f) { return n + f.bytes.length; }, 0);
+  if (total > MAX_BYTES) return {status: 'rejected', detail: (uploads.length > 1 ? 'files are' : 'file is') + ' over 20 MB, too large to email'};
+  var files = [];
+  for (var i = 0; i < uploads.length; i++) {
+    var c = checkFile_(uploads[i]);
+    if (c.rejected) {
+      return {status: 'rejected', detail: (uploads.length > 1 ? c.rejected : c.rejected.replace(/^[^:]*: /, '')) + '; nothing was emailed'};
+    }
+    if (files.some(function (f) { return f.name === c.name; })) {
+      return {status: 'rejected', detail: 'two files are both named ' + c.name + '; nothing was emailed'};
+    }
+    if (!files.some(function (f) { return f.sha === c.sha; })) files.push(c);
   }
 
-  var key = 'sent:' + cfg.mode + ':' + sha;
   var today = 'count:' + cfg.mode + ':' + nowIst_('yyyy-MM-dd');
   var ledger = PropertiesService.getUserProperties();
   var lock = LockService.getScriptLock();
   lock.waitLock(30000);
   try {
-    var prev = ledger.getProperty(key);
-    if (prev && !opts.resend) {
-      var p = JSON.parse(prev);
-      return {status: 'duplicate', detail: (p.state === 'sent' ? 'this exact file was already emailed at ' : 'a send of this file started at ') +
+    var keyOf = function (f) { return 'sent:' + cfg.mode + ':' + f.sha; };
+    var before = files.filter(function (f) { return ledger.getProperty(keyOf(f)); });
+    var send = opts.resend ? files : files.filter(function (f) { return !ledger.getProperty(keyOf(f)); });
+    if (!send.length) {
+      var p = JSON.parse(ledger.getProperty(keyOf(files[0])));
+      var what = files.length === 1 ? 'this exact file was already emailed at ' : 'all ' + files.length + ' files were already emailed, the first at ';
+      return {status: 'duplicate', detail: (p.state === 'sent' ? what : 'a send of this file started at ') +
               p.at + ' (' + cfg.mode + ' mode); not emailed again'};
     }
     var count = Number(ledger.getProperty(today) || 0);
@@ -155,22 +193,27 @@ function deliver_(name, bytes, opts) {
     }
     var to = recipientsFor_(cfg);
     var at = nowIst_('yyyy-MM-dd HH:mm') + ' IST';
-    // Mark before sending: if the script is killed mid-send, the file is never emailed twice.
-    ledger.setProperty(key, JSON.stringify({state: 'sending', at: at, name: name}));
-    var msg = message_(name, type, cfg.mode, cfg.recipients.length);
+    // Mark before sending: if the script is killed mid-send, the files are never emailed twice.
+    send.forEach(function (f) { ledger.setProperty(keyOf(f), JSON.stringify({state: 'sending', at: at, name: f.name})); });
+    var msg = message_(send, cfg.mode, cfg.recipients.length);
     try {
       MailApp.sendEmail({to: to.join(','), subject: msg.subject, body: msg.body, name: 'Sales reports',
-                         attachments: [Utilities.newBlob(bytes, type.mime, name)]});
+                         attachments: send.map(function (f) { return Utilities.newBlob(f.bytes, f.type.mime, f.name); })});
     } catch (e) {
-      ledger.deleteProperty(key);  // nothing went out, so a later try may send it
+      send.forEach(function (f) { ledger.deleteProperty(keyOf(f)); });  // nothing went out, so a later try may send them
       throw e;
     }
-    ledger.setProperty(key, JSON.stringify({state: 'sent', at: at, name: name, to: to.length, resend: !!opts.resend}));
+    send.forEach(function (f) {
+      ledger.setProperty(keyOf(f), JSON.stringify({state: 'sent', at: at, name: f.name, to: to.length, resend: !!opts.resend}));
+    });
     Object.keys(ledger.getProperties()).forEach(function (k) {
       if (k.indexOf('count:') === 0 && k !== today) ledger.deleteProperty(k);  // only today's count matters
     });
     ledger.setProperty(today, String(count + 1));
-    return {status: 'sent', detail: 'emailed to ' + to.length + ' recipient(s) in ' + cfg.mode + ' mode'};
+    var skipped = opts.resend ? [] : before;
+    return {status: 'sent', detail: (send.length === 1 ? '' : send.length + ' files in one email, ') + 'emailed to ' + to.length +
+            ' recipient(s) in ' + cfg.mode + ' mode' +
+            (skipped.length ? '; left out, already emailed: ' + skipped.map(function (f) { return f.name; }).join(', ') : '')};
   } finally {
     lock.releaseLock();
   }
@@ -182,7 +225,8 @@ function reply_(obj) {
   return ContentService.createTextOutput(JSON.stringify(obj)).setMimeType(ContentService.MimeType.JSON);
 }
 
-/** action "check": what would happen, sends nothing. action "send": email one file. */
+/** action "check": what would happen, sends nothing. action "send": email one file (file_name, content_b64,
+ * sha256) or several in one email (files: a list of those three). */
 function doPost(e) {
   var req;
   try {
@@ -197,13 +241,17 @@ function doPost(e) {
   try {
     if (req.action === 'check') {
       var cfg = readConfig_();
-      return reply_({ok: true, status: cfg.mode === 'off' ? 'off' : 'ready', mode: cfg.mode, recipients: recipientsFor_(cfg).length});
+      return reply_({ok: true, status: cfg.mode === 'off' ? 'off' : 'ready', mode: cfg.mode, recipients: recipientsFor_(cfg).length,
+                     multi: true});
     }
     if (req.action !== 'send') return reply_({ok: false, status: 'bad_request', detail: 'action must be check or send'});
-    var name = String(req.file_name || '');
-    var r = deliver_(name, Utilities.base64Decode(String(req.content_b64 || '')),
-                     {sha256: req.sha256, resend: req.resend === true});
-    console.log('send: ' + name + ' -> ' + r.status + ': ' + r.detail);
+    var list = Array.isArray(req.files) ? req.files : [req];
+    var uploads = list.map(function (f) {
+      f = f && typeof f === 'object' ? f : {};
+      return {name: String(f.file_name || ''), bytes: Utilities.base64Decode(String(f.content_b64 || '')), sha256: f.sha256};
+    });
+    var r = deliver_(uploads, {resend: req.resend === true});
+    console.log('send: ' + uploads.map(function (f) { return f.name; }).join(', ') + ' -> ' + r.status + ': ' + r.detail);
     r.ok = ['sent', 'duplicate', 'off'].indexOf(r.status) >= 0;
     return reply_(r);
   } catch (err) {
