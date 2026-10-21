@@ -28,6 +28,7 @@ function formatDate(date, tz, fmt) {
   return {
     'yyyy-MM-dd': `${y}-${pad(m + 1)}-${pad(day)}`,
     'yyyy-MM-dd HH:mm': `${y}-${pad(m + 1)}-${pad(day)} ${pad(h)}:${pad(min)}`,
+    'd MMM yyyy': `${day} ${MON[m]} ${y}`,
     'd MMM yyyy, h:mm a': `${day} ${MON[m]} ${y}, ${h % 12 || 12}:${pad(min)} ${h < 12 ? 'AM' : 'PM'}`,
   }[fmt];
 }
@@ -77,7 +78,7 @@ const TEST = { ...LIVE, DELIVERY_MODE: 'test' };
 test('nothing is emailed until delivery is switched on', () => {
   const run = load({ ALLOWED_DOMAINS: 'example.in', RECIPIENTS: 'a@example.in', UPLOAD_TOKEN: TOKEN });
   assert.deepEqual([run.send().ok, run.send().status], [true, 'off']);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0 });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0, multi: true });
   assert.equal(run.sent.length, 0);
 });
 
@@ -103,9 +104,9 @@ test('unsafe settings stop delivery with a plain reason', () => {
 });
 
 test('check reports mode and recipient count, and sends nothing', () => {
-  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2 });
+  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true });
   const run = load(TEST);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1 });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1, multi: true });
   assert.equal(run.sent.length, 0);
 });
 
@@ -229,4 +230,69 @@ test('editor helpers: token never replaced, setup check and sent log send nothin
   run.gs.showSentLog();
   assert.equal(run.logs.at(-1), 'Nothing has been emailed yet.');
   assert.equal(run.sent.length, 0);
+});
+
+const many = (names, fields = {}, files = FILES) => names.map((n) => ({
+  file_name: n, content_b64: files[n].toString('base64'), sha256: sha(files[n]), ...fields }));
+const sendMany = (run, names, fields = {}, files = FILES) =>
+  run.post({ token: TOKEN, action: 'send', files: many(names, {}, files), ...fields });
+
+test('a set of files goes out together in one email and counts once', () => {
+  const run = load(LIVE);
+  const r = sendMany(run, Object.keys(FILES));
+  assert.deepEqual([r.ok, r.status], [true, 'sent']);
+  assert.match(r.detail, /^3 files in one email, emailed to 2 recipient/);
+  assert.equal(run.sent.length, 1);
+  assert.deepEqual([...run.sent[0].attachments.map((a) => a.name)], Object.keys(FILES));
+  assert.match(run.sent[0].subject, /^Reports: 3 files, \d+ \w{3} \d{4}$/);
+  assert.match(run.sent[0].body, /These 3 reports are attached:\n- team_calling_report_2026-10-11.pdf \(PDF\)/);
+  assert.equal(Object.entries(run.user.data).filter(([k]) => k.startsWith('count:'))[0][1], '1');
+});
+
+test('files already emailed are left out of a set; a set all sent before is a duplicate unless resent', () => {
+  const run = load(LIVE);
+  run.send(PDF);
+  const r = sendMany(run, Object.keys(FILES));
+  assert.equal(r.status, 'sent');
+  assert.match(r.detail, /left out, already emailed: team_calling_report_2026-10-11.pdf/);
+  assert.deepEqual([...run.sent[1].attachments.map((a) => a.name)], ['call_plan_Elite_2026-10-12.xlsx', 'callers.csv']);
+  const again = sendMany(run, Object.keys(FILES));
+  assert.deepEqual([again.ok, again.status], [true, 'duplicate']);
+  assert.match(again.detail, /all 3 files were already emailed/);
+  assert.equal(sendMany(run, Object.keys(FILES), { resend: true }).status, 'sent');
+  assert.equal(run.sent.at(-1).attachments.length, 3);
+});
+
+test('one bad file, a repeated name, too many files or too many bytes stop the whole set', () => {
+  const run = load(LIVE);
+  const files = { ...FILES, 'fake.pdf': Buffer.from('<html>') };
+  let r = sendMany(run, [PDF, 'fake.pdf'], {}, files);
+  assert.deepEqual([r.status, r.detail], ['rejected', 'fake.pdf: file content does not match its .pdf name; nothing was emailed']);
+  const other = Buffer.from('%PDF-1.7\nanother report');
+  r = run.post({ token: TOKEN, action: 'send', files: [...many([PDF]),
+    { file_name: PDF, content_b64: other.toString('base64'), sha256: sha(other) }] });
+  assert.match(r.detail, /both named team_calling_report_2026-10-11.pdf/);
+  r = run.post({ token: TOKEN, action: 'send', files: Array(11).fill(many([PDF])[0]) });
+  assert.match(r.detail, /more than 10 files/);
+  run.gs.MAX_BYTES = 40;
+  r = sendMany(run, Object.keys(FILES));
+  assert.deepEqual([r.status, r.detail], ['rejected', 'files are over 20 MB, too large to email']);
+  assert.equal(run.sent.length, 0);
+});
+
+test('Word, PowerPoint, old Excel, images and HTML go out with the right type; fakes do not', () => {
+  const run = load(LIVE);
+  const files = {
+    'notes.docx': Buffer.from('PK\u0003\u0004 doc'), 'deck.pptx': Buffer.from('PK\u0003\u0004 deck'),
+    'old.xls': Buffer.from([0xd0, 0xcf, 0x11, 0xe0, 0xa1, 0xb1, 0x1a, 0xe1, 1]), 'chart.png': Buffer.from([0x89, 0x50, 0x4e, 0x47, 13, 10]),
+    'photo.jpg': Buffer.from([0xff, 0xd8, 0xff, 0xe0, 1]), 'page.html': Buffer.from('<!doctype html><p>hi</p>'),
+  };
+  assert.equal(sendMany(run, Object.keys(files), {}, files).status, 'sent');
+  assert.deepEqual([...run.sent[0].attachments.map((a) => a.mime)], [
+    'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+    'application/vnd.openxmlformats-officedocument.presentationml.presentation',
+    'application/vnd.ms-excel', 'image/png', 'image/jpeg', 'text/html']);
+  const fake = { 'chart.png': Buffer.from('%PDF-1.7') };
+  assert.equal(sendMany(run, ['chart.png'], {}, fake).status, 'rejected');
+  assert.equal(run.send('run.exe', {}, FILES[PDF]).status, 'rejected');
 });
