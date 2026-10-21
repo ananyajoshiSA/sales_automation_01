@@ -596,6 +596,35 @@ def test_report_mailer_reports_a_failed_send(report_mailer):
     assert not os.path.exists(er.LAST_SENT)
 
 
+@responses_lib.activate
+def test_report_mailer_sends_to_the_teams_list(report_mailer):
+    import json as _json
+    er, files = report_mailer
+    mailer_answers({"ok": True, "status": "ready", "mode": "live", "recipients": 5, "multi": True, "list": "elite",
+                    "lists": ["deepanshi", "elite"]}, {"ok": True, "status": "sent"})
+    assert mailer.send("Plan", "<p>h</p>", "t", [], files, to_list="elite")
+    check, sent = (_json.loads(c.request.body) for c in responses_lib.calls)
+    assert check["list"] == sent["list"] == "elite"
+
+
+@responses_lib.activate
+def test_report_mailer_without_lists_sends_nothing_for_a_team(report_mailer):
+    er, files = report_mailer
+    mailer_answers({"ok": True, "status": "ready", "mode": "live", "recipients": 2, "multi": True})
+    assert not mailer.send_report_mailer("Plan", files, sleep=lambda s: None, to_list="elite")
+    assert len(responses_lib.calls) == 1 and not os.path.exists(er.LAST_SENT)
+
+
+def test_daily_plan_mails_to_the_elite_list_by_default(monkeypatch):
+    from analytics.daily_plan import __main__ as cli
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_status", lambda a: seen.update(list=a.mail_list))
+    cli.main(["status", "2026-10-21", "--mail", "--no-fetch"])
+    assert seen["list"] == "elite"
+    cli.main(["--mail-list", "deepanshi", "status", "2026-10-21", "--mail", "--no-fetch"])
+    assert seen["list"] == "deepanshi"
+
+
 def test_restaged_students_and_old_payments_are_not_the_days_enrollments():
     from analytics.daily_plan import review
     reads = {"L1": {"status": "already_student"}, "L3": {"status": "paid_new", "paid_on": "2026-09"}, "L5": {"status": "paid_new", "paid_on": "2026-10-09"}}

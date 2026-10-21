@@ -11,12 +11,16 @@ the raw lead data in the repo's data/ folder and hidden files such as .env. With
 set: the newest report and every report finished shortly before it, since this machine's last email and
 within 24 hours. Drafts are never picked. Every file of a set goes in one email.
 
+With --to-list NAME the email goes to the mailer's list LIST_<NAME> (set in the Apps Script settings) instead
+of its default RECIPIENTS; the request names the list, never addresses.
+
 Needs REPORT_EMAIL_URL (the web app's /exec address) and REPORT_EMAIL_TOKEN in the root .env or the
 cloud environment's settings.
 
     PYTHONPATH=. python scripts/email_report.py --list                      # reports it can see; sends nothing
     PYTHONPATH=. python scripts/email_report.py [FILE ...] --check         # what would be sent, to how many; sends nothing
     PYTHONPATH=. python scripts/email_report.py [FILE ...] [--resend]      # email them, together in one email
+    PYTHONPATH=. python scripts/email_report.py [FILE ...] --to-list elite # to the mailer's LIST_ELITE
 """
 
 from __future__ import annotations
@@ -43,6 +47,7 @@ from integrations.timeutil import IST
 REPO = os.path.realpath(os.path.join(os.path.dirname(__file__), ".."))
 PROJECT_REPORTS = "/mnt/project-files/reports"  # team_performance's default output folder
 BLOCKED = os.path.join(REPO, "data")  # raw lead data: never emailed
+LIST_NAME = re.compile(r"^[a-z0-9_]{1,40}$")  # the mailer's own rule for list names
 LAST_SENT = os.path.join(BLOCKED, "email_report", "last_sent.json")  # this machine's last email (the file isn't a report)
 SCRATCH = [os.path.join(t, "claude-*", "*", "*", "scratchpad") for t in dict.fromkeys((tempfile.gettempdir(), "/tmp"))]  # Claude's scratch folders
 SKIP_DIRS = {"data", "node_modules", "__pycache__", "venv", "uploads"}  # plus hidden folders such as .git and .venv
@@ -194,8 +199,8 @@ def call(url: str, body: dict, label: str, session: requests.Session | None = No
     raise ApiError("the mailer did not answer with JSON: check the web app is deployed with access 'Anyone'")
 
 
-def check(url: str, token: str) -> dict:
-    return call(url, {"token": token, "action": "check"}, "mailer check")
+def check(url: str, token: str, to_list: str = "") -> dict:
+    return call(url, {"token": token, "action": "check", **({"list": to_list} if to_list else {})}, "mailer check")
 
 
 def upload(path: str) -> dict:
@@ -204,10 +209,11 @@ def upload(path: str) -> dict:
             "content_b64": base64.b64encode(data).decode("ascii")}
 
 
-def send(paths: list[str], url: str, token: str, resend: bool = False) -> dict:
+def send(paths: list[str], url: str, token: str, resend: bool = False, to_list: str = "") -> dict:
     """One file goes in the original request shape, which every mailer version takes; several go as `files`."""
     files = [upload(p) for p in paths]
-    body = {"token": token, "action": "send", "resend": resend, **(files[0] if len(files) == 1 else {"files": files})}
+    body = {"token": token, "action": "send", "resend": resend, **(files[0] if len(files) == 1 else {"files": files}),
+            **({"list": to_list} if to_list else {})}
     return call(url, body, f"send {len(files)} file(s)")
 
 
@@ -228,8 +234,13 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--list", action="store_true", help="list finished reports, newest first; send nothing")
     ap.add_argument("--check", action="store_true", help="say what would be sent and to how many; send nothing")
     ap.add_argument("--resend", action="store_true", help="email files that were already sent, again")
+    ap.add_argument("--to-list", default="", metavar="NAME", help="send to the mailer's LIST_<NAME> instead of RECIPIENTS")
     a = ap.parse_args(argv)
     now = time.time()
+    to_list = a.to_list.strip().lower()
+    if to_list and not LIST_NAME.match(to_list):
+        print(f"refused: the list name {a.to_list!r} must use only letters, digits and _")
+        return 2
     if a.list:
         reports = finished(now)[:15]
         print("\n".join(describe(p, now) for p in reports) or "No finished reports in " + ", ".join(search_roots()) + ".")
@@ -260,9 +271,13 @@ def main(argv: list[str]) -> int:
         return 2
     try:
         url, token = settings()
-        c = check(url, token)
+        c = check(url, token, to_list)
+        if to_list and c.get("status") in ("ready", "off") and "lists" not in c:
+            print("mailer: outdated - this Apps Script has no recipient lists, so it would email its default RECIPIENTS. "
+                  "Paste the new email_report/Code.gs and deploy a new version (docs/email_report.md). Nothing was sent.")
+            return 2
         if c.get("status") == "ready":
-            print(f"mailer: {c['mode']} mode, {c['recipients']} approved recipient(s)"
+            print(f"mailer: {c['mode']} mode, {c['recipients']} approved recipient(s)" + (f" on list {to_list}" if to_list else "")
                   + (" (only the test address)" if c["mode"] == "test" else ""))
         elif c.get("status") == "off":
             print("mailer: off - DELIVERY_MODE is off in the Apps Script settings, so nothing can be emailed")
@@ -276,7 +291,7 @@ def main(argv: list[str]) -> int:
             return 2
         if a.check:
             return 0
-        r = send(paths, url, token, a.resend)
+        r = send(paths, url, token, a.resend, to_list)
     except ApiError as exc:
         print(f"error: {exc}")
         return 2

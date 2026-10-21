@@ -86,7 +86,8 @@ In **Project Settings**, scroll to **Script Properties**, click **Add script pro
 | `ALLOWED_DOMAINS` | `lawsikho.in` (add others with commas only if a recipient needs them) |
 | `TEST_RECIPIENT` | your own work email |
 | `RECIPIENTS` | the approved addresses, separated by commas |
-| `MAX_SENDS_PER_DAY` | leave out to use 20 |
+| `MAX_SENDS_PER_DAY` | leave out to use 20 (at most 100) |
+| `LIST_<NAME>` | optional named lists, e.g. `LIST_ELITE`: a team's full set of addresses, separated by commas |
 
 You can change these at any time with no redeploy: edit, save, and the next email uses them.
 
@@ -165,10 +166,18 @@ put the same two lines in the project's `.env` file instead.
 To add or remove a recipient, edit `RECIPIENTS` in Script Properties. To stop all email, set
 `DELIVERY_MODE` to `off`.
 
+### Recipient lists per chat
+
+A chat can send to a named list instead of `RECIPIENTS`: "email this report to the deepanshi list" runs
+`scripts/email_report.py ... --to-list deepanshi`, which emails everyone in `LIST_DEEPANSHI` (and only them).
+The request names the list, never addresses; an unknown list, or a mailer older than the list `Code.gs`, sends
+nothing. The Elite daily plan's `--mail` uses `LIST_ELITE` (`--mail-list`, default `elite`). Each list has its
+own sent log, so the same report can go to two lists. In test mode every email still goes only to `TEST_RECIPIENT`.
+
 ## Update the mailer (after `Code.gs` changes)
 
-Sending several files in one email (21 Oct 2026) needs the new `Code.gs`. Until it is deployed, single files
-still go out and a set stops with "mailer: outdated".
+Sending several files in one email and recipient lists (both 21 Oct 2026) need the new `Code.gs`. Until it is
+deployed, single files to `RECIPIENTS` still go out, and a set or a send to a list stops with "mailer: outdated".
 
 1. Open the `Report mailer` project at <https://script.google.com>, open `Code.gs`, select everything and
    delete it, paste the whole text of `email_report/Code.gs` from `main` on GitHub, and save (Ctrl+S).
@@ -187,6 +196,7 @@ still go out and a set stops with "mailer: outdated".
 | no new report / more than 10 files | name the files you want, e.g. "email the calling report" |
 | `mailer: outdated` | the Apps Script is the one-file version; follow "Update the mailer" above |
 | outside `ALLOWED_DOMAINS` | a recipient's domain isn't allowed; fix the address or add the domain |
+| `unknown_list` | the chat named a list that isn't in Script Properties; add `LIST_<NAME>` or fix the name |
 | `limit` | the daily cap is reached; raise `MAX_SENDS_PER_DAY` or wait until tomorrow (IST) |
 | too many times | Google's daily email quota is used up; try again tomorrow. Nothing was marked sent |
 

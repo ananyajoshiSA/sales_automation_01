@@ -45,6 +45,7 @@ PYTHONPATH=. python3 scripts/email_report.py [FILE ...] --check
 | `mailer: outdated ...` | Say the Apps Script takes one file per email until the new `Code.gs` is deployed (`docs/email_report.md`, "Update the mailer"). Offer to send the files one at a time. Stop. |
 | `mailer: off ...` | Say delivery is switched off in the Apps Script settings (`DELIVERY_MODE`). Stop. |
 | `error: REPORT_EMAIL_...` | Say this environment is missing the mailer settings (`docs/email_report.md`, step 7). Never ask for the token in chat. Stop. |
+| `mailer: unknown_list ...` | Say there is no such list in the Apps Script settings (`LIST_<NAME>`). Stop. |
 | `mailer: <mode> mode, N approved recipient(s)` | Go on to step 3. |
 
 ## 3. Send
@@ -57,6 +58,10 @@ PYTHONPATH=. python3 scripts/email_report.py "<path 1>" "<path 2>" ...
 
 Add `--resend` only when the user asked to send it again after being told it was already sent.
 
+Add `--to-list NAME` (to both the preview and the send) only when the user named a recipient list, e.g. "email it
+to the deepanshi list", or this chat was told which list its reports go to. Never guess a list. With no list
+the email goes to the default approved recipients.
+
 ## 4. Tell the user, in two or three lines
 
 - **sent:** the file names, when they finished (IST), and how many approved recipients got the email. If the
@@ -67,8 +72,8 @@ Add `--resend` only when the user asked to send it again after being told it was
 ## Rules
 
 - Send only through `scripts/email_report.py`. Never use Gmail, another email tool, SMTP or `curl`.
-- Never add, change or guess recipients. If the user wants someone else included, tell them to add the
-  address to `RECIPIENTS` in the Apps Script settings.
+- Never add, change or guess recipients or lists. If the user wants someone else included, tell them to add the
+  address to `RECIPIENTS` (or the chat's `LIST_<NAME>`) in the Apps Script settings.
 - Never print, echo or open `REPORT_EMAIL_TOKEN`, `REPORT_EMAIL_URL` or `.env`, and never commit them.
 - Never edit report files or reporting code, and never generate a report just to email it. If there is
   no finished report, say so.

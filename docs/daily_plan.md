@@ -190,8 +190,8 @@ passed its checks, through the first route that is set up:
 
 1. **The project's report mailer** (`REPORT_EMAIL_URL`, `REPORT_EMAIL_TOKEN`): the Apps Script that `/email-report`
    uses (`email_report/Code.gs`, [docs/email_report.md](email_report.md)). It sends the exact files the run built
-   (the PDF and workbook in one email; one email per file on a script older than the multi-file Code.gs) to its own
-   approved recipients, and follows its off/test/live switch, daily cap and sent log. `REPORT_TO` is ignored and the
+   (the PDF and workbook in one email) to its recipient list `LIST_ELITE` (`--mail-list`, default `elite`; a script
+   without lists sends nothing), and follows its off/test/live switch, daily cap and sent log. `REPORT_TO` is ignored and the
    email body is the mailer's own. The run marks the files as sent, so a later `/email-report` in the same chat
    doesn't pick them again. The log line `mail: ... sent via the report mailer (...)` gives the mode and the result.
 2. The older Gmail relay (`docs/mail_relay.gs`, `MAIL_RELAY_URL`, `MAIL_RELAY_KEY`): its own script and recipient list.

@@ -78,7 +78,7 @@ const TEST = { ...LIVE, DELIVERY_MODE: 'test' };
 test('nothing is emailed until delivery is switched on', () => {
   const run = load({ ALLOWED_DOMAINS: 'example.in', RECIPIENTS: 'a@example.in', UPLOAD_TOKEN: TOKEN });
   assert.deepEqual([run.send().ok, run.send().status], [true, 'off']);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0, multi: true });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0, multi: true, list: '', lists: [] });
   assert.equal(run.sent.length, 0);
 });
 
@@ -92,6 +92,8 @@ test('unsafe settings stop delivery with a plain reason', () => {
     [{ ...TEST, TEST_RECIPIENT: '' }, /TEST_RECIPIENT is empty/],
     [{ ...TEST, TEST_RECIPIENT: 'me@other.com' }, /outside ALLOWED_DOMAINS/],
     [{ ...LIVE, MAX_SENDS_PER_DAY: '0' }, /MAX_SENDS_PER_DAY/],
+    [{ ...LIVE, LIST_ELITE: 'lead3@example.in, someone@gmail.com' }, /LIST_ELITE: someone@gmail.com is outside ALLOWED_DOMAINS/],
+    [{ ...LIVE, LIST_ELITE: ' ' }, /LIST_ELITE is empty/],
   ];
   for (const [settings, err] of cases) {
     const run = load(settings);
@@ -104,9 +106,9 @@ test('unsafe settings stop delivery with a plain reason', () => {
 });
 
 test('check reports mode and recipient count, and sends nothing', () => {
-  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true });
+  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, list: '', lists: [] });
   const run = load(TEST);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1, multi: true });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1, multi: true, list: '', lists: [] });
   assert.equal(run.sent.length, 0);
 });
 
@@ -295,4 +297,45 @@ test('Word, PowerPoint, old Excel, images and HTML go out with the right type; f
   const fake = { 'chart.png': Buffer.from('%PDF-1.7') };
   assert.equal(sendMany(run, ['chart.png'], {}, fake).status, 'rejected');
   assert.equal(run.send('run.exe', {}, FILES[PDF]).status, 'rejected');
+});
+
+const LISTS = { ...LIVE, LIST_ELITE: 'lead1@example.in, tl@example.in', LIST_DEEPANSHI: 'lead2@example.in; dk@example.in' };
+
+test('a named list sends to that list only; no list sends to RECIPIENTS', () => {
+  const run = load(LISTS);
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check', list: 'Elite' }),
+    { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, list: 'elite', lists: ['deepanshi', 'elite'] });
+  const r = run.send(PDF, { list: 'elite' });
+  assert.equal(r.status, 'sent');
+  assert.match(r.detail, /list elite/);
+  assert.equal(run.send('callers.csv', { list: 'deepanshi' }).status, 'sent');
+  assert.equal(run.send('call_plan_Elite_2026-10-12.xlsx').status, 'sent');
+  assert.deepEqual(run.sent.map((m) => m.to),
+    ['lead1@example.in,tl@example.in', 'lead2@example.in,dk@example.in', 'lead1@example.in,lead2@example.in']);
+});
+
+test('an unknown or malformed list sends nothing', () => {
+  const run = load(LISTS);
+  const c = run.post({ token: TOKEN, action: 'check', list: 'sana' });
+  assert.deepEqual([c.ok, c.status], [false, 'unknown_list']);
+  assert.match(c.detail, /no LIST_SANA .*deepanshi, elite/);
+  for (const list of ['sana', 'a@b.in', '../x']) {
+    const r = run.send(PDF, { list });
+    assert.deepEqual([r.ok, r.status], [false, 'rejected']);
+  }
+  assert.equal(run.sent.length, 0);
+});
+
+test('each list keeps its own sent log; test mode still emails only the test address', () => {
+  const run = load(LISTS);
+  assert.equal(run.send(PDF, { list: 'elite' }).status, 'sent');
+  assert.equal(run.send(PDF, { list: 'elite' }).status, 'duplicate');
+  assert.equal(run.send(PDF, { list: 'deepanshi' }).status, 'sent');
+  assert.equal(run.send(PDF).status, 'sent');
+  assert.equal(run.sent.length, 3);
+  const t = load({ ...LISTS, DELIVERY_MODE: 'test' });
+  assert.equal(t.send(PDF, { list: 'elite' }).status, 'sent');
+  assert.equal(t.sent[0].to, 'owner@example.in');
+  assert.match(t.sent[0].body, /In live mode it goes to 2 approved recipient/);
+  assert.equal(t.send(PDF, { list: 'sana' }).status, 'rejected');
 });

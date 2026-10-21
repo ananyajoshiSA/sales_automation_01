@@ -2,7 +2,8 @@
 
 Route 0, the project's report mailer (email_report/Code.gs, the one /email-report uses): REPORT_EMAIL_URL and
 REPORT_EMAIL_TOKEN. The Apps Script holds the approved recipients, the off/test/live switch, the daily cap and the
-sent log, so ``to`` is ignored and a file already emailed comes back "duplicate". The report's files go in one email
+sent log, so ``to`` is ignored and a file already emailed comes back "duplicate". ``to_list`` names one of its
+recipient lists (LIST_<NAME> in the Apps Script settings; the daily plan uses ``--mail-list``, default "elite"). The report's files go in one email
 (one per file on a mailer older than the multi-file Code.gs), and the email body is the mailer's own.
 Route 1, the Gmail relay (docs/mail_relay.gs, an Apps Script web app in the sender's Google account; works where SMTP
 ports are blocked, as in the cloud sessions): MAIL_RELAY_URL and MAIL_RELAY_KEY. The relay holds the recipient list,
@@ -65,7 +66,7 @@ def report_mailer_configured() -> bool:
     return bool(os.environ.get("REPORT_EMAIL_URL") and os.environ.get("REPORT_EMAIL_TOKEN"))
 
 
-def send_report_mailer(subject: str, attachments=(), sleep=time.sleep) -> bool:
+def send_report_mailer(subject: str, attachments=(), sleep=time.sleep, to_list: str = "") -> bool:
     """Hand the report's files to the project's report mailer, the way /email-report does, and mark them as this
     machine's last email so a later /email-report doesn't pick them again."""
     from scripts import email_report as er
@@ -84,12 +85,16 @@ def send_report_mailer(subject: str, attachments=(), sleep=time.sleep) -> bool:
         return False
     try:
         url, token = er.settings()
-        c = er.check(url, token)
+        c = er.check(url, token, to_list)
+        if to_list and c.get("status") == "ready" and "lists" not in c:  # an older script would email its default list
+            print(f"mail: '{subject}' NOT sent, the mailer has no recipient lists yet: deploy the new email_report/Code.gs",
+                  file=sys.stderr)
+            return False
         if c.get("status") != "ready":
             print(f"mail: '{subject}' NOT sent, mailer {c.get('status')}: {c.get('detail', '')}".rstrip(": "), file=sys.stderr)
             return False
         groups = [paths] if c.get("multi") or len(paths) == 1 else [[p] for p in paths]
-        results = [er.send(g, url, token).get("status") for g in groups]
+        results = [er.send(g, url, token, to_list=to_list).get("status") for g in groups]
     except ApiError as exc:
         print(f"mail: '{subject}' NOT sent, error: {exc}", file=sys.stderr)
         return False
@@ -97,13 +102,15 @@ def send_report_mailer(subject: str, attachments=(), sleep=time.sleep) -> bool:
     if ok:
         er.remember(paths, now)
     print(f"mail: '{subject}' {'sent via the report mailer' if ok else 'NOT all sent'} ({c['mode']} mode, "
-          f"{c['recipients']} recipient(s), {len(groups)} email(s): {', '.join(map(str, results))})", file=sys.stderr)
+          f"{c['recipients']} recipient(s){f' on list {to_list}' if to_list else ''}, {len(groups)} email(s): "
+          f"{', '.join(map(str, results))})", file=sys.stderr)
     return ok
 
 
-def send(subject: str, html: str, text: str, to: list[str], attachments=(), smtp_factory=smtplib.SMTP, post=requests.post) -> bool:
-    if report_mailer_configured():  # the mailer keeps its own recipient list, switch and sent log
-        return send_report_mailer(subject, attachments)
+def send(subject: str, html: str, text: str, to: list[str], attachments=(), smtp_factory=smtplib.SMTP, post=requests.post,
+         to_list: str = "") -> bool:
+    if report_mailer_configured():  # the mailer keeps its own recipient lists, switch and sent log
+        return send_report_mailer(subject, attachments, to_list=to_list)
     if relay_configured():  # the relay keeps its own recipient list, so an empty ``to`` is fine
         return send_relay(subject, html, text, to, attachments, post)
     if not to:
