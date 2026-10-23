@@ -181,14 +181,17 @@ the day start sooner (speed to lead, calling the right leads first). We will see
 first dials of the day come.
 
 After a **live** email to a list, the mailer also sends the same new files on WhatsApp to that list's numbers,
-using the approved WATI template `daily_report_pdf`: one message per file per number, so a plan PDF and its
-workbook arrive as two messages. Nothing changes in the chats, the scheduled jobs or the Python code: whatever
+using the approved WATI template `daily_report_pdf`: one message per PDF per number. A template's document must
+be a PDF (WATI delivers anything else as a broken "Document.pdf"), so the workbook comes as a view link inside its
+PDF's message: "the Call plan Sat 24 Oct (PDF; Excel: https://drive.google.com/file/d/…/view) for Elite team …".
+Tapping it opens the real .xlsx in Drive's viewer or the Sheets app. A set with no PDF goes by email only. Nothing changes in the chats, the scheduled jobs or the Python code: whatever
 emails a list also WhatsApps it. A file already emailed is never sent again on WhatsApp either. Email is never
 held up by WhatsApp: a WhatsApp problem only adds a "WhatsApp: not sent ..." line to the result.
 
 Each file is kept for good in the Drive folder **Sales reports / <team> / <date>**, which only people at your
-company can open (on a personal Google account it stays private to you). WATI collects the file through a link
-that is closed again after 3 days; people keep the file itself in their WhatsApp chat.
+company can open (on a personal Google account it stays private to you). Each file's link opens to anyone who has
+it and is closed again after 3 days: people keep the PDF itself in their WhatsApp chat, and after 3 days the
+workbook link stops working (the workbook is still in the email).
 
 | Property | Value |
 |---|---|
@@ -202,13 +205,13 @@ that is closed again after 3 days; people keep the file itself in their WhatsApp
 | `WA_MAX_PER_DAY` | leave out to use 200 messages a day (at most 1000) |
 
 WATI numbers the template's variables. The mailer fills `{{1}}` (header document link), `{{2}}` (report, from
-the file name, e.g. "Status at 13:50 (PDF)"), `{{3}}` (team, "Elite team") and `{{4}}` (the dates in the file name,
+the file name, e.g. "Status at 13:50 (PDF)", plus any workbook link), `{{3}}` (team, "Elite team") and `{{4}}` (the dates in the file name,
 else the day it is sent, IST). The message greets "Hello team". Any new team or report works with the same template: add its `WA_LIST_<NAME>`.
 
 To switch it on: paste the new `Code.gs` **and** `appsscript.json` (it adds Drive, outside requests and a
 clean-up timer), deploy a new version and allow the new permissions. Run `checkWhatsApp`: it checks the key and
 client ID with WATI and says whether the template is APPROVED, sending nothing. Run `sendWhatsAppTest`: one
-sample PDF with no lead data goes to `WA_TEST_NUMBER`. When it arrives, set `WHATSAPP_MODE` to `live`.
+sample PDF with no lead data goes to `WA_TEST_NUMBER`, with a sample sheet as a view link in its text. When it arrives, set `WHATSAPP_MODE` to `live`.
 `showSentLog` lists WhatsApp sends too. To stop WhatsApp at once, set `WHATSAPP_MODE` to `off`.
 
 ## Update the mailer (after `Code.gs` changes)

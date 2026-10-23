@@ -126,7 +126,7 @@ function load(settings = {}, { mailFails = 0, driveOpts = {}, watiOpts = {} } = 
       computeDigest: (_, bytes) => signed(createHash('sha256').update(unsigned(bytes)).digest()),
       base64Decode: (s) => signed(Buffer.from(s, 'base64')),
       newBlob: (bytes, mime, name) => (typeof bytes === 'string'
-        ? { getAs: () => ({ getBytes: () => signed(Buffer.from(`%PDF-1.4\n${bytes}`)) }) }
+        ? { getAs: () => ({ getBytes: () => signed(Buffer.from(`%PDF-1.4\n${bytes}`)) }), getBytes: () => signed(Buffer.from(bytes)) }
         : { bytes: unsigned(bytes), mime, name }),
     },
     DriveApp: dr.api,
@@ -435,36 +435,56 @@ test('WhatsApp is off until WHATSAPP_MODE is live: email goes out as before, not
   assert.equal(run.post({ token: TOKEN, action: 'check', list: 'elite' }).whatsapp, undefined);
 });
 
-test('a live email to a list also sends each new file on WhatsApp to that list, one message per file per number', () => {
+test('a live email to a list also sends each new PDF on WhatsApp to that list, one message per file per number', () => {
   const run = load(WA);
   const r = sendMany(run, Object.keys(PLAN), { list: 'elite' }, PLAN);
   assert.equal(r.status, 'sent');
-  assert.match(r.detail, /; WhatsApp: 4 of 4 messages sent \(2 file\(s\) to 2 number\(s\)\)$/);
+  assert.match(r.detail, /; WhatsApp: 2 of 2 messages sent \(1 file\(s\) to 2 number\(s\), with 1 other file\(s\) as view links\)$/);
   assert.equal(run.sent.length, 1);
-  assert.equal(run.wati.length, 4);
+  assert.equal(run.sent[0].attachments.length, 2);
+  assert.equal(run.wati.length, 2);
   const c = run.wati[0];
   assert.equal(c.url, 'https://live-mt-server.wati.io/123456/api/v1/sendTemplateMessage?whatsappNumber=919800000001');
   assert.deepEqual([c.method, c.contentType, c.headers.Authorization], ['post', 'application/json', 'Bearer wati-secret-key']);
   assert.equal(c.body.template_name, 'daily_report_pdf');
   assert.equal(c.body.channel_number, undefined);
   const params = Object.fromEntries(c.body.parameters.map((p) => [p.name, p.value]));
-  const [pdf] = files(run);
+  const [xlsx, pdf] = files(run);
+  // the PDF is the attachment; the workbook, which WhatsApp would deliver as a broken Document.pdf, is a view link in its text
   assert.deepEqual(params, { 1: `https://drive.google.com/uc?export=download&id=${pdf.id}`,
-    2: 'Call plan Fri 23 Oct (PDF)', 3: 'Elite team', 4: params[4] });
+    2: `Call plan Fri 23 Oct (PDF; Excel: https://drive.google.com/file/d/${xlsx.id}/view)`, 3: 'Elite team', 4: params[4] });
   assert.match(params[4], /^\d{1,2} \w{3} \d{4}$/);
+  assert.doesNotMatch(params[2], /[\n\t]| {4}/);  // Meta refuses a variable with a new line, a tab or 4 spaces in a row
   assert.match(run.wati[1].url, /whatsappNumber=919800000002$/);
-  assert.equal(Object.fromEntries(run.wati[2].body.parameters.map((p) => [p.name, p.value]))[2], 'Call plan Fri 23 Oct (Excel)');
-  // kept in Sales reports/<team>/<day>, link open for WATI to collect, a timer set to close it
+  assert.deepEqual(run.wati[1].body.parameters, c.body.parameters);
+  // both kept in Sales reports/<team>/<day>, links open to anyone who has them, a timer set to close them
   assert.match(pdf.parent.path(), /^Sales reports\/Elite team\/\d{4}-\d\d-\d\d$/);
-  assert.deepEqual(files(run).map((f) => [f.name, f.sharing]), [['Elite_call_plan_Fri_23_Oct.pdf', 'anyone'], ['Elite_call_plan_Fri_23_Oct.xlsx', 'anyone']]);
+  assert.equal(xlsx.parent, pdf.parent);
+  assert.deepEqual(files(run).map((f) => [f.name, f.sharing]), [['Elite_call_plan_Fri_23_Oct.xlsx', 'anyone'], ['Elite_call_plan_Fri_23_Oct.pdf', 'anyone']]);
+  assert.deepEqual(Object.keys(run.user.getProperties()).filter((k) => k.startsWith('walink:')).sort(), [`walink:${xlsx.id}`, `walink:${pdf.id}`].sort());
   assert.deepEqual(run.triggers, ['closeExpiredLinks']);
   // a repeat is a duplicate email and no WhatsApp; the next report reuses the same folders and timer
   assert.equal(sendMany(run, Object.keys(PLAN), { list: 'elite' }, PLAN).status, 'duplicate');
-  assert.equal(run.wati.length, 4);
+  assert.equal(run.wati.length, 2);
   run.send(PDF, { list: 'elite' });
-  assert.equal(run.wati.length, 6);
+  assert.equal(run.wati.length, 4);
+  assert.equal(Object.fromEntries(run.wati[3].body.parameters.map((p) => [p.name, p.value]))[2], 'Team calling report (PDF)');
   assert.equal(Object.values(run.drive).filter((x) => x.kind === 'folder').length, 3);
   assert.deepEqual(run.triggers, ['closeExpiredLinks']);
+});
+
+test('a workbook rides with the PDF of the same name, else the first PDF; with no PDF it goes by email only', () => {
+  const set = { 'Elite_status_1350.pdf': Buffer.from('%PDF-1.7\nstatus'), ...PLAN, 'callers.csv': Buffer.from('a,b\n1,2\n') };
+  const run = load(WA);
+  assert.match(sendMany(run, Object.keys(set), { list: 'elite' }, set).detail, /4 of 4 messages sent \(2 file\(s\) to 2 number\(s\), with 2 other file\(s\) as view links\)$/);
+  const text = run.wati.map((c) => Object.fromEntries(c.body.parameters.map((p) => [p.name, p.value]))[2]);
+  assert.match(text[0], /^Status at 13:50 \(PDF; CSV: https:\/\/drive\.google\.com\/file\/d\/[^/]+\/view\)$/);
+  assert.match(text[2], /^Call plan Fri 23 Oct \(PDF; Excel: https:\/\/drive\.google\.com\/file\/d\/[^/]+\/view\)$/);
+  const alone = load(WA);
+  const r = sendMany(alone, ['Elite_call_plan_Fri_23_Oct.xlsx'], { list: 'elite' }, PLAN);
+  assert.equal(r.status, 'sent');
+  assert.match(r.detail, /; WhatsApp: not sent: a WhatsApp template carries a PDF, and these go by email only: Elite_call_plan_Fri_23_Oct\.xlsx$/);
+  assert.deepEqual([alone.wati.length, files(alone).length], [0, 0]);
 });
 
 test('WhatsApp goes only with live emails to a list that has a WA list', () => {
@@ -532,7 +552,7 @@ test('the WhatsApp daily cap holds back a set that would pass it', () => {
   assert.match(run.send(PDF, { list: 'elite' }).detail, /2 of 2 messages sent/);
   const r = sendMany(run, Object.keys(PLAN), { list: 'elite' }, PLAN);
   assert.equal(r.status, 'sent');
-  assert.match(r.detail, /WhatsApp: not sent: 4 more messages would pass WA_MAX_PER_DAY \(3\)/);
+  assert.match(r.detail, /WhatsApp: not sent: 2 more messages would pass WA_MAX_PER_DAY \(3\)$/);
   assert.equal(run.wati.length, 2);
 });
 
@@ -588,8 +608,8 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   const sends = run.wati.filter((c) => c.body);
   assert.equal(sends.length, 1);
   assert.match(sends[0].url, /whatsappNumber=919811111111$/);
-  assert.match(Object.fromEntries(sends[0].body.parameters.map((p) => [p.name, p.value]))[2], /^WhatsApp test \(PDF\)$/);
-  assert.match(run.logs.at(-1), /WhatsApp test: 1 of 1 messages sent/);
+  assert.match(Object.fromEntries(sends[0].body.parameters.map((p) => [p.name, p.value]))[2], /^WhatsApp test \(PDF; CSV: https:\/\/drive\.google\.com\/file\/d\/[^/]+\/view\)$/);
+  assert.match(run.logs.at(-1), /WhatsApp test: 1 of 1 messages sent \(1 file\(s\) to 1 number\(s\), with 1 other file\(s\) as view links\)/);
   assert.equal(run.sent.length, 0);
   assert.throws(() => load(WA).gs.sendWhatsAppTest(), /WA_TEST_NUMBER is empty/);
   run.gs.showSentLog();
