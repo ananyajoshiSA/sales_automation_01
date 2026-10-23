@@ -45,7 +45,7 @@ function store(init = {}) {
 }
 
 // Fake Drive: folders and files with their link sharing, so the tests see what would be opened and closed.
-function drive({ domainFails = false, createFails = false, linkFails = false } = {}) {
+function drive({ domainFails = false, createFails = false, linkFails = false, closeFails = false } = {}) {
   const items = {};
   let n = 0;
   const access = { ANYONE_WITH_LINK: 'anyone', DOMAIN: 'domain', PRIVATE: 'private' };
@@ -55,6 +55,7 @@ function drive({ domainFails = false, createFails = false, linkFails = false } =
       setSharing(a) {
         if (a === 'domain' && domainFails) throw new Error('Invalid argument: domain');
         if (a === 'anyone' && linkFails) throw new Error('Access denied: DriveApp.');
+        if (a !== 'anyone' && it.kind === 'file' && closeFails) throw new Error('Access denied: DriveApp.');
         it.sharing = a;
       } };
     items[id] = it;
@@ -83,7 +84,8 @@ function drive({ domainFails = false, createFails = false, linkFails = false } =
 }
 
 // Fake WATI: answers each message with result true unless the number is in fail; records every request.
-function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_report_pdf', status: 'APPROVED' }], zeroBased = false } = {}) {
+function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_report_pdf', status: 'APPROVED' }], zeroBased = false,
+                driveApiStatus = 200 } = {}, driveItems = {}) {
   const calls = [];
   const answer = (code, body) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(body) });
   return {
@@ -95,6 +97,13 @@ function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_repo
         return fail.includes(num) ? answer(200, { result: false, info: 'Invalid WhatsApp number' }) : answer(status, { result: status === 200 });
       }),
       fetch: (url, opts) => {
+        const api = /^https:\/\/www\.googleapis\.com\/drive\/v3\/files\/([^/]+)\/permissions(\/anyoneWithLink)?\?/.exec(url);
+        if (api) {  // Drive's sharing API: works even where DriveApp's setSharing is refused
+          calls.push({ url, drive: true, ...opts });
+          if (driveApiStatus !== 200) return answer(driveApiStatus, { error: { message: 'Forbidden' } });
+          driveItems[api[1]].sharing = api[2] ? 'private' : 'anyone';
+          return api[2] ? answer(204, {}) : answer(200, { id: 'anyoneWithLink', type: 'anyone' });
+        }
         calls.push({ url, ...opts });
         const n = Number(new URL(url).searchParams.get('pageNumber'));
         const page = zeroBased ? n + 1 : Math.max(1, n);
@@ -106,7 +115,7 @@ function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_repo
 
 function load(settings = {}, { mailFails = 0, driveOpts = {}, watiOpts = {} } = {}) {
   const sent = [], logs = [], triggers = [];
-  const dr = drive(driveOpts), wa = wati(watiOpts);
+  const dr = drive(driveOpts), wa = wati(watiOpts, dr.items);
   const script = store(settings), user = store();
   const ctx = {
     console: { log: (s) => logs.push(s), error: (s) => logs.push(s) },
@@ -123,6 +132,7 @@ function load(settings = {}, { mailFails = 0, driveOpts = {}, watiOpts = {} } = 
     DriveApp: dr.api,
     UrlFetchApp: wa.api,
     ScriptApp: {
+      getOAuthToken: () => 'oauth-token',
       getProjectTriggers: () => triggers.map((h) => ({ getHandlerFunction: () => h })),
       newTrigger: (h) => ({ timeBased: () => ({ everyHours: () => ({ create: () => triggers.push(h) }) }) }),
     },
@@ -511,9 +521,10 @@ test('a number WATI refuses is reported; the others still get the file', () => {
   const full = load(WA, { driveOpts: { createFails: true } });
   assert.match(full.send(PDF, { list: 'elite' }).detail, /0 of 2 messages sent.*\(Drive, saving to Drive: Drive is full\)/);
   assert.equal(full.wati.length, 0);
-  const closed = load(WA, { driveOpts: { linkFails: true } });
-  assert.match(closed.send(PDF, { list: 'elite' }).detail, /\(Drive, opening its link \(your Google Workspace may block sharing outside the company\): Access denied: DriveApp\.\)/);
-  assert.equal(closed.wati.length, 0);
+  const closed = load(WA, { driveOpts: { linkFails: true }, watiOpts: { driveApiStatus: 403 } });
+  assert.match(closed.send(PDF, { list: 'elite' }).detail,
+    /\(Drive, opening its link \(your Google Workspace may block sharing outside the company\): Access denied: DriveApp\.; Drive API answered HTTP 403/);
+  assert.equal(closed.wati.filter((c) => !c.drive).length, 0);
 });
 
 test('the WhatsApp daily cap holds back a set that would pass it', () => {
@@ -583,4 +594,19 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   assert.throws(() => load(WA).gs.sendWhatsAppTest(), /WA_TEST_NUMBER is empty/);
   run.gs.showSentLog();
   assert.match(run.logs.at(-1), /whatsapp test {2}WhatsApp_test_\d{4}-\d\d-\d\d\.pdf {2}to 1 number/);
+});
+
+test("where DriveApp may not share by link, Drive's own API opens and later closes the link", () => {
+  const run = load(WA, { driveOpts: { linkFails: true, closeFails: true } });
+  assert.match(run.send(PDF, { list: 'elite' }).detail, /WhatsApp: 2 of 2 messages sent/);
+  const [f] = files(run);
+  assert.equal(f.sharing, 'anyone');
+  const open = run.wati.find((c) => c.drive);
+  assert.deepEqual([open.url, open.method, open.headers.Authorization, JSON.parse(open.payload)],
+    [`https://www.googleapis.com/drive/v3/files/${f.id}/permissions?supportsAllDrives=true`, 'post', 'Bearer oauth-token',
+     { type: 'anyone', role: 'reader', allowFileDiscovery: false }]);
+  run.user.setProperty(`walink:${f.id}`, '0');
+  assert.equal(run.gs.closeExpiredLinks(), 1);
+  assert.equal(f.sharing, 'private');
+  assert.equal(run.wati.filter((c) => c.drive).at(-1).method, 'delete');
 });

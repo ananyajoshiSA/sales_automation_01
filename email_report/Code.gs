@@ -382,6 +382,39 @@ function archiveFolder_(team, day) {
   return sub(sub(root, team), day);
 }
 
+/** Drive's own API, for sharing changes DriveApp is refused on some Workspace accounts ("Access denied: DriveApp"). */
+function driveApi_(method, path, body) {
+  var opts = {method: method, headers: {Authorization: 'Bearer ' + ScriptApp.getOAuthToken()}, muteHttpExceptions: true};
+  if (body) {
+    opts.contentType = 'application/json';
+    opts.payload = JSON.stringify(body);
+  }
+  var r = UrlFetchApp.fetch('https://www.googleapis.com/drive/v3/files/' + path, opts);
+  return {code: r.getResponseCode(), text: r.getContentText()};
+}
+
+/** Lets anyone with the link download the file, for WATI to collect it. */
+function openLink_(file) {
+  try {
+    file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+    return;
+  } catch (e) {
+    var r = driveApi_('post', file.getId() + '/permissions?supportsAllDrives=true', {type: 'anyone', role: 'reader', allowFileDiscovery: false});
+    if (r.code !== 200) throw new Error((e && e.message || e) + '; Drive API answered HTTP ' + r.code + ': ' + r.text.slice(0, 160));
+  }
+}
+
+/** Takes the anyone-with-the-link access off again. */
+function closeLink_(id, closed) {
+  try {
+    DriveApp.getFileById(id).setSharing(closed, DriveApp.Permission.VIEW);
+    return;
+  } catch (e) {
+    var r = driveApi_('delete', id + '/permissions/anyoneWithLink?supportsAllDrives=true');
+    if (r.code !== 204 && r.code !== 200 && r.code !== 404) throw new Error((e && e.message || e) + '; Drive API answered HTTP ' + r.code);
+  }
+}
+
 /** Closes every WhatsApp link opened more than WA_LINK_DAYS ago. The files stay in the archive. */
 function closeExpiredLinks() {
   var store = PropertiesService.getUserProperties();
@@ -392,7 +425,7 @@ function closeExpiredLinks() {
   Object.keys(all).forEach(function (k) {
     if (k.indexOf('walink:') !== 0 || Number(all[k]) > cutoff) return;
     try {
-      DriveApp.getFileById(k.slice(7)).setSharing(closed, DriveApp.Permission.VIEW);
+      closeLink_(k.slice(7), closed);
     } catch (e) {
       console.error('could not close link ' + k.slice(7) + ': ' + e);
       return;  // tried again next time
@@ -451,7 +484,7 @@ function whatsappSend_(w, files, people, listName) {
     try {
       file = archiveFolder_(labels.team, nowIst_('yyyy-MM-dd')).createFile(Utilities.newBlob(f.bytes, f.type.mime, f.name));
       step = 'opening its link (your Google Workspace may block sharing outside the company)';
-      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      openLink_(file);
       store.setProperty('walink:' + file.getId(), String(new Date().getTime()));
       link = 'https://drive.google.com/uc?export=download&id=' + file.getId();
     } catch (e) {
