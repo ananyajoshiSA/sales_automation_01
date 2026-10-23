@@ -195,15 +195,15 @@ that is closed again after 3 days; people keep the file itself in their WhatsApp
 | `WHATSAPP_MODE` | `off` (default) or `live` |
 | `WATI_TOKEN` | the WATI API key (WATI → Connector → API) |
 | `WATI_CLIENT_ID` | the WATI client (tenant) ID |
-| `WA_LIST_<NAME>` | numbers for the matching `LIST_<NAME>`, comma-separated, with country code: `9198xxxxxxxx` or `Yash:9198xxxxxxxx` (the name goes in the greeting; without one it says "Hello team") |
+| `WA_LIST_<NAME>` | numbers for the matching `LIST_<NAME>`, comma-separated, with country code: `9198xxxxxxxx` |
 | `WA_TEST_NUMBER` | your own number, the only one `sendWhatsAppTest` messages |
 | `WATI_TEMPLATE` | leave out to use `daily_report_pdf` |
 | `WATI_CHANNEL_NUMBER` | leave out unless WATI asks for the sender number |
 | `WA_MAX_PER_DAY` | leave out to use 200 messages a day (at most 1000) |
 
-WATI numbers the template's variables. The mailer fills `{{1}}` (header document link), `{{2}}` (name),
-`{{3}}` (report, from the file name, e.g. "Status at 13:50 (PDF)"), `{{4}}` (team, "Elite team") and `{{5}}` (the
-dates in the file name, else the day it is sent, IST). Any new team or report works with the same template: add its `WA_LIST_<NAME>`.
+WATI numbers the template's variables. The mailer fills `{{1}}` (header document link), `{{2}}` (report, from
+the file name, e.g. "Status at 13:50 (PDF)"), `{{3}}` (team, "Elite team") and `{{4}}` (the dates in the file name,
+else the day it is sent, IST). The message greets "Hello team". Any new team or report works with the same template: add its `WA_LIST_<NAME>`.
 
 To switch it on: paste the new `Code.gs` **and** `appsscript.json` (it adds Drive, outside requests and a
 clean-up timer), deploy a new version and allow the new permissions. Run `checkWhatsApp`: it checks the key and

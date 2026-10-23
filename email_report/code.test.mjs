@@ -403,7 +403,7 @@ test('each list keeps its own sent log; test mode still emails only the test add
 // ------------------------------------------------------------------ WhatsApp (WATI)
 
 const WA = { ...LISTS, WHATSAPP_MODE: 'live', WATI_TOKEN: 'wati-secret-key', WATI_CLIENT_ID: '123456',
-             WA_LIST_ELITE: 'Yash:919800000001, +919800000002' };
+             WA_LIST_ELITE: '919800000001, +919800000002' };
 const PLAN = { 'Elite_call_plan_Fri_23_Oct.pdf': Buffer.from('%PDF-1.7\nplan'), 'Elite_call_plan_Fri_23_Oct.xlsx': Buffer.from('PK\u0003\u0004 plan') };
 const files = (run) => Object.values(run.drive).filter((x) => x.kind === 'file');
 
@@ -430,11 +430,11 @@ test('a live email to a list also sends each new file on WhatsApp to that list, 
   assert.equal(c.body.channel_number, undefined);
   const params = Object.fromEntries(c.body.parameters.map((p) => [p.name, p.value]));
   const [pdf] = files(run);
-  assert.deepEqual(params, { 1: `https://drive.google.com/uc?export=download&id=${pdf.id}`, 2: 'Yash',
-    3: 'Call plan Fri 23 Oct (PDF)', 4: 'Elite team', 5: params[5] });
-  assert.match(params[5], /^\d{1,2} \w{3} \d{4}$/);
-  assert.equal(Object.fromEntries(run.wati[1].body.parameters.map((p) => [p.name, p.value]))[2], 'team');
-  assert.equal(Object.fromEntries(run.wati[2].body.parameters.map((p) => [p.name, p.value]))[3], 'Call plan Fri 23 Oct (Excel)');
+  assert.deepEqual(params, { 1: `https://drive.google.com/uc?export=download&id=${pdf.id}`,
+    2: 'Call plan Fri 23 Oct (PDF)', 3: 'Elite team', 4: params[4] });
+  assert.match(params[4], /^\d{1,2} \w{3} \d{4}$/);
+  assert.match(run.wati[1].url, /whatsappNumber=919800000002$/);
+  assert.equal(Object.fromEntries(run.wati[2].body.parameters.map((p) => [p.name, p.value]))[2], 'Call plan Fri 23 Oct (Excel)');
   // kept in Sales reports/<team>/<day>, link open for WATI to collect, a timer set to close it
   assert.match(pdf.parent.path(), /^Sales reports\/Elite team\/\d{4}-\d\d-\d\d$/);
   assert.deepEqual(files(run).map((f) => [f.name, f.sharing]), [['Elite_call_plan_Fri_23_Oct.pdf', 'anyone'], ['Elite_call_plan_Fri_23_Oct.xlsx', 'anyone']]);
@@ -476,7 +476,8 @@ test('bad WhatsApp settings never stop the email; they say why WhatsApp was not 
     [{ WATI_TOKEN: '' }, /WATI_TOKEN is empty/],
     [{ WATI_CLIENT_ID: 'a/b' }, /WATI_CLIENT_ID/],
     [{ WA_LIST_ELITE: '98000 00001' }, /WA_LIST_ELITE: "98000" is not a number/],
-    [{ WA_LIST_ELITE: 'Yash Jain:919800000001' }, /not a number with country code/],
+    [{ WA_LIST_ELITE: 'Yash:919800000001' }, /not a number with country code/],
+    [{ WA_LIST_ELITE: '9800000001' }, /not a number with country code/],
     [{ WA_LIST_SANA: ' ' }, /WA_LIST_SANA is empty/],
     [{ WHATSAPP_MODE: 'on' }, null],
   ];
@@ -538,7 +539,7 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   run.gs.checkWhatsApp();
   const log = run.logs.at(-1);
   assert.match(log, /WhatsApp: LIVE/);
-  assert.match(log, /WA list elite \(2\): Yash \.\.\.0001, team \.\.\.0002/);
+  assert.match(log, /WA list elite \(2\): \.\.\.0001, \.\.\.0002/);
   assert.match(log, /WATI key and client ID work\. Template daily_report_pdf: APPROVED/);
   assert.doesNotMatch(log, /wati-secret-key|919800000001/);
   assert.equal(run.wati[0].url, 'https://live-mt-server.wati.io/123456/api/v1/getMessageTemplates?pageSize=100&pageNumber=1');
@@ -554,7 +555,7 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   const sends = run.wati.filter((c) => c.body);
   assert.equal(sends.length, 1);
   assert.match(sends[0].url, /whatsappNumber=919811111111$/);
-  assert.match(Object.fromEntries(sends[0].body.parameters.map((p) => [p.name, p.value]))[3], /^WhatsApp test \(PDF\)$/);
+  assert.match(Object.fromEntries(sends[0].body.parameters.map((p) => [p.name, p.value]))[2], /^WhatsApp test \(PDF\)$/);
   assert.match(run.logs.at(-1), /WhatsApp test: 1 of 1 messages sent/);
   assert.equal(run.sent.length, 0);
   assert.throws(() => load(WA).gs.sendWhatsAppTest(), /WA_TEST_NUMBER is empty/);

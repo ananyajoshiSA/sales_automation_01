@@ -17,10 +17,10 @@
  *
  * WhatsApp (WATI), optional, off until WHATSAPP_MODE is live. After a live email to list NAME, the same new files also
  * go on WhatsApp to WA_LIST_NAME, one message per file per number, using the approved WATI template, whose header
- * document link is {{1}} and body {{2}} name, {{3}} report, {{4}} team, {{5}} date(s):
+ * document link is {{1}} and body {{2}} report, {{3}} team, {{4}} date(s):
  *   WHATSAPP_MODE      off (default) | live
  *   WATI_TOKEN         the WATI API key;  WATI_CLIENT_ID  the WATI client (tenant) ID
- *   WA_LIST_<NAME>     comma-separated numbers with country code, e.g. 9198xxxxxxxx or Yash:9198xxxxxxxx
+ *   WA_LIST_<NAME>     comma-separated numbers with country code, e.g. 9198xxxxxxxx
  *   WA_TEST_NUMBER     one number, the only one sendWhatsAppTest() messages
  *   WATI_TEMPLATE      optional, default daily_report_pdf;  WATI_CHANNEL_NUMBER  optional sender number
  *   WA_MAX_PER_DAY     optional, default 200 messages a day
@@ -280,7 +280,6 @@ function deliver_(uploads, opts) {
 
 var WA_LIST_KEY = /^WA_LIST_([A-Z0-9_]{1,40})$/;
 var WA_NUMBER = /^[1-9][0-9]{10,14}$/;
-var WA_PERSON = /^[A-Za-z][A-Za-z.'-]{0,30}$/;
 var WA_TENANT = /^[A-Za-z0-9_-]{1,64}$/;
 var WA_TEMPLATE = /^[a-z0-9_]{1,512}$/;
 var WA_LINK_DAYS = 3;
@@ -288,11 +287,10 @@ var WA_HOST = 'https://live-mt-server.wati.io';
 var ARCHIVE = 'Sales reports';
 var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
 
-/** "Yash:919812345678" or "919812345678" (a leading + is fine); null when it is not one of those. */
+/** "919812345678" (a leading + is fine); null when it is not a number with country code. */
 function waEntry_(raw) {
-  var m = /^(?:([^:]+):)?\+?([0-9]+)$/.exec(String(raw).trim());
-  if (!m || !WA_NUMBER.test(m[2]) || (m[1] && !WA_PERSON.test(m[1].trim()))) return null;
-  return {name: m[1] ? m[1].trim() : 'team', number: m[2]};
+  var n = String(raw).trim().replace(/^\+/, '');
+  return WA_NUMBER.test(n) ? {number: n} : null;
 }
 
 /** WhatsApp settings. Never throws: anything wrong comes back as problem, so email is never held up by WhatsApp. */
@@ -309,7 +307,7 @@ function readWhatsApp_() {
     var entries = list_(p[k]);
     var parsed = entries.map(waEntry_);
     var bad = entries.filter(function (e, i) { return !parsed[i]; });
-    if (bad.length) problems.push(k + ': "' + bad[0] + '" is not a number with country code, e.g. 9198xxxxxxxx or Yash:9198xxxxxxxx');
+    if (bad.length) problems.push(k + ': "' + bad[0] + '" is not a number with country code, e.g. 9198xxxxxxxx');
     else if (!parsed.length) problems.push(k + ' is empty: add its numbers or delete it');
     else if (parsed.length > MAX_RECIPIENTS) problems.push(k + ' has more than ' + MAX_RECIPIENTS + ' numbers');
     else w.lists[m[1].toLowerCase()] = parsed;
@@ -461,9 +459,9 @@ function whatsappSend_(w, files, people, listName) {
     }
     var requests = people.map(function (p) {
       var body = {template_name: w.template, broadcast_name: 'reports_' + listName + '_' + nowIst_('yyyy-MM-dd'),
-                  // WATI numbers a template's variables: {{1}} the header document link, {{2}}-{{5}} the body
-                  parameters: [{name: '1', value: link}, {name: '2', value: p.name}, {name: '3', value: labels.report},
-                               {name: '4', value: labels.team}, {name: '5', value: labels.period}]};
+                  // WATI numbers a template's variables: {{1}} the header document link, {{2}}-{{4}} the body
+                  parameters: [{name: '1', value: link}, {name: '2', value: labels.report},
+                               {name: '3', value: labels.team}, {name: '4', value: labels.period}]};
       if (w.channel) body.channel_number = w.channel;
       return {url: WA_HOST + '/' + w.tenant + '/api/v1/sendTemplateMessage?whatsappNumber=' + p.number, method: 'post',
               contentType: 'application/json', headers: {Authorization: auth}, payload: JSON.stringify(body), muteHttpExceptions: true};
@@ -597,7 +595,7 @@ function checkWhatsApp() {
     'Test number: ' + (w.test ? '...' + w.test.number.slice(-4) : '(none)'),
     'At most ' + w.maxPerDay + ' WhatsApp messages a day'
   ].concat(Object.keys(w.lists).sort().map(function (n) {
-    return 'WA list ' + n + ' (' + w.lists[n].length + '): ' + w.lists[n].map(function (p) { return p.name + ' ...' + p.number.slice(-4); }).join(', ');
+    return 'WA list ' + n + ' (' + w.lists[n].length + '): ' + w.lists[n].map(function (p) { return '...' + p.number.slice(-4); }).join(', ');
   }));
   if (w.problem) lines.push('PROBLEM: ' + w.problem);
   if (w.token && WA_TENANT.test(w.tenant)) {
