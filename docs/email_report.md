@@ -236,7 +236,8 @@ deployed, single files to `RECIPIENTS` still go out, and a set or a send to a li
 | `unknown_list` | the chat named a list that isn't in Script Properties; add `LIST_<NAME>` or fix the name |
 | `limit` | the daily cap is reached; raise `MAX_SENDS_PER_DAY` or wait until tomorrow (IST) |
 | WhatsApp: not sent: ... | a WhatsApp setting is wrong (named in the message); the email still went out |
-| WhatsApp: ... failed: ... (Drive: ...) | Drive refused the file or its link; your Workspace may block "anyone with the link" sharing |
+| WhatsApp: ... (Drive, saving to Drive: ...) | the script can't write to Drive; rerun a function from the editor and allow Drive |
+| WhatsApp: ... (Drive, opening its link ...: Access denied) | your Workspace blocks "anyone with the link" sharing; a Google Workspace admin must allow sharing outside the company for the mailer's account |
 | WhatsApp: ... (HTTP 401) | WATI refused the key; check `WATI_TOKEN` and `WATI_CLIENT_ID` with `checkWhatsApp` |
 | too many times | Google's daily email quota is used up; try again tomorrow. Nothing was marked sent |
 

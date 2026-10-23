@@ -45,14 +45,18 @@ function store(init = {}) {
 }
 
 // Fake Drive: folders and files with their link sharing, so the tests see what would be opened and closed.
-function drive({ domainFails = false, createFails = false } = {}) {
+function drive({ domainFails = false, createFails = false, linkFails = false } = {}) {
   const items = {};
   let n = 0;
   const access = { ANYONE_WITH_LINK: 'anyone', DOMAIN: 'domain', PRIVATE: 'private' };
   const item = (props) => {
     const id = `id${++n}`;
     const it = { id, sharing: 'private', ...props, getId: () => id,
-      setSharing(a) { if (a === 'domain' && domainFails) throw new Error('Invalid argument: domain'); it.sharing = a; } };
+      setSharing(a) {
+        if (a === 'domain' && domainFails) throw new Error('Invalid argument: domain');
+        if (a === 'anyone' && linkFails) throw new Error('Access denied: DriveApp.');
+        it.sharing = a;
+      } };
     items[id] = it;
     return it;
   };
@@ -505,8 +509,11 @@ test('a number WATI refuses is reported; the others still get the file', () => {
   const down = load(WA, { watiOpts: { status: 401 } }).send(PDF, { list: 'elite' });
   assert.match(down.detail, /0 of 2 messages sent.*HTTP 401/);
   const full = load(WA, { driveOpts: { createFails: true } });
-  assert.match(full.send(PDF, { list: 'elite' }).detail, /0 of 2 messages sent.*\(Drive: Drive is full\)/);
+  assert.match(full.send(PDF, { list: 'elite' }).detail, /0 of 2 messages sent.*\(Drive, saving to Drive: Drive is full\)/);
   assert.equal(full.wati.length, 0);
+  const closed = load(WA, { driveOpts: { linkFails: true } });
+  assert.match(closed.send(PDF, { list: 'elite' }).detail, /\(Drive, opening its link \(your Google Workspace may block sharing outside the company\): Access denied: DriveApp\.\)/);
+  assert.equal(closed.wati.length, 0);
 });
 
 test('the WhatsApp daily cap holds back a set that would pass it', () => {

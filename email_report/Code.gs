@@ -447,14 +447,15 @@ function whatsappSend_(w, files, people, listName) {
   var ok = 0, failed = [];
   files.forEach(function (f) {
     var labels = waLabels_(f, listName);
-    var link;
+    var link, file, step = 'saving to Drive';
     try {
-      var file = archiveFolder_(labels.team, nowIst_('yyyy-MM-dd')).createFile(Utilities.newBlob(f.bytes, f.type.mime, f.name));
+      file = archiveFolder_(labels.team, nowIst_('yyyy-MM-dd')).createFile(Utilities.newBlob(f.bytes, f.type.mime, f.name));
+      step = 'opening its link (your Google Workspace may block sharing outside the company)';
       file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
       store.setProperty('walink:' + file.getId(), String(new Date().getTime()));
       link = 'https://drive.google.com/uc?export=download&id=' + file.getId();
     } catch (e) {
-      failed.push(f.name + ' (Drive: ' + (e && e.message || e) + ')');
+      failed.push(f.name + ' (Drive, ' + step + ': ' + (e && e.message || e) + ')');
       return;
     }
     var requests = people.map(function (p) {
