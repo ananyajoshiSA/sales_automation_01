@@ -53,7 +53,6 @@ funnel. Code: `analytics/funnel_icp.py`. ICP maps: `analytics/funnel_icp_maps/<b
      Report how many you checked and any that were wrong; if any are wrong, find the cause and re-run.
    - Totals: sales matched + "not in GrowthX" must equal the sheet's sale rows for that tab.
 9. **Commit the updated map** (it holds no lead data) so the next run starts from it.
-7. **Commit the updated map** (it holds no lead data) so the next run starts from it.
 
 ## How to present it
 Lead with the table per ICP (leads, TimePay connected, positive % of connected, sales, lead→sale %,
