@@ -201,9 +201,9 @@ that is closed again after 3 days; people keep the file itself in their WhatsApp
 | `WATI_CHANNEL_NUMBER` | leave out unless WATI asks for the sender number |
 | `WA_MAX_PER_DAY` | leave out to use 200 messages a day (at most 1000) |
 
-The template fills `{{file_link}}` (header document), `{{name}}`, `{{report_name}}` (from the file name, e.g.
-"Status at 13:50 (PDF)"), `{{team_name}}` ("Elite team") and `{{report_period}}` (the dates in the file name,
-else the day it is sent, IST). Any new team or report works with the same template: add its `WA_LIST_<NAME>`.
+WATI numbers the template's variables. The mailer fills `{{1}}` (header document link), `{{2}}` (name),
+`{{3}}` (report, from the file name, e.g. "Status at 13:50 (PDF)"), `{{4}}` (team, "Elite team") and `{{5}}` (the
+dates in the file name, else the day it is sent, IST). Any new team or report works with the same template: add its `WA_LIST_<NAME>`.
 
 To switch it on: paste the new `Code.gs` **and** `appsscript.json` (it adds Drive, outside requests and a
 clean-up timer), deploy a new version and allow the new permissions. Run `checkWhatsApp`: it checks the key and

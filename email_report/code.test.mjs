@@ -430,11 +430,11 @@ test('a live email to a list also sends each new file on WhatsApp to that list, 
   assert.equal(c.body.channel_number, undefined);
   const params = Object.fromEntries(c.body.parameters.map((p) => [p.name, p.value]));
   const [pdf] = files(run);
-  assert.deepEqual(params, { file_link: `https://drive.google.com/uc?export=download&id=${pdf.id}`, name: 'Yash',
-    report_name: 'Call plan Fri 23 Oct (PDF)', team_name: 'Elite team', report_period: params.report_period });
-  assert.match(params.report_period, /^\d{1,2} \w{3} \d{4}$/);
-  assert.equal(Object.fromEntries(run.wati[1].body.parameters.map((p) => [p.name, p.value])).name, 'team');
-  assert.equal(Object.fromEntries(run.wati[2].body.parameters.map((p) => [p.name, p.value])).report_name, 'Call plan Fri 23 Oct (Excel)');
+  assert.deepEqual(params, { 1: `https://drive.google.com/uc?export=download&id=${pdf.id}`, 2: 'Yash',
+    3: 'Call plan Fri 23 Oct (PDF)', 4: 'Elite team', 5: params[5] });
+  assert.match(params[5], /^\d{1,2} \w{3} \d{4}$/);
+  assert.equal(Object.fromEntries(run.wati[1].body.parameters.map((p) => [p.name, p.value]))[2], 'team');
+  assert.equal(Object.fromEntries(run.wati[2].body.parameters.map((p) => [p.name, p.value]))[3], 'Call plan Fri 23 Oct (Excel)');
   // kept in Sales reports/<team>/<day>, link open for WATI to collect, a timer set to close it
   assert.match(pdf.parent.path(), /^Sales reports\/Elite team\/\d{4}-\d\d-\d\d$/);
   assert.deepEqual(files(run).map((f) => [f.name, f.sharing]), [['Elite_call_plan_Fri_23_Oct.pdf', 'anyone'], ['Elite_call_plan_Fri_23_Oct.xlsx', 'anyone']]);
@@ -554,7 +554,7 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   const sends = run.wati.filter((c) => c.body);
   assert.equal(sends.length, 1);
   assert.match(sends[0].url, /whatsappNumber=919811111111$/);
-  assert.match(Object.fromEntries(sends[0].body.parameters.map((p) => [p.name, p.value])).report_name, /^WhatsApp test \(PDF\)$/);
+  assert.match(Object.fromEntries(sends[0].body.parameters.map((p) => [p.name, p.value]))[3], /^WhatsApp test \(PDF\)$/);
   assert.match(run.logs.at(-1), /WhatsApp test: 1 of 1 messages sent/);
   assert.equal(run.sent.length, 0);
   assert.throws(() => load(WA).gs.sendWhatsAppTest(), /WA_TEST_NUMBER is empty/);

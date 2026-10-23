@@ -16,7 +16,8 @@
  *   MAX_SENDS_PER_DAY  optional, default 20: a cap that limits the damage if the token ever leaks
  *
  * WhatsApp (WATI), optional, off until WHATSAPP_MODE is live. After a live email to list NAME, the same new files also
- * go on WhatsApp to WA_LIST_NAME, one message per file per number, using the approved WATI template:
+ * go on WhatsApp to WA_LIST_NAME, one message per file per number, using the approved WATI template, whose header
+ * document link is {{1}} and body {{2}} name, {{3}} report, {{4}} team, {{5}} date(s):
  *   WHATSAPP_MODE      off (default) | live
  *   WATI_TOKEN         the WATI API key;  WATI_CLIENT_ID  the WATI client (tenant) ID
  *   WA_LIST_<NAME>     comma-separated numbers with country code, e.g. 9198xxxxxxxx or Yash:9198xxxxxxxx
@@ -460,9 +461,9 @@ function whatsappSend_(w, files, people, listName) {
     }
     var requests = people.map(function (p) {
       var body = {template_name: w.template, broadcast_name: 'reports_' + listName + '_' + nowIst_('yyyy-MM-dd'),
-                  parameters: [{name: 'file_link', value: link}, {name: 'name', value: p.name},
-                               {name: 'report_name', value: labels.report}, {name: 'team_name', value: labels.team},
-                               {name: 'report_period', value: labels.period}]};
+                  // WATI numbers a template's variables: {{1}} the header document link, {{2}}-{{5}} the body
+                  parameters: [{name: '1', value: link}, {name: '2', value: p.name}, {name: '3', value: labels.report},
+                               {name: '4', value: labels.team}, {name: '5', value: labels.period}]};
       if (w.channel) body.channel_number = w.channel;
       return {url: WA_HOST + '/' + w.tenant + '/api/v1/sendTemplateMessage?whatsappNumber=' + p.number, method: 'post',
               contentType: 'application/json', headers: {Authorization: auth}, payload: JSON.stringify(body), muteHttpExceptions: true};
