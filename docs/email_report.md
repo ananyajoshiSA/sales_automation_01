@@ -174,6 +174,43 @@ The request names the list, never addresses; an unknown list, or a mailer older 
 nothing. The Elite daily plan's `--mail` uses `LIST_ELITE` (`--mail-list`, default `elite`). Each list has its
 own sent log, so the same report can go to two lists. In test mode every email still goes only to `TEST_RECIPIENT`.
 
+### WhatsApp copies through WATI (optional, off until you switch it on)
+
+**Lever:** callers and team leaders see the plan on their phones the moment it is built, so the first calls of
+the day start sooner (speed to lead, calling the right leads first). We will see it in how early each caller's
+first dials of the day come.
+
+After a **live** email to a list, the mailer also sends the same new files on WhatsApp to that list's numbers,
+using the approved WATI template `daily_report_pdf`: one message per file per number, so a plan PDF and its
+workbook arrive as two messages. Nothing changes in the chats, the scheduled jobs or the Python code: whatever
+emails a list also WhatsApps it. A file already emailed is never sent again on WhatsApp either. Email is never
+held up by WhatsApp: a WhatsApp problem only adds a "WhatsApp: not sent ..." line to the result.
+
+Each file is kept for good in the Drive folder **Sales reports / <team> / <date>**, which only people at your
+company can open (on a personal Google account it stays private to you). WATI collects the file through a link
+that is closed again after 3 days; people keep the file itself in their WhatsApp chat.
+
+| Property | Value |
+|---|---|
+| `WHATSAPP_MODE` | `off` (default) or `live` |
+| `WATI_TOKEN` | the WATI API key (WATI → Connector → API) |
+| `WATI_CLIENT_ID` | the WATI client (tenant) ID |
+| `WA_LIST_<NAME>` | numbers for the matching `LIST_<NAME>`, comma-separated, with country code: `9198xxxxxxxx` or `Yash:9198xxxxxxxx` (the name goes in the greeting; without one it says "Hello team") |
+| `WA_TEST_NUMBER` | your own number, the only one `sendWhatsAppTest` messages |
+| `WATI_TEMPLATE` | leave out to use `daily_report_pdf` |
+| `WATI_CHANNEL_NUMBER` | leave out unless WATI asks for the sender number |
+| `WA_MAX_PER_DAY` | leave out to use 200 messages a day (at most 1000) |
+
+The template fills `{{file_link}}` (header document), `{{name}}`, `{{report_name}}` (from the file name, e.g.
+"Status at 13:50 (PDF)"), `{{team_name}}` ("Elite team") and `{{report_period}}` (the dates in the file name,
+else the day it is sent, IST). Any new team or report works with the same template: add its `WA_LIST_<NAME>`.
+
+To switch it on: paste the new `Code.gs` **and** `appsscript.json` (it adds Drive, outside requests and a
+clean-up timer), deploy a new version and allow the new permissions. Run `checkWhatsApp`: it checks the key and
+client ID with WATI and says whether the template is APPROVED, sending nothing. Run `sendWhatsAppTest`: one
+sample PDF with no lead data goes to `WA_TEST_NUMBER`. When it arrives, set `WHATSAPP_MODE` to `live`.
+`showSentLog` lists WhatsApp sends too. To stop WhatsApp at once, set `WHATSAPP_MODE` to `off`.
+
 ## Update the mailer (after `Code.gs` changes)
 
 Sending several files in one email and recipient lists (both 21 Oct 2026) need the new `Code.gs`. Until it is
@@ -198,6 +235,9 @@ deployed, single files to `RECIPIENTS` still go out, and a set or a send to a li
 | outside `ALLOWED_DOMAINS` | a recipient's domain isn't allowed; fix the address or add the domain |
 | `unknown_list` | the chat named a list that isn't in Script Properties; add `LIST_<NAME>` or fix the name |
 | `limit` | the daily cap is reached; raise `MAX_SENDS_PER_DAY` or wait until tomorrow (IST) |
+| WhatsApp: not sent: ... | a WhatsApp setting is wrong (named in the message); the email still went out |
+| WhatsApp: ... failed: ... (Drive: ...) | Drive refused the file or its link; your Workspace may block "anyone with the link" sharing |
+| WhatsApp: ... (HTTP 401) | WATI refused the key; check `WATI_TOKEN` and `WATI_CLIENT_ID` with `checkWhatsApp` |
 | too many times | Google's daily email quota is used up; try again tomorrow. Nothing was marked sent |
 
 Free limits: Google Workspace scripts can email about 1,500 recipients a day, at most 50 per email, with

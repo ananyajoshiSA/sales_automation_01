@@ -15,6 +15,17 @@
  *   UPLOAD_TOKEN       shared secret (createUploadToken() makes one)
  *   MAX_SENDS_PER_DAY  optional, default 20: a cap that limits the damage if the token ever leaks
  *
+ * WhatsApp (WATI), optional, off until WHATSAPP_MODE is live. After a live email to list NAME, the same new files also
+ * go on WhatsApp to WA_LIST_NAME, one message per file per number, using the approved WATI template:
+ *   WHATSAPP_MODE      off (default) | live
+ *   WATI_TOKEN         the WATI API key;  WATI_CLIENT_ID  the WATI client (tenant) ID
+ *   WA_LIST_<NAME>     comma-separated numbers with country code, e.g. 9198xxxxxxxx or Yash:9198xxxxxxxx
+ *   WA_TEST_NUMBER     one number, the only one sendWhatsAppTest() messages
+ *   WATI_TEMPLATE      optional, default daily_report_pdf;  WATI_CHANNEL_NUMBER  optional sender number
+ *   WA_MAX_PER_DAY     optional, default 200 messages a day
+ * Each file is kept in the Drive folder "Sales reports/<team>/<date>" for good. WhatsApp collects it through a link
+ * that is closed again after 3 days; people keep the file itself in their chat.
+ *
  * A request can never choose who gets an email: at most it names one of these lists. The sent log (User Properties) keeps one entry per mode
  * and file content, so the same file is never emailed twice unless the request says resend. One email, however
  * many files it carries, counts once toward MAX_SENDS_PER_DAY.
@@ -250,11 +261,251 @@ function deliver_(uploads, opts) {
     });
     ledger.setProperty(today, String(count + 1));
     var skipped = opts.resend ? [] : before;
-    return {status: 'sent', detail: (send.length === 1 ? '' : send.length + ' files in one email, ') + 'emailed to ' + to.length +
+    var result = {status: 'sent', detail: (send.length === 1 ? '' : send.length + ' files in one email, ') + 'emailed to ' + to.length +
             ' recipient(s) in ' + cfg.mode + ' mode' + (listName ? ', list ' + listName : '') +
             (skipped.length ? '; left out, already emailed: ' + skipped.map(function (f) { return f.name; }).join(', ') : '')};
   } finally {
     lock.releaseLock();
+  }
+  // WhatsApp follows only a live email, and only with the files this email carried, so it is never sent twice either.
+  if (cfg.mode === 'live' && listName) {
+    var wa = whatsappAfterEmail_(send, listName);
+    if (wa) result.detail += '; WhatsApp: ' + wa;
+  }
+  return result;
+}
+
+// ------------------------------------------------------------------ WhatsApp (WATI)
+
+var WA_LIST_KEY = /^WA_LIST_([A-Z0-9_]{1,40})$/;
+var WA_NUMBER = /^[1-9][0-9]{10,14}$/;
+var WA_PERSON = /^[A-Za-z][A-Za-z.'-]{0,30}$/;
+var WA_TENANT = /^[A-Za-z0-9_-]{1,64}$/;
+var WA_TEMPLATE = /^[a-z0-9_]{1,512}$/;
+var WA_LINK_DAYS = 3;
+var WA_HOST = 'https://live-mt-server.wati.io';
+var ARCHIVE = 'Sales reports';
+var MONTHS = ['Jan', 'Feb', 'Mar', 'Apr', 'May', 'Jun', 'Jul', 'Aug', 'Sep', 'Oct', 'Nov', 'Dec'];
+
+/** "Yash:919812345678" or "919812345678" (a leading + is fine); null when it is not one of those. */
+function waEntry_(raw) {
+  var m = /^(?:([^:]+):)?\+?([0-9]+)$/.exec(String(raw).trim());
+  if (!m || !WA_NUMBER.test(m[2]) || (m[1] && !WA_PERSON.test(m[1].trim()))) return null;
+  return {name: m[1] ? m[1].trim() : 'team', number: m[2]};
+}
+
+/** WhatsApp settings. Never throws: anything wrong comes back as problem, so email is never held up by WhatsApp. */
+function readWhatsApp_() {
+  var p = PropertiesService.getScriptProperties().getProperties();
+  var w = {mode: String(p.WHATSAPP_MODE || 'off').trim().toLowerCase(), token: String(p.WATI_TOKEN || '').trim(),
+           tenant: String(p.WATI_CLIENT_ID || '').trim(), template: String(p.WATI_TEMPLATE || 'daily_report_pdf').trim(),
+           channel: String(p.WATI_CHANNEL_NUMBER || '').trim().replace(/^\+/, ''), maxPerDay: 200, lists: {}, test: null, problem: ''};
+  var problems = [];
+  if (['off', 'live'].indexOf(w.mode) < 0) problems.push('WHATSAPP_MODE must be off or live, not "' + p.WHATSAPP_MODE + '"');
+  Object.keys(p).forEach(function (k) {
+    var m = WA_LIST_KEY.exec(k);
+    if (!m) return;
+    var entries = list_(p[k]);
+    var parsed = entries.map(waEntry_);
+    var bad = entries.filter(function (e, i) { return !parsed[i]; });
+    if (bad.length) problems.push(k + ': "' + bad[0] + '" is not a number with country code, e.g. 9198xxxxxxxx or Yash:9198xxxxxxxx');
+    else if (!parsed.length) problems.push(k + ' is empty: add its numbers or delete it');
+    else if (parsed.length > MAX_RECIPIENTS) problems.push(k + ' has more than ' + MAX_RECIPIENTS + ' numbers');
+    else w.lists[m[1].toLowerCase()] = parsed;
+  });
+  if (p.WA_TEST_NUMBER) {
+    w.test = waEntry_(p.WA_TEST_NUMBER);
+    if (!w.test) problems.push('WA_TEST_NUMBER is not a number with country code, e.g. 9198xxxxxxxx');
+  }
+  if (p.WA_MAX_PER_DAY) {
+    w.maxPerDay = Number(p.WA_MAX_PER_DAY);
+    if (!(w.maxPerDay >= 1 && w.maxPerDay <= 1000 && w.maxPerDay % 1 === 0)) problems.push('WA_MAX_PER_DAY must be a whole number from 1 to 1000');
+  }
+  if (!w.token) problems.push('WATI_TOKEN is empty');
+  if (!WA_TENANT.test(w.tenant)) problems.push('WATI_CLIENT_ID is empty or has characters other than letters, digits, - and _');
+  if (!WA_TEMPLATE.test(w.template)) problems.push('WATI_TEMPLATE must be a template name like daily_report_pdf');
+  if (w.channel && !WA_NUMBER.test(w.channel)) problems.push('WATI_CHANNEL_NUMBER is not a number with country code');
+  w.problem = problems.join('; ');
+  return w;
+}
+
+function istDate_(y, m, d) {
+  return d + ' ' + MONTHS[m - 1] + ' ' + y;
+}
+
+/** The template's words for a set of files: report name per file, team and the day or days the files cover. */
+function waLabels_(file, listName) {
+  var base = file.name.replace(/\.[^.]+$/, '');
+  var dates = [];
+  base = base.replace(/(\d{4})-(\d{2})-(\d{2})/g, function (all, y, m, d) {
+    if (Number(m) >= 1 && Number(m) <= 12) dates.push([y, m, d].join('-'));
+    return ' ';
+  });
+  var words = base.replace(/[_.+()-]+/g, ' ').replace(/\s+/g, ' ').trim();
+  if (words.toLowerCase().indexOf(listName.replace(/_/g, ' ') + ' ') === 0) words = words.slice(listName.length + 1);
+  words = words.replace(/\b(status) ([01]\d|2[0-3])([0-5]\d)\b/i, '$1 at $2:$3');
+  words = (words.charAt(0).toUpperCase() + words.slice(1)) || 'Report';
+  var team = listName.replace(/_/g, ' ');
+  dates.sort();
+  var period;
+  if (!dates.length) {
+    period = Utilities.formatDate(new Date(), TZ, 'd MMM yyyy');
+  } else {
+    var a = dates[0].split('-').map(Number), b = dates[dates.length - 1].split('-').map(Number);
+    period = dates[0] === dates[dates.length - 1] ? istDate_(a[0], a[1], a[2]) :
+      a[0] === b[0] && a[1] === b[1] ? a[2] + '–' + istDate_(b[0], b[1], b[2]) : istDate_(a[0], a[1], a[2]) + ' – ' + istDate_(b[0], b[1], b[2]);
+  }
+  team = team.charAt(0).toUpperCase() + team.slice(1) + (/\bteam$/i.test(team) ? '' : ' team');
+  return {report: (words + ' (' + file.type.label + ')').slice(0, 60), team: team.slice(0, 60), period: period};
+}
+
+/** The archive folder for one team and day, made on first use; files are kept there for good. */
+function archiveFolder_(team, day) {
+  var store = PropertiesService.getUserProperties();
+  var root = null, id = store.getProperty('wa:archive');
+  if (id) {
+    try { root = DriveApp.getFolderById(id); } catch (e) { root = null; }
+  }
+  if (!root) {
+    root = DriveApp.createFolder(ARCHIVE);
+    var closed = 'private';
+    try {  // a Google Workspace account can open it to everyone at the company; a personal one keeps it private
+      root.setSharing(DriveApp.Access.DOMAIN, DriveApp.Permission.VIEW);
+      closed = 'domain';
+    } catch (e) { /* keep private */ }
+    store.setProperty('wa:archive', root.getId());
+    store.setProperty('wa:closed', closed);
+  }
+  var sub = function (parent, name) {
+    var it = parent.getFoldersByName(name);
+    return it.hasNext() ? it.next() : parent.createFolder(name);
+  };
+  return sub(sub(root, team), day);
+}
+
+/** Closes every WhatsApp link opened more than WA_LINK_DAYS ago. The files stay in the archive. */
+function closeExpiredLinks() {
+  var store = PropertiesService.getUserProperties();
+  var all = store.getProperties();
+  var closed = all['wa:closed'] === 'domain' ? DriveApp.Access.DOMAIN : DriveApp.Access.PRIVATE;
+  var cutoff = new Date().getTime() - WA_LINK_DAYS * 24 * 3600 * 1000;
+  var n = 0;
+  Object.keys(all).forEach(function (k) {
+    if (k.indexOf('walink:') !== 0 || Number(all[k]) > cutoff) return;
+    try {
+      DriveApp.getFileById(k.slice(7)).setSharing(closed, DriveApp.Permission.VIEW);
+    } catch (e) {
+      console.error('could not close link ' + k.slice(7) + ': ' + e);
+      return;  // tried again next time
+    }
+    store.deleteProperty(k);
+    n++;
+  });
+  return n;
+}
+
+/** Makes sure closeExpiredLinks runs every 6 hours even on days nothing is sent. */
+function ensureCleanupTrigger_() {
+  try {
+    var has = ScriptApp.getProjectTriggers().some(function (t) { return t.getHandlerFunction() === 'closeExpiredLinks'; });
+    if (!has) ScriptApp.newTrigger('closeExpiredLinks').timeBased().everyHours(6).create();
+  } catch (e) {
+    console.error('could not set the link clean-up timer: ' + e);  // links still close on the next send
+  }
+}
+
+/** Reserves n messages under today's cap; false when that would go over it. */
+function waReserve_(w, n) {
+  var store = PropertiesService.getUserProperties();
+  var today = 'wacount:' + nowIst_('yyyy-MM-dd');
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    var count = Number(store.getProperty(today) || 0);
+    if (count + n > w.maxPerDay) return false;
+    Object.keys(store.getProperties()).forEach(function (k) {
+      if (k.indexOf('wacount:') === 0 && k !== today) store.deleteProperty(k);
+    });
+    store.setProperty(today, String(count + n));
+    return true;
+  } finally {
+    lock.releaseLock();
+  }
+}
+
+/**
+ * Sends each file as one WhatsApp template message to each person: archive the file in Drive, open a link for
+ * WATI to collect it, send. Returns a one-line summary. Never throws.
+ */
+function whatsappSend_(w, files, people, listName) {
+  if (!waReserve_(w, files.length * people.length)) {
+    return 'not sent: ' + files.length * people.length + ' more messages would pass WA_MAX_PER_DAY (' + w.maxPerDay + ')';
+  }
+  closeExpiredLinks();
+  ensureCleanupTrigger_();
+  var store = PropertiesService.getUserProperties();
+  var auth = /^bearer /i.test(w.token) ? w.token : 'Bearer ' + w.token;
+  var ok = 0, failed = [];
+  files.forEach(function (f) {
+    var labels = waLabels_(f, listName);
+    var link;
+    try {
+      var file = archiveFolder_(labels.team, nowIst_('yyyy-MM-dd')).createFile(Utilities.newBlob(f.bytes, f.type.mime, f.name));
+      file.setSharing(DriveApp.Access.ANYONE_WITH_LINK, DriveApp.Permission.VIEW);
+      store.setProperty('walink:' + file.getId(), String(new Date().getTime()));
+      link = 'https://drive.google.com/uc?export=download&id=' + file.getId();
+    } catch (e) {
+      failed.push(f.name + ' (Drive: ' + (e && e.message || e) + ')');
+      return;
+    }
+    var requests = people.map(function (p) {
+      var body = {template_name: w.template, broadcast_name: 'reports_' + listName + '_' + nowIst_('yyyy-MM-dd'),
+                  parameters: [{name: 'file_link', value: link}, {name: 'name', value: p.name},
+                               {name: 'report_name', value: labels.report}, {name: 'team_name', value: labels.team},
+                               {name: 'report_period', value: labels.period}]};
+      if (w.channel) body.channel_number = w.channel;
+      return {url: WA_HOST + '/' + w.tenant + '/api/v1/sendTemplateMessage?whatsappNumber=' + p.number, method: 'post',
+              contentType: 'application/json', headers: {Authorization: auth}, payload: JSON.stringify(body), muteHttpExceptions: true};
+    });
+    var responses;
+    try {
+      responses = UrlFetchApp.fetchAll(requests);
+    } catch (e) {
+      failed.push(f.name + ' (' + (e && e.message || e) + ')');
+      return;
+    }
+    responses.forEach(function (r, i) {
+      var code = r.getResponseCode(), json = null;
+      try { json = JSON.parse(r.getContentText()); } catch (e) { json = null; }
+      if (code === 200 && json && json.result === true) {
+        ok++;
+      } else {
+        var why = json && (json.info || json.message || (json.errors && json.errors.error)) || 'HTTP ' + code;
+        failed.push(f.name + ' to ...' + people[i].number.slice(-4) + ' (' + String(why).slice(0, 120) + ')');
+      }
+    });
+    store.setProperty('wa:' + listName + ':' + f.sha, JSON.stringify({at: nowIst_('yyyy-MM-dd HH:mm') + ' IST', name: f.name,
+                                                                        to: people.length, file: link.split('id=')[1]}));
+  });
+  var line = ok + ' of ' + files.length * people.length + ' messages sent (' + files.length + ' file(s) to ' + people.length + ' number(s))';
+  if (failed.length) {
+    console.error('WhatsApp failures: ' + failed.join('; '));
+    line += '; failed: ' + failed.slice(0, 3).join('; ') + (failed.length > 3 ? '; and ' + (failed.length - 3) + ' more' : '');
+  }
+  return line;
+}
+
+/** After a live email to a list: WhatsApp the same files to WA_LIST_<same name>, if WhatsApp is on. '' when off. */
+function whatsappAfterEmail_(files, listName) {
+  try {
+    var w = readWhatsApp_();
+    if (w.mode !== 'live' || !files.length) return '';
+    if (w.problem) return 'not sent: ' + w.problem;
+    if (!w.lists[listName]) return '';
+    return whatsappSend_(w, files, w.lists[listName], listName);
+  } catch (e) {
+    console.error('WhatsApp failed: ' + e);
+    return 'failed: ' + String(e && e.message || e);
   }
 }
 
@@ -283,8 +534,11 @@ function doPost(e) {
       var name = listName_(req.list);
       var bad = cfg.mode === 'off' ? '' : listProblem_(cfg, name);
       if (bad) return reply_({ok: false, status: 'unknown_list', detail: bad});
-      return reply_({ok: true, status: cfg.mode === 'off' ? 'off' : 'ready', mode: cfg.mode, recipients: recipientsFor_(cfg, name).length,
-                     multi: true, list: name || '', lists: Object.keys(cfg.lists).sort()});
+      var out = {ok: true, status: cfg.mode === 'off' ? 'off' : 'ready', mode: cfg.mode, recipients: recipientsFor_(cfg, name).length,
+                 multi: true, list: name || '', lists: Object.keys(cfg.lists).sort()};
+      var w = readWhatsApp_();
+      if (w.mode !== 'off') out.whatsapp = {mode: w.mode, numbers: name && w.lists[name] ? w.lists[name].length : 0, problem: w.problem};
+      return reply_(out);
     }
     if (req.action !== 'send') return reply_({ok: false, status: 'bad_request', detail: 'action must be check or send'});
     var list = Array.isArray(req.files) ? req.files : [req];
@@ -333,6 +587,45 @@ function checkSetup() {
   ]).join('\n'));
 }
 
+/** Checks the WhatsApp settings and asks WATI whether the template is approved. Sends nothing. */
+function checkWhatsApp() {
+  var w = readWhatsApp_();
+  var lines = [
+    'WhatsApp: ' + w.mode.toUpperCase() + (w.mode === 'live' ? ' (reports emailed to a list also go to its WA_LIST)' : ' (nothing is sent on WhatsApp)'),
+    'WATI key: ' + (w.token ? 'set' : 'MISSING') + '; client ID: ' + (w.tenant ? 'set' : 'MISSING') + '; template: ' + w.template,
+    'Test number: ' + (w.test ? '...' + w.test.number.slice(-4) : '(none)'),
+    'At most ' + w.maxPerDay + ' WhatsApp messages a day'
+  ].concat(Object.keys(w.lists).sort().map(function (n) {
+    return 'WA list ' + n + ' (' + w.lists[n].length + '): ' + w.lists[n].map(function (p) { return p.name + ' ...' + p.number.slice(-4); }).join(', ');
+  }));
+  if (w.problem) lines.push('PROBLEM: ' + w.problem);
+  if (w.token && WA_TENANT.test(w.tenant)) {
+    var r = UrlFetchApp.fetch(WA_HOST + '/' + w.tenant + '/api/v1/getMessageTemplates?pageSize=100&pageNumber=1', {
+      headers: {Authorization: /^bearer /i.test(w.token) ? w.token : 'Bearer ' + w.token}, muteHttpExceptions: true});
+    var code = r.getResponseCode();
+    if (code !== 200) {
+      lines.push('WATI answered HTTP ' + code + ': check WATI_TOKEN and WATI_CLIENT_ID');
+    } else {
+      var t = ((JSON.parse(r.getContentText()) || {}).messageTemplates || []).filter(function (x) { return x.elementName === w.template; })[0];
+      lines.push('WATI key and client ID work. Template ' + w.template + ': ' + (t ? t.status : 'NOT FOUND in WATI'));
+    }
+  }
+  console.log(lines.join('\n'));
+}
+
+/** Sends one sample PDF (no lead data) on WhatsApp to WA_TEST_NUMBER only, to prove the whole path works. */
+function sendWhatsAppTest() {
+  var w = readWhatsApp_();
+  if (w.problem) throw new Error(w.problem);
+  if (!w.test) throw new Error('WA_TEST_NUMBER is empty: add your own number, e.g. 9198xxxxxxxx');
+  var pdf = Utilities.newBlob('<h2>WhatsApp test</h2><p>This sample has no lead data. Sent ' + nowIst_('d MMM yyyy, h:mm a') +
+                              ' IST.</p>', 'text/html', 'test.html').getAs('application/pdf');
+  var bytes = pdf.getBytes();
+  var file = {name: 'WhatsApp_test_' + nowIst_('yyyy-MM-dd') + '.pdf', bytes: bytes, type: TYPES.pdf,
+              sha: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes))};
+  console.log('WhatsApp test: ' + whatsappSend_(w, [file], [w.test], 'test'));
+}
+
 /** Lists every file this script has emailed, newest first. */
 function showSentLog() {
   var all = PropertiesService.getUserProperties().getProperties();
@@ -342,5 +635,10 @@ function showSentLog() {
     return v.at + '  ' + parts[1] + (parts.length > 3 ? ' ' + parts[2] : '') + '  ' + v.name + '  ' + v.state +
            (v.to ? ' to ' + v.to : '') + (v.resend ? ' (resend)' : '');
   }).sort().reverse();
+  Object.keys(all).filter(function (k) { return k.indexOf('wa:') === 0 && k.split(':').length === 3; }).forEach(function (k) {
+    var v = JSON.parse(all[k]);
+    rows.push(v.at + '  whatsapp ' + k.split(':')[1] + '  ' + v.name + '  to ' + v.to + ' number(s)');
+  });
+  rows.sort().reverse();
   console.log(rows.length ? rows.join('\n') : 'Nothing has been emailed yet.');
 }
