@@ -79,7 +79,7 @@ function drive({ domainFails = false, createFails = false } = {}) {
 }
 
 // Fake WATI: answers each message with result true unless the number is in fail; records every request.
-function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_report_pdf', status: 'APPROVED' }] } = {}) {
+function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_report_pdf', status: 'APPROVED' }], zeroBased = false } = {}) {
   const calls = [];
   const answer = (code, body) => ({ getResponseCode: () => code, getContentText: () => JSON.stringify(body) });
   return {
@@ -92,7 +92,8 @@ function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_repo
       }),
       fetch: (url, opts) => {
         calls.push({ url, ...opts });
-        const page = Number(new URL(url).searchParams.get('pageNumber'));
+        const n = Number(new URL(url).searchParams.get('pageNumber'));
+        const page = zeroBased ? n + 1 : Math.max(1, n);
         return answer(status, { result: 'success', messageTemplates: templates.slice((page - 1) * 100, page * 100) });
       },
     },
@@ -546,7 +547,7 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   assert.match(log, /WA list elite \(2\): \.\.\.0001, \.\.\.0002/);
   assert.match(log, /WATI key and client ID work\. Template daily_report_pdf: APPROVED/);
   assert.doesNotMatch(log, /wati-secret-key|919800000001/);
-  assert.equal(run.wati[0].url, 'https://live-mt-server.wati.io/123456/api/v1/getMessageTemplates?pageSize=100&pageNumber=1');
+  assert.equal(run.wati[0].url, 'https://live-mt-server.wati.io/123456/api/v1/getMessageTemplates?pageSize=100&pageNumber=0');
   assert.equal(run.wati.filter((c) => c.body).length, 0);
   const pending = load(WA, { watiOpts: { templates: [{ elementName: 'daily_report_pdf', status: 'PENDING' }] } });
   pending.gs.checkWhatsApp();
@@ -555,6 +556,9 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   const paged = load(WA, { watiOpts: { templates: [...filler, { elementName: 'daily_report_pdf', status: 'APPROVED' }] } });
   paged.gs.checkWhatsApp();
   assert.match(paged.logs.at(-1), /Template daily_report_pdf: APPROVED/);
+  const first = load(WA, { watiOpts: { zeroBased: true, templates: [{ elementName: 'Daily_Report_PDF', status: 'PENDING' }, ...filler] } });
+  first.gs.checkWhatsApp();
+  assert.match(first.logs.at(-1), /Template daily_report_pdf: PENDING/);
   const other = load(WA, { watiOpts: { templates: [...filler, { elementName: 'daily_report_pdf_v2', status: 'PENDING' }] } });
   other.gs.checkWhatsApp();
   assert.match(other.logs.at(-1), /NOT FOUND among 151 templates in WATI\nSimilar names: daily_report_pdf_v2 \(PENDING\)\. If one of these is yours, set WATI_TEMPLATE/);

@@ -599,20 +599,27 @@ function checkWhatsApp() {
   }));
   if (w.problem) lines.push('PROBLEM: ' + w.problem);
   if (w.token && WA_TENANT.test(w.tenant)) {
-    var all = [], code = 200;
-    for (var page = 1; page <= 20 && code === 200; page++) {  // WATI lists templates 100 to a page
+    var all = [], seen = {}, code = 200;
+    // WATI lists templates 100 to a page; start at page 0 in case its pages count from 0, and skip repeats
+    for (var page = 0; page <= 30 && code === 200; page++) {
       var r = UrlFetchApp.fetch(WA_HOST + '/' + w.tenant + '/api/v1/getMessageTemplates?pageSize=100&pageNumber=' + page, {
         headers: {Authorization: /^bearer /i.test(w.token) ? w.token : 'Bearer ' + w.token}, muteHttpExceptions: true});
       code = r.getResponseCode();
       if (code !== 200) break;
       var got = (JSON.parse(r.getContentText()) || {}).messageTemplates || [];
-      all = all.concat(got);
-      if (got.length < 100) break;
+      var fresh = got.filter(function (x) {
+        var k = (x.id || '') + '|' + x.elementName + '|' + (x.language && x.language.value || x.language || '');
+        if (seen[k]) return false;
+        seen[k] = true;
+        return true;
+      });
+      all = all.concat(fresh);
+      if (got.length < 100 || (page > 1 && !fresh.length)) break;  // page 1 may repeat page 0
     }
     if (code !== 200 && !all.length) {
       lines.push('WATI answered HTTP ' + code + ': check WATI_TOKEN and WATI_CLIENT_ID');
     } else {
-      var t = all.filter(function (x) { return x.elementName === w.template; })[0];
+      var t = all.filter(function (x) { return String(x.elementName).toLowerCase() === w.template.toLowerCase(); })[0];
       lines.push('WATI key and client ID work. Template ' + w.template + ': ' + (t ? t.status : 'NOT FOUND among ' + all.length + ' templates in WATI'));
       if (!t) {
         var near = all.filter(function (x) { return /report|daily/i.test(String(x.elementName)); }).slice(0, 5);
