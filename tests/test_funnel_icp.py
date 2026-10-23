@@ -8,7 +8,8 @@ import openpyxl
 from analytics import funnel_icp as fi
 
 MAP = {"icps": ["Retired", "Teachers / educators", "General"],
-       "pages": {"ret-a": "Retired", "edu-a": "Teachers / educators"}}
+       "pages": {"ret-a": "Retired", "edu-a": "Teachers / educators", "gen-a": "General"},
+       "general_segments": {"gen-a": "Brand search"}}
 
 
 def lead(phone, slug, at, email=""):
@@ -16,20 +17,47 @@ def lead(phone, slug, at, email=""):
             "captured_ist": at}
 
 
-def test_first_funnel_wins_and_sales_match_by_phone_then_email():
-    leads = [lead("+91 98765 43210", "edu-a", "2026-10-01T10:00"),
-             lead("9876543210", "ret-a", "2026-10-02T10:00"),
-             lead("9000000001", "ret-a", "2026-10-03T10:00", "A@B.in"),
-             lead("9000000002", "new-page", "2026-10-03T11:00")]
-    sales = [{"phone": "9876543210", "email": "", "paid": 100.0},
-             {"phone": "1111111111", "email": "a@b.in", "paid": 50.0},
-             {"phone": "2222222222", "email": "", "paid": 10.0}]
-    r = fi.build(leads, sales, MAP)
+def sale(row, phone, email="", paid=0.0):
+    return {"row": row, "name": "x", "status": "Disbursed", "phone": phone, "email": email, "paid": paid,
+            "paid_raw": paid}
+
+
+LEADS = [lead("+91 98765 43210", "edu-a", "2026-10-01T10:00"),
+         lead("9876543210", "ret-a", "2026-10-02T10:00"),
+         lead("9000000001", "ret-a", "2026-10-03T10:00", "A@B.in"),
+         lead("9000000003", "gen-a", "2026-10-03T12:00")]
+SALES = [sale(2, "9876543210", paid=100.0), sale(3, "1111111111", "a@b.in", 50.0), sale(4, "2222222222", paid=10.0)]
+LOGS = [{"call_id": 1, "to": "919876543210", "status": "Contacted", "disposition": "Hangup NEW"},
+        {"call_id": 2, "to": "9876543210", "status": "Contacted", "disposition": "Full Conversion NEW"},
+        {"call_id": 2, "to": "9876543210", "status": "Contacted", "disposition": "Full Conversion NEW"},
+        {"call_id": 3, "to": "9000000001", "status": "No Contact", "disposition": "USER_BUSY"},
+        {"call_id": 4, "to": "9000000003", "status": "Contacted", "disposition": "Not Interested NEW"}]
+
+
+def test_first_funnel_wins_sales_match_by_phone_then_email_and_timepay_best_outcome():
+    r = fi.build(LEADS, SALES, MAP, fi.timepay_by_phone(LOGS))
     assert r["people"] == 3
-    assert r["icp"]["Teachers / educators"] == {"leads": 1, "sales": 1, "paid": 100.0}
-    assert r["icp"]["Retired"] == {"leads": 1, "sales": 1, "paid": 50.0}
-    assert r["icp"][fi.UNMAPPED]["leads"] == 1
+    t = r["icp"]["Teachers / educators"]
+    assert (t["leads"], t["dialled"], t["connected"], t["positive"], t["full"], t["sales"], t["paid"]) == \
+        (1, 1, 1, 1, 1, 1, 100.0)
+    ret = r["icp"]["Retired"]
+    assert (ret["dialled"], ret["connected"], ret["positive"], ret["sales"]) == (1, 0, 0, 1)
+    assert r["segments"]["Brand search"]["connected"] == 1 and r["segments"]["Brand search"]["positive"] == 0
     assert r["matched"] == {"phone": 1, "email": 1, "not in GrowthX": 1}
+    assert all(c[0] != "FAIL" for c in fi.checks(r, MAP, LEADS))
+
+
+def test_checks_fail_on_unmapped_page_and_missing_segment():
+    m = {**MAP, "general_segments": {}}
+    r = fi.build(LEADS + [lead("9000000002", "new-page", "2026-10-03T11:00")], SALES, m)
+    failed = {c[1] for c in fi.checks(r, m, LEADS) if c[0] == "FAIL"}
+    assert "Every lead's landing page is mapped" in failed
+    assert "Every General page has a segment, and only General pages" in failed
+
+
+def test_checks_fail_when_timepay_returns_fewer_calls_than_counted():
+    r = fi.build(LEADS, SALES, MAP, {})
+    assert ("FAIL", "TimePay: every counted call was read", "read 9 of 10") in fi.checks(r, MAP, LEADS, 10, 9)
 
 
 def test_read_sales_keeps_sale_statuses_and_float_phones(tmp_path):
@@ -42,10 +70,19 @@ def test_read_sales_keeps_sale_statuses_and_float_phones(tmp_path):
     ws.append(["", "", "B", 919000000000.0, "", 0, "Not interested"])
     path = os.path.join(tmp_path, "s.xlsx")
     wb.save(path)
-    assert fi.read_sales(path, "Bootcamp | X") == [{"phone": "9876543210", "email": "a@x.in", "paid": 5000.0}]
+    got = fi.read_sales(path, "Bootcamp | X")
+    assert [(s["row"], s["phone"], s["email"], s["paid"]) for s in got] == [(2, "9876543210", "a@x.in", 5000.0)]
 
 
-def test_shipped_maps_use_only_their_own_icps():
+def test_written_report_rereads_to_the_same_totals(tmp_path):
+    r = fi.build(LEADS, SALES, MAP, fi.timepay_by_phone(LOGS))
+    path = os.path.join(tmp_path, "r.xlsx")
+    fi.write_xlsx(r, fi.checks(r, MAP, LEADS), path, "t", "fresh")
+    assert fi.verify_written(path, r)
+
+
+def test_shipped_maps_are_consistent():
     for name in os.listdir(fi.MAPS_DIR):
         m = json.load(open(os.path.join(fi.MAPS_DIR, name), encoding="utf-8"))
         assert set(m["pages"].values()) <= set(m["icps"]), name
+        assert set(m["general_segments"]) == {s for s, v in m["pages"].items() if v == "General"}, name

@@ -69,5 +69,11 @@
   "usacc-sim-ca-inter-2": "CA Inter / MBA Finance / CMA",
   "usacc-sim-evening": "Employed accountants",
   "usacc-sim-evening-2": "Employed accountants"
+ },
+ "general_segments": {
+  "google-accounting-all-oct10": "Brand search (\"Skill-arbitrage\")",
+  "google-accounting-quote-ad-oct10": "Accountants and commerce grads, generic \"from home\"",
+  "sep12-usacc-paychart-2": "Any Indian accountant wanting US clients (pay chart)",
+  "usacc-oct-tuition": "Accountancy tuition teachers"
  }
 }

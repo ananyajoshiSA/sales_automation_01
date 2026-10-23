@@ -103,5 +103,9 @@
   "rid-oct-ric-sor": "Teachers / educators",
   "w1-2": "Senior women professionals",
   "w3-2": "Senior women professionals"
+ },
+ "general_segments": {
+  "oct10-id-f20-social-sector": "Social-sector professionals (NGO, CSR, 10+ yrs)",
+  "id-oct-cxo": "CEOs and CXOs"
  }
 }
