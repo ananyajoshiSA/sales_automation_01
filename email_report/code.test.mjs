@@ -90,7 +90,11 @@ function wati({ fail = [], status = 200, templates = [{ elementName: 'daily_repo
         const num = new URL(r.url).searchParams.get('whatsappNumber');
         return fail.includes(num) ? answer(200, { result: false, info: 'Invalid WhatsApp number' }) : answer(status, { result: status === 200 });
       }),
-      fetch: (url, opts) => { calls.push({ url, ...opts }); return answer(status, { result: 'success', messageTemplates: templates }); },
+      fetch: (url, opts) => {
+        calls.push({ url, ...opts });
+        const page = Number(new URL(url).searchParams.get('pageNumber'));
+        return answer(status, { result: 'success', messageTemplates: templates.slice((page - 1) * 100, page * 100) });
+      },
     },
   };
 }
@@ -547,6 +551,13 @@ test('editor helpers: WhatsApp check hides the key and sends nothing; the test g
   const pending = load(WA, { watiOpts: { templates: [{ elementName: 'daily_report_pdf', status: 'PENDING' }] } });
   pending.gs.checkWhatsApp();
   assert.match(pending.logs.at(-1), /Template daily_report_pdf: PENDING/);
+  const filler = Array.from({ length: 150 }, (_, i) => ({ elementName: `promo_${i}`, status: 'APPROVED' }));
+  const paged = load(WA, { watiOpts: { templates: [...filler, { elementName: 'daily_report_pdf', status: 'APPROVED' }] } });
+  paged.gs.checkWhatsApp();
+  assert.match(paged.logs.at(-1), /Template daily_report_pdf: APPROVED/);
+  const other = load(WA, { watiOpts: { templates: [...filler, { elementName: 'daily_report_pdf_v2', status: 'PENDING' }] } });
+  other.gs.checkWhatsApp();
+  assert.match(other.logs.at(-1), /NOT FOUND among 151 templates in WATI\nSimilar names: daily_report_pdf_v2 \(PENDING\)\. If one of these is yours, set WATI_TEMPLATE/);
   const bad = load(WA, { watiOpts: { status: 401 } });
   bad.gs.checkWhatsApp();
   assert.match(bad.logs.at(-1), /WATI answered HTTP 401: check WATI_TOKEN and WATI_CLIENT_ID/);

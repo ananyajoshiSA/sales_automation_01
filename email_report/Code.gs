@@ -599,14 +599,26 @@ function checkWhatsApp() {
   }));
   if (w.problem) lines.push('PROBLEM: ' + w.problem);
   if (w.token && WA_TENANT.test(w.tenant)) {
-    var r = UrlFetchApp.fetch(WA_HOST + '/' + w.tenant + '/api/v1/getMessageTemplates?pageSize=100&pageNumber=1', {
-      headers: {Authorization: /^bearer /i.test(w.token) ? w.token : 'Bearer ' + w.token}, muteHttpExceptions: true});
-    var code = r.getResponseCode();
-    if (code !== 200) {
+    var all = [], code = 200;
+    for (var page = 1; page <= 20 && code === 200; page++) {  // WATI lists templates 100 to a page
+      var r = UrlFetchApp.fetch(WA_HOST + '/' + w.tenant + '/api/v1/getMessageTemplates?pageSize=100&pageNumber=' + page, {
+        headers: {Authorization: /^bearer /i.test(w.token) ? w.token : 'Bearer ' + w.token}, muteHttpExceptions: true});
+      code = r.getResponseCode();
+      if (code !== 200) break;
+      var got = (JSON.parse(r.getContentText()) || {}).messageTemplates || [];
+      all = all.concat(got);
+      if (got.length < 100) break;
+    }
+    if (code !== 200 && !all.length) {
       lines.push('WATI answered HTTP ' + code + ': check WATI_TOKEN and WATI_CLIENT_ID');
     } else {
-      var t = ((JSON.parse(r.getContentText()) || {}).messageTemplates || []).filter(function (x) { return x.elementName === w.template; })[0];
-      lines.push('WATI key and client ID work. Template ' + w.template + ': ' + (t ? t.status : 'NOT FOUND in WATI'));
+      var t = all.filter(function (x) { return x.elementName === w.template; })[0];
+      lines.push('WATI key and client ID work. Template ' + w.template + ': ' + (t ? t.status : 'NOT FOUND among ' + all.length + ' templates in WATI'));
+      if (!t) {
+        var near = all.filter(function (x) { return /report|daily/i.test(String(x.elementName)); }).slice(0, 5);
+        lines.push(near.length ? 'Similar names: ' + near.map(function (x) { return x.elementName + ' (' + x.status + ')'; }).join(', ') +
+                   '. If one of these is yours, set WATI_TEMPLATE to its exact name.' : 'No template name contains "report" or "daily".');
+      }
     }
   }
   console.log(lines.join('\n'));
