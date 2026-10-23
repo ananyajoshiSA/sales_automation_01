@@ -610,3 +610,15 @@ test("where DriveApp may not share by link, Drive's own API opens and later clos
   assert.equal(f.sharing, 'private');
   assert.equal(run.wati.filter((c) => c.drive).at(-1).method, 'delete');
 });
+
+test('the demo sends two sample PDFs on WhatsApp only, to the list numbers, and emails nobody', () => {
+  const run = load(WA);
+  run.gs.sendWhatsAppDemo();
+  const sends = run.wati.filter((c) => c.body);
+  assert.equal(sends.length, 4);
+  assert.deepEqual(sends.map((c) => Object.fromEntries(c.body.parameters.map((p) => [p.name, p.value]))[2]),
+    ['Call plan DEMO (PDF)', 'Call plan DEMO (PDF)', 'Status at 13:50 DEMO (PDF)', 'Status at 13:50 DEMO (PDF)']);
+  assert.match(run.logs.at(-1), /WhatsApp demo: 4 of 4 messages sent \(2 file\(s\) to 2 number\(s\)\)/);
+  assert.equal(run.sent.length, 0);
+  assert.throws(() => load(WA).gs.sendWhatsAppDemo('sana'), /WA_LIST_SANA is empty/);
+});

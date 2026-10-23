@@ -678,6 +678,22 @@ function sendWhatsAppTest() {
   console.log('WhatsApp test: ' + whatsappSend_(w, [file], [w.test], 'test'));
 }
 
+/** WhatsApp only, no email: two sample PDFs (no lead data) to every number in WA_LIST_<list> (default elite). */
+function sendWhatsAppDemo(list) {
+  var name = typeof list === 'string' && LIST_NAME.test(list) ? list : 'elite';
+  var w = readWhatsApp_();
+  if (w.problem) throw new Error(w.problem);
+  if (!w.lists[name]) throw new Error('WA_LIST_' + name.toUpperCase() + ' is empty: add its numbers first');
+  var files = ['call_plan', 'status_1350'].map(function (kind) {
+    var title = kind === 'call_plan' ? 'Morning call plan' : 'Status at 13:50';
+    var bytes = Utilities.newBlob('<h2>' + title + ' (DEMO)</h2><p>Sample file to show WhatsApp delivery. It has no lead data. Sent ' +
+                                  nowIst_('d MMM yyyy, h:mm a') + ' IST.</p>', 'text/html', kind + '.html').getAs('application/pdf').getBytes();
+    return {name: name + '_' + kind + '_DEMO.pdf', bytes: bytes, type: TYPES.pdf,
+            sha: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes))};
+  });
+  console.log('WhatsApp demo: ' + whatsappSend_(w, files, w.lists[name], name));
+}
+
 /** Lists every file this script has emailed, newest first. */
 function showSentLog() {
   var all = PropertiesService.getUserProperties().getProperties();
