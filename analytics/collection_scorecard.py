@@ -38,7 +38,7 @@ NO_TEAM = "Not with either team"
 MAYUR_TLS = {
     "Sonal Tripathi": ("Sonal Tripathi", "Dipak Kumar Verma", "Vedahi Rana", "Shikha Chahar", "Yamini Billore"),
     "Anjali Srivastava": ("Anjali Srivastava", "Devika Singh", "Kanika Verma", "Srashti Dwivedi", "Shivangi Vyas"),
-    "Ayush Srivastava": ("Ayush Srivastava",),
+    "Ayush Srivastava": ("Ayush Srivastava", "Aisha Sami", "Himanshi"),
     "Prawal Singh": ("Prawal Singh",),
 }
 PUJA_GROUP_TL = {"Team Women AI": "Nancy Bajaj", "DSV - UK (Aditya)": "Aditya Chugh",

@@ -5,7 +5,7 @@ from analytics.collection_scorecard import (callers, chances, hierarchy, next_st
 from integrations.timeutil import utc
 
 NOW = "2026-10-24 06:00:00"
-GROUPS = {"Asha Rao": ["Acefone Users", "Team Puja Malik (DSV+Women AI)", "Team Women AI"],
+GROUPS = {"Asha Rao": ["Acefone Users", "Team Puja Malik (DSV+Women AI)", "Team Women AI"], "Himanshi": ["Elite Changemakers"],
           "Vedahi Rana": ["Elite Changemakers"], "Raunak Mandilwar": ["Elite Changemakers"],
           "New Joiner": ["Elite Changemakers"], "Someone Else": ["Group A"]}
 META = {"fetched_at_utc": NOW, "team_of_owner": {"u1": "Team Puja Malik (DSV+Women AI)"},
@@ -53,6 +53,7 @@ def test_hierarchy_maps_side_ad_and_tl():
     assert h["Asha Rao"] == ("Puja / Anmol", "Anmol Gakhar", "Nancy Bajaj")
     assert h["Vedahi Rana"] == ("Mayur", "Sahil Arora", "Sonal Tripathi")
     assert h["Raunak Mandilwar"] == ("Mayur", "Raunak Mandilwar", "(AD)")
+    assert h["Himanshi"] == ("Mayur", "Raunak Mandilwar", "Ayush Srivastava")
     assert h["New Joiner"] == ("Mayur", "Not known", "Not known")
     assert "Someone Else" not in h
 
