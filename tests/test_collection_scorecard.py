@@ -75,6 +75,7 @@ def test_pipeline_priority_reason_and_step():
     assert next_step(fresh).startswith("Call back first")
     old = {**fresh, "days_since_booking": 75, "call_not_returned": False, "days_since_real": 40}
     assert priority(old) == "3 · TL decides" and next_step(old).startswith("TL: final call")
+    assert next_step({**fresh, "dials": 0, "call_not_returned": False}).startswith("First call not made yet")
 
 
 def test_chances_measure_later_payment_among_still_pending():

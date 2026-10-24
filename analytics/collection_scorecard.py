@@ -179,6 +179,8 @@ def why(r: dict, now: datetime) -> str:
 def next_step(r: dict) -> str:
     if r["call_not_returned"]:
         return "Call back first: the lead tried to reach you."
+    if r["dials"] == 0:
+        return "First call not made yet: call today."
     if priority(r) == "3 · TL decides":
         return "TL: final call this week: collect, move to a named batch, or drop with a reason."
     if not r["connected"]:
@@ -205,7 +207,7 @@ def agg(rs: list[dict], bar: float) -> dict:
             "dialled_24h_%": pct(sum(r["dialled_24h"] for r in rs), n),
             "real_conv_%": pct(sum(r["real_convs"] > 0 for r in rs), n),
             "attempt_days": median([r["attempt_days"] for r in rs if r["outcome"] != "collected"]),
-            "callbacks_kept_%": pct(sum(r["callbacks_due"] - r["callbacks_missed"] for r in rs), sum(r["callbacks_due"] for r in rs)),
+            "callbacks_kept": f"{sum(r['callbacks_due'] - r['callbacks_missed'] for r in rs)} of {sum(r['callbacks_due'] for r in rs)}",
             "abandoned": sum(r["outcome"] == "open" and r["stalled"] for r in rs),
             "moved_out": sum(r["moved_out"] and r["outcome"] != "collected" for r in rs),
             "no_reason": sum(r["reason"] == "No reason recorded" for r in rs),
@@ -221,10 +223,12 @@ def callers(rows: list[dict], bar: float) -> list[dict]:
     out = [{"side": k[0], "ad": k[1], "tl": k[2], "caller": k[3], **agg(v, bar)} for k, v in g.items() if len(v) >= MIN_CALLER_LEADS]
     for r in out:
         r["abandoned_%"] = pct(r["abandoned"], r["leads"])
-    m24, mdays, mab = (median([r[k] for r in out]) for k in ("dialled_24h_%", "attempt_days", "abandoned_%"))
+    med = {(s, k): median([r[k] for r in out if r["side"] == s]) for s in {r["side"] for r in out}
+           for k in ("dialled_24h_%", "attempt_days", "abandoned_%")}
     for r in out:
-        weak = sum([(r["dialled_24h_%"] or 0) < (m24 or 0), (r["attempt_days"] or 0) < (mdays or 0),
-                    (r["abandoned_%"] or 0) > (mab or 0)])
+        m = lambda k: med[(r["side"], k)] or 0
+        weak = sum([(r["dialled_24h_%"] or 0) < m("dialled_24h_%"), (r["attempt_days"] or 0) < m("attempt_days"),
+                    (r["abandoned_%"] or 0) > m("abandoned_%")])
         good, busy = (r["recovery_%"] or 0) >= bar, weak < 2
         r["effort"] = "High" if busy else "Low"
         r["box"], r["action"] = {
@@ -361,7 +365,7 @@ def write_workbook(path: str, rows: list[dict], recon: dict, meta: dict, bar: fl
                  f"the same age that later paid.")
     body = [[p["priority"], f"{p['chance']}%" if p["chance"] is not None else "—", p["side"], p["ad"], p["tl"], p["caller"],
              p["lead_name"], p["lead_id"], p["course"], p["booked_ist"][:10], int(p["days_since_booking"]), p["stage"],
-             p["last_disposition"], _ist(p["last_dial"]), p["dials"], p["real_convs"],
+             p["last_disposition"] or "None logged", _ist(p["last_dial"]), p["dials"], p["real_convs"],
              int(p["days_since_real"]) if p["days_since_real"] is not None else "never", _ist(p["next_follow_up"], "%d %b %H:%M"),
              p["why"], p["step"]] for p in pipe]
     fills = [[PRIORITY_FILL[p["priority"]]] + [None] * 19 for p in pipe]
@@ -383,14 +387,14 @@ def write_workbook(path: str, rows: list[dict], recon: dict, meta: dict, bar: fl
 
     ws = wb.create_sheet("Callers")
     title(ws, 1, f"Callers with {MIN_CALLER_LEADS}+ leads booked {MATURE_DAYS}+ days ago. Effort is High unless the caller is "
-                 f"below the callers' median on 2 of: dialled in 24 h, attempt-days, leads abandoned.")
+                 f"below their team's median on 2 of: dialled in 24 h, attempt-days, leads abandoned.")
     body = [[c["side"], c["ad"], c["tl"], c["caller"], c["leads"], c["recovery_%"], c["gap_to_bar"], c["dialled_24h_%"],
-             c["real_conv_%"], c["attempt_days"], c["callbacks_kept_%"], c["abandoned"], c["moved_out"], c["no_reason"],
+             c["real_conv_%"], c["attempt_days"], c["callbacks_kept"], c["abandoned"], c["moved_out"], c["no_reason"],
              c["effort"], c["box"], c["action"]] for c in cal]
     fills = [[None] * 5 + [band(c["recovery_%"], bar)] + [None] * 9 + [GOOD if c["box"] == "Performing well" else NEAR, None]
              for c in cal]
     _table(ws, 2, ["Team", "AD", "TL", "Caller", "Leads", "Recovered %", f"More needed for {bar:.0f}%", "Dialled in 24 h %",
-                   "Real conversation %", "Attempt-days on unpaid leads (median)", "Callbacks kept %",
+                   "Real conversation %", "Attempt-days on unpaid leads (median)", "Dated callbacks kept",
                    "Abandoned (pending, no dial 7+ days)", "Dropped and moved out", "Drops with no reason", "Effort", "Box",
                    "What the TL does"], [12, 16, 16, 20, 7, 10, 10, 10, 10, 12, 10, 12, 10, 10, 8, 22, 40], body, fills)
 
