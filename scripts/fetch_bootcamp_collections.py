@@ -19,7 +19,7 @@ from integrations.leadsquared import LeadSquaredClient
 from integrations.timeutil import now_utc
 from scripts.fetch_lead_histories import main as fetch_histories
 
-COLUMNS = ["ProspectID", "OwnerId", "OwnerIdName", "ProspectStage", "CreatedOn", "mx_Bootcamp_collections",
+COLUMNS = ["ProspectID", "FirstName", "LastName", "OwnerId", "OwnerIdName", "ProspectStage", "CreatedOn", "mx_Bootcamp_collections",
            "mx_Enquired_Course", "mx_Course_Fees", "mx_Bootcamp_attended", "mx_Next_follow_up_date"]
 
 
@@ -45,7 +45,9 @@ def main(first_month: str, last_month: str, out_dir: str) -> None:
     fetch_histories(ids, os.path.join(out_dir, "hist.jsonl"))
     json.dump({"fetched_at_utc": now_utc().strftime("%Y-%m-%d %H:%M:%S"), "bootcamps": tags,
                "months": [first_month, last_month], "team_of_owner": team_of_owner,
-               "team_callers": team_callers},
+               "team_callers": team_callers,
+               "member_groups": {f"{u.get('FirstName') or ''} {u.get('LastName') or ''}".strip(): u.get("MemberOfGroups") or []
+                                 for u, _ in members}},
               open(os.path.join(out_dir, "meta.json"), "w"), indent=1)
 
 
