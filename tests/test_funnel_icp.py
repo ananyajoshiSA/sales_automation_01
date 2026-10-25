@@ -86,3 +86,63 @@ def test_shipped_maps_are_consistent():
         m = json.load(open(os.path.join(fi.MAPS_DIR, name), encoding="utf-8"))
         assert set(m["pages"].values()) <= set(m["icps"]), name
         assert set(m["general_segments"]) == {s for s, v in m["pages"].items() if v == "General"}, name
+
+
+def test_caller_list_priorities_tabs_and_icp_choice(tmp_path):
+    from analytics import funnel_icp_callers as fc
+
+    m = {**MAP, "playbook": {"Retired": {"open_with": "R line", "story": "R story", "day": "Day 1"}},
+         "stated_icp_codes": {"E": "Retired", "F": "General"}}
+    leads = LEADS + [lead("9000000004", "edu-a", "2026-10-03T13:00"), lead("9000000005", "ret-a", "2026-10-03T14:00")]
+    logs = LOGS + [{"call_id": 5, "to": "9000000004", "status": "Contacted", "disposition": "Not Interested NEW"},
+                   {"call_id": 6, "to": "9000000005", "status": "Contacted", "disposition": "Call Back NEW",
+                    "summary": "Asked to call after 6 PM", "start_time": "2026-10-04T10:00:00"}]
+    tp = fi.timepay_by_phone(logs)
+    r = fi.build(leads, SALES, m, tp)
+    stated = {"9000000003": "Retired", "9000000004": "General"}
+    rows = {x["Phone"]: x for x in fc.caller_rows(leads, r, m, tp, stated)}
+    assert rows["9876543210"]["tab"] == "Already enrolled" and rows["9876543210"]["Priority"] == ""
+    no = rows["9000000004"]  # said no: stays on the call list, last
+    assert (no["tab"], no["prio"], no["Said yes to the AI agent?"]) == ("Call list", 6, "No")
+    assert no["ICP"] == "Teachers / educators"  # call "General" never overrides the ad
+    assert rows["9000000003"]["ICP"] == "Retired" and rows["9000000003"]["Check"]
+    assert rows["9000000003"]["Open with"] == "R line"
+    assert rows["9000000001"]["Said yes to the AI agent?"] == "Not reached" and rows["9000000001"]["prio"] == 5
+    cb = rows["9000000005"]  # callback; Retired sold 1 of 2 leads, above the campaign average
+    assert (cb["prio"], cb["Said yes to the AI agent?"], cb["AI call summary"], cb["Last AI call (IST)"]) == \
+        (3, "Callback", "Asked to call after 6 PM", "2026-10-04T10:00:00")
+    assert cb["ICP sales so far"] == "1 of 2 leads bought (50.0%)"
+    assert all(c[0] == "PASS" for c in fc.caller_checks(list(rows.values()), r))
+    path = os.path.join(tmp_path, "c.xlsx")
+    fc.write_caller_xlsx(list(rows.values()), path, "t", "f", m, r)
+    assert openpyxl.load_workbook(path).sheetnames == ["How to use", "Call list", "Already enrolled"]
+
+
+def test_shipped_maps_have_a_playbook_for_every_icp():
+    for name in os.listdir(fi.MAPS_DIR):
+        m = json.load(open(os.path.join(fi.MAPS_DIR, name), encoding="utf-8"))
+        assert set(m["playbook"]) == set(m["icps"]), name
+        assert set(m["stated_icp_codes"].values()) <= set(m["icps"]), name
+
+
+def test_every_tab_is_written_as_csv(tmp_path):
+    r = fi.build(LEADS, SALES, MAP, fi.timepay_by_phone(LOGS))
+    path = os.path.join(tmp_path, "r.xlsx")
+    fi.write_xlsx(r, fi.checks(r, MAP, LEADS), path, "t", "fresh")
+    names = sorted(os.path.basename(p) for p in fi.xlsx_to_csvs(path))
+    assert names == ["r_By_ICP.csv", "r_By_funnel.csv", "r_Checks.csv", "r_Spot_check.csv"]
+    text = open(os.path.join(tmp_path, "r_By_ICP.csv"), encoding="utf-8-sig").read()
+    assert text.startswith("t") and "Teachers / educators" in text
+
+
+def test_summary_pdf_notes_name_best_and_worst_from_the_figures(monkeypatch):
+    from analytics import funnel_icp_pdf as fp
+
+    monkeypatch.setattr(fp, "MIN_LEADS", 1)
+    r = fi.build(LEADS, SALES, MAP, fi.timepay_by_phone(LOGS))
+    n = " ".join(fp.notes(r))
+    assert "Best:</b> Retired, 1 sales from 1 leads (100.0%)" in n
+    assert "Worst:</b> General, 0 sales from 1 leads" in n
+    assert "1 of 3 sales did not match a GrowthX lead" in n
+    doc = fp.html_doc(r, fi.checks(r, MAP, LEADS), "t", "fresh")
+    assert "Brand search" in doc and "failed" in doc

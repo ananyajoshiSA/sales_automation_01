@@ -3,10 +3,17 @@ name: funnel-icp-report
 description: Leads and sales per ICP for any bootcamp campaign, from GrowthX funnels and the enrolment sheet. Use when someone asks "ICP report for <bootcamp> <month>", "which ICP converted", "leads and sales per ICP/funnel", or "which ads brought teachers/retired/etc."
 ---
 
-# Funnel → ICP report
+# Funnel → ICP report (two stages)
 
-Gives, for one bootcamp campaign: leads, sales, conversion and money received per ICP, plus the same per
-funnel. Code: `analytics/funnel_icp.py`. ICP maps: `analytics/funnel_icp_maps/<bootcamp>.json`.
+- **Stage 1, for managers:** leads, TimePay results, sales and money per ICP and per funnel
+  (`ICP_funnel_report_<leadtype>.xlsx`).
+- **Stage 2, for sales callers:** one row per lead, none left out, best first: the ICP, how that ICP has
+  sold so far, their answer on the AI call (Yes / Callback / No clear answer / No / Not reached), the AI
+  call summary, priority 1–6 and why, and the line to open with, story and bootcamp day. Leads who said no
+  stay on the list at priority 6; only enrolled leads move to their own tab
+  (`Caller_list_<leadtype>.xlsx`, code in `analytics/funnel_icp_callers.py`).
+
+Both come from one run, so they always agree. Code: `analytics/funnel_icp.py`. ICP maps: `analytics/funnel_icp_maps/<bootcamp>.json`.
 
 ## What to ask the person (only if missing)
 1. Which bootcamp and campaign (e.g. "US Accounting, 14–16 Nov").
@@ -45,6 +52,14 @@ funnel. Code: `analytics/funnel_icp.py`. ICP maps: `analytics/funnel_icp_maps/<b
    `python -m analytics.funnel_icp report <bootcamp> <leadtype> data/enr.xlsx "<tab>" exports --timepay <id>[,<id>] --tp-from 2026-MM-DDT00:00:00 [--tp-to ..] [--from YYYY-MM-DD --to YYYY-MM-DD]`
    Output: `exports/ICP_funnel_report_<leadtype>.xlsx` with tabs By ICP (General split by segment),
    By funnel, Checks and Spot check.
+7b. **ICP from what each lead said (stage 2, recommended):** read every connected lead's TimePay call
+   summary yourself (no model API, no keyword rules; use subagents in batches of about 500) and write
+   `data/funnel_icp/stated_<leadtype>.tsv` as `phone<TAB>code`, codes from the map's `stated_icp_codes`.
+   Rules: use only what the lead said about themselves; pick one ICP; teacher/principal/professor → the
+   Teachers code (ID: T); "General" only when they gave a background that fits none; leave the lead out
+   when they said nothing about themselves. A woman needs a senior role or 10+ years to be "Senior women".
+   Then re-run step 7 with `--stated-icp data/funnel_icp/stated_<leadtype>.tsv`. Hand-check 20 codings
+   against their summaries and report the result.
 8. **Double checks before sharing (all required):**
    - Exit code 0 and no FAIL in the Checks tab. A FAIL means fix and re-run, never share.
    - Read every WARN. Email-only matches with a different sheet phone: open those sheet rows and confirm
@@ -55,6 +70,16 @@ funnel. Code: `analytics/funnel_icp.py`. ICP maps: `analytics/funnel_icp_maps/<b
 9. **Commit the updated map** (it holds no lead data) so the next run starts from it.
 
 ## How to present it
+**Always deliver CSV or PDF, never only xlsx.** Managers get the one-page `exports/ICP_summary_<leadtype>.pdf`.
+Each run also writes every tab as CSV
+(`exports/ICP_funnel_report_<leadtype>_<Tab>.csv`, `exports/Caller_list_<leadtype>_<Tab>.csv`); send those.
+The callers' file is `Caller_list_<leadtype>_Call_list.csv`.
+
+Stage 2 goes to the callers as is. Tell the team leader how many leads are in each priority (1–6) and
+Already enrolled, the Yes / Callback / No clear answer / No / Not reached split, and how many leads have
+an ICP from the call versus only from the ad.
+
+Stage 1:
 Lead with the table per ICP (leads, TimePay connected, positive % of connected, sales, lead→sale %,
 money received), General split by segment. Say how fresh the data is and the check results. Then the 2–3 funnels driving the
 best and worst ICP. Say how many sales did not match a GrowthX lead. Leave out ICPs with no leads.
