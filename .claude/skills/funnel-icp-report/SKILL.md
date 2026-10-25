@@ -70,6 +70,10 @@ Both come from one run, so they always agree. Code: `analytics/funnel_icp.py`. I
 9. **Commit the updated map** (it holds no lead data) so the next run starts from it.
 
 ## How to present it
+**Always deliver CSV or PDF, never only xlsx.** Each run writes every tab as CSV
+(`exports/ICP_funnel_report_<leadtype>_<Tab>.csv`, `exports/Caller_list_<leadtype>_<Tab>.csv`); send those.
+The callers' file is `Caller_list_<leadtype>_Call_list.csv`.
+
 Stage 2 goes to the callers as is. Tell the team leader how many leads are in each priority (1–6) and
 Already enrolled, the Yes / Callback / No clear answer / No / Not reached split, and how many leads have
 an ICP from the call versus only from the ad.

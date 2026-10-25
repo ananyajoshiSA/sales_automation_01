@@ -23,6 +23,7 @@ and added to the map before ``report`` runs.
         [--from .. --to ..] [--timepay CAMPAIGN_ID[,ID]] [--tp-from YYYY-MM-DDTHH:MM:SS --tp-to ..]
         [--timepay-logs logs.json] [--stated-icp phone_code.tsv]
 
+Every tab of both workbooks is also written as CSV (``<file>_<tab>.csv``); share the CSVs.
 Stage 1 (managers): ``ICP_funnel_report_<leadtype>.xlsx``. Stage 2 (sales callers): ``Caller_list_<leadtype>.xlsx``,
 one row per lead (see ``analytics/funnel_icp_callers.py``).
 """
@@ -379,6 +380,26 @@ def write_xlsx(result: dict, chk: list, path: str, title: str, fresh: str) -> No
     wb.save(path)
 
 
+def xlsx_to_csvs(path: str) -> list[str]:
+    """Write every tab of a saved workbook as ``<file>_<Tab_name>.csv`` (UTF-8 with BOM so Excel shows Hindi
+    and rupee text). The CSVs are the files people get; they hold exactly what the workbook holds."""
+    import csv
+
+    import openpyxl
+
+    out = []
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    for ws in wb.worksheets:
+        name = re.sub(r"[^A-Za-z0-9]+", "_", ws.title).strip("_")
+        target = f"{os.path.splitext(path)[0]}_{name}.csv"
+        with open(target, "w", newline="", encoding="utf-8-sig") as f:
+            w = csv.writer(f)
+            for row in ws.iter_rows(values_only=True):
+                w.writerow(["" if v is None else v for v in row])
+        out.append(target)
+    return out
+
+
 def verify_written(path: str, result: dict) -> bool:
     """Re-open the saved file and confirm the ICP rows add up to the same leads and sales."""
     import openpyxl
@@ -462,11 +483,13 @@ def main(argv: list[str] | None = None) -> int:
     write_xlsx(result, chk, path, f"Leads, TimePay and sales per ICP · {a.bootcamp} · {a.leadtype}", fresh)
     caller_path = os.path.join(a.out_dir, f"Caller_list_{a.leadtype}.xlsx")
     write_caller_xlsx(callers, caller_path, f"Caller list · {a.bootcamp} · {a.leadtype}", fresh, icp_map, result)
+    csvs = xlsx_to_csvs(path) + xlsx_to_csvs(caller_path)
     for c in chk:
         if c[0] != "PASS":
             print(f"{c[0]:5} {c[1]}: {c[2]}")
     fails = [c for c in chk if c[0] == "FAIL"]
     print(f"{len(chk) - len(fails)} of {len(chk)} checks not failed -> {path} and {caller_path}")
+    print("CSV files (send these):\n  " + "\n  ".join(csvs))
     if fails:
         print("REPORT NOT READY: fix the FAIL checks above before sharing.", file=sys.stderr)
         return 3

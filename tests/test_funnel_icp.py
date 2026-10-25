@@ -123,3 +123,13 @@ def test_shipped_maps_have_a_playbook_for_every_icp():
         m = json.load(open(os.path.join(fi.MAPS_DIR, name), encoding="utf-8"))
         assert set(m["playbook"]) == set(m["icps"]), name
         assert set(m["stated_icp_codes"].values()) <= set(m["icps"]), name
+
+
+def test_every_tab_is_written_as_csv(tmp_path):
+    r = fi.build(LEADS, SALES, MAP, fi.timepay_by_phone(LOGS))
+    path = os.path.join(tmp_path, "r.xlsx")
+    fi.write_xlsx(r, fi.checks(r, MAP, LEADS), path, "t", "fresh")
+    names = sorted(os.path.basename(p) for p in fi.xlsx_to_csvs(path))
+    assert names == ["r_By_ICP.csv", "r_By_funnel.csv", "r_Checks.csv", "r_Spot_check.csv"]
+    text = open(os.path.join(tmp_path, "r_By_ICP.csv"), encoding="utf-8-sig").read()
+    assert text.startswith("t") and "Teachers / educators" in text
