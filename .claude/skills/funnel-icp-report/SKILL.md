@@ -7,9 +7,11 @@ description: Leads and sales per ICP for any bootcamp campaign, from GrowthX fun
 
 - **Stage 1, for managers:** leads, TimePay results, sales and money per ICP and per funnel
   (`ICP_funnel_report_<leadtype>.xlsx`).
-- **Stage 2, for sales callers:** one row per lead, best leads first: the ICP to use, what they told the
-  AI agent, the line to open with, the story to tell and the bootcamp day to mention, plus "Already
-  enrolled" and "Do not call" tabs (`Caller_list_<leadtype>.xlsx`, code in `analytics/funnel_icp_callers.py`).
+- **Stage 2, for sales callers:** one row per lead, none left out, best first: the ICP, how that ICP has
+  sold so far, their answer on the AI call (Yes / Callback / No clear answer / No / Not reached), the AI
+  call summary, priority 1–6 and why, and the line to open with, story and bootcamp day. Leads who said no
+  stay on the list at priority 6; only enrolled leads move to their own tab
+  (`Caller_list_<leadtype>.xlsx`, code in `analytics/funnel_icp_callers.py`).
 
 Both come from one run, so they always agree. Code: `analytics/funnel_icp.py`. ICP maps: `analytics/funnel_icp_maps/<bootcamp>.json`.
 
@@ -68,9 +70,9 @@ Both come from one run, so they always agree. Code: `analytics/funnel_icp.py`. I
 9. **Commit the updated map** (it holds no lead data) so the next run starts from it.
 
 ## How to present it
-Stage 2 goes to the callers as is. Tell the team leader how many leads are in each priority, how many
-are in Do not call and Already enrolled, and how many leads have an ICP from the call versus only from
-the ad.
+Stage 2 goes to the callers as is. Tell the team leader how many leads are in each priority (1–6) and
+Already enrolled, the Yes / Callback / No clear answer / No / Not reached split, and how many leads have
+an ICP from the call versus only from the ad.
 
 Stage 1:
 Lead with the table per ICP (leads, TimePay connected, positive % of connected, sales, lead→sale %,

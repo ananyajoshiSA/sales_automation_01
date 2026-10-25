@@ -102,17 +102,20 @@ def test_caller_list_priorities_tabs_and_icp_choice(tmp_path):
     stated = {"9000000003": "Retired", "9000000004": "General"}
     rows = {x["Phone"]: x for x in fc.caller_rows(leads, r, m, tp, stated)}
     assert rows["9876543210"]["tab"] == "Already enrolled" and rows["9876543210"]["Priority"] == ""
-    assert rows["9000000004"]["tab"] == "Do not call"
-    assert rows["9000000004"]["ICP to use"] == "Teachers / educators"  # call "General" never overrides the ad
-    assert rows["9000000003"]["ICP to use"] == "Retired" and rows["9000000003"]["Check"]
+    no = rows["9000000004"]  # said no: stays on the call list, last
+    assert (no["tab"], no["prio"], no["Said yes to the AI agent?"]) == ("Call list", 6, "No")
+    assert no["ICP"] == "Teachers / educators"  # call "General" never overrides the ad
+    assert rows["9000000003"]["ICP"] == "Retired" and rows["9000000003"]["Check"]
     assert rows["9000000003"]["Open with"] == "R line"
-    cb = rows["9000000005"]
-    assert (cb["prio"], cb["What they told the AI agent"], cb["Last AI call (IST)"]) == \
-        (2, "Asked to call after 6 PM", "2026-10-04T10:00:00")
+    assert rows["9000000001"]["Said yes to the AI agent?"] == "Not reached" and rows["9000000001"]["prio"] == 5
+    cb = rows["9000000005"]  # callback; Retired sold 1 of 2 leads, above the campaign average
+    assert (cb["prio"], cb["Said yes to the AI agent?"], cb["AI call summary"], cb["Last AI call (IST)"]) == \
+        (3, "Callback", "Asked to call after 6 PM", "2026-10-04T10:00:00")
+    assert cb["ICP sales so far"] == "1 of 2 leads bought (50.0%)"
     assert all(c[0] == "PASS" for c in fc.caller_checks(list(rows.values()), r))
     path = os.path.join(tmp_path, "c.xlsx")
     fc.write_caller_xlsx(list(rows.values()), path, "t", "f", m, r)
-    assert openpyxl.load_workbook(path).sheetnames == ["How to use", "Call list", "Already enrolled", "Do not call"]
+    assert openpyxl.load_workbook(path).sheetnames == ["How to use", "Call list", "Already enrolled"]
 
 
 def test_shipped_maps_have_a_playbook_for_every_icp():
