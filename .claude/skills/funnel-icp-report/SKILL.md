@@ -70,7 +70,8 @@ Both come from one run, so they always agree. Code: `analytics/funnel_icp.py`. I
 9. **Commit the updated map** (it holds no lead data) so the next run starts from it.
 
 ## How to present it
-**Always deliver CSV or PDF, never only xlsx.** Each run writes every tab as CSV
+**Always deliver CSV or PDF, never only xlsx.** Managers get the one-page `exports/ICP_summary_<leadtype>.pdf`.
+Each run also writes every tab as CSV
 (`exports/ICP_funnel_report_<leadtype>_<Tab>.csv`, `exports/Caller_list_<leadtype>_<Tab>.csv`); send those.
 The callers' file is `Caller_list_<leadtype>_Call_list.csv`.
 

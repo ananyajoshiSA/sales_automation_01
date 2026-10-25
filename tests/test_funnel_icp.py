@@ -133,3 +133,16 @@ def test_every_tab_is_written_as_csv(tmp_path):
     assert names == ["r_By_ICP.csv", "r_By_funnel.csv", "r_Checks.csv", "r_Spot_check.csv"]
     text = open(os.path.join(tmp_path, "r_By_ICP.csv"), encoding="utf-8-sig").read()
     assert text.startswith("t") and "Teachers / educators" in text
+
+
+def test_summary_pdf_notes_name_best_and_worst_from_the_figures(monkeypatch):
+    from analytics import funnel_icp_pdf as fp
+
+    monkeypatch.setattr(fp, "MIN_LEADS", 1)
+    r = fi.build(LEADS, SALES, MAP, fi.timepay_by_phone(LOGS))
+    n = " ".join(fp.notes(r))
+    assert "Best:</b> Retired, 1 sales from 1 leads (100.0%)" in n
+    assert "Worst:</b> General, 0 sales from 1 leads" in n
+    assert "1 of 3 sales did not match a GrowthX lead" in n
+    doc = fp.html_doc(r, fi.checks(r, MAP, LEADS), "t", "fresh")
+    assert "Brand search" in doc and "failed" in doc
