@@ -21,7 +21,10 @@ and added to the map before ``report`` runs.
     python -m analytics.funnel_icp pages  <bootcamp> <leadtype> <out_dir> [--from YYYY-MM-DD --to YYYY-MM-DD]
     python -m analytics.funnel_icp report <bootcamp> <leadtype> <sales.xlsx> <tab> <out_dir>
         [--from .. --to ..] [--timepay CAMPAIGN_ID[,ID]] [--tp-from YYYY-MM-DDTHH:MM:SS --tp-to ..]
-        [--timepay-logs logs.json]
+        [--timepay-logs logs.json] [--stated-icp phone_code.tsv]
+
+Stage 1 (managers): ``ICP_funnel_report_<leadtype>.xlsx``. Stage 2 (sales callers): ``Caller_list_<leadtype>.xlsx``,
+one row per lead (see ``analytics/funnel_icp_callers.py``).
 """
 
 from __future__ import annotations
@@ -87,8 +90,13 @@ def outcome_rank(disposition: str | None) -> int:
     return next((i for i, p in enumerate(POSITIVE) if d.startswith(p)), len(POSITIVE))
 
 
+def _text(v: Any) -> str:
+    return "" if v in (None, "None", "null") else str(v).strip()
+
+
 def timepay_by_phone(logs: Iterable[dict]) -> dict[str, dict]:
-    """Per phone: dialled, connected (any call Contacted) and best outcome rank, each call_id once."""
+    """Per phone, each call_id once: dialled, connected (any call Contacted), best outcome rank, attempts,
+    last call time (IST), the best call's disposition and the most informative summary of a connected call."""
     seen: set = set()
     out: dict[str, dict] = {}
     for r in logs:
@@ -99,10 +107,23 @@ def timepay_by_phone(logs: Iterable[dict]) -> dict[str, dict]:
         p = phone10(r.get("to"))
         if not p:
             continue
-        s = out.setdefault(p, {"connected": False, "best": len(POSITIVE) + 1})
+        s = out.setdefault(p, {"connected": False, "best": len(POSITIVE) + 1, "attempts": 0, "last_call": "",
+                               "disposition": "", "summary": "", "dispositions": [], "_score": (99, 0)})
+        s["attempts"] += 1
+        s["last_call"] = max(s["last_call"], _text(r.get("start_time")))
         if r.get("status") == "Contacted":
             s["connected"] = True
-            s["best"] = min(s["best"], outcome_rank(r.get("disposition")))
+            rank = outcome_rank(r.get("disposition"))
+            s["dispositions"].append(_text(r.get("disposition")).replace(" NEW", ""))
+            s["best"] = min(s["best"], rank)
+            summary = _text(r.get("summary"))
+            score = (rank, -len(summary))
+            if score < s["_score"]:
+                s["_score"] = score
+                s["disposition"] = _text(r.get("disposition")).replace(" NEW", "")
+                s["summary"] = summary
+    for s in out.values():
+        s.pop("_score", None)
     return out
 
 
@@ -390,6 +411,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--tp-from", default="2026-01-01T00:00:00")
             p.add_argument("--tp-to")
             p.add_argument("--timepay-logs", help="saved logs JSON instead of fetching")
+            p.add_argument("--stated-icp", help="TSV of phone<TAB>code: ICP read from each lead's call summary")
     a = ap.parse_args(argv)
     icp_map = load_map(a.bootcamp)
     os.makedirs(a.out_dir, exist_ok=True)
@@ -428,17 +450,23 @@ def main(argv: list[str] | None = None) -> int:
         tp = timepay_by_phone(logs)
     result = build(leads, read_sales(a.sales_xlsx, a.tab), icp_map, tp)
     chk = checks(result, icp_map, leads, tp_expected, tp_read)
+    from analytics.funnel_icp_callers import caller_checks, caller_rows, read_stated, write_caller_xlsx
+
+    callers = caller_rows(leads, result, icp_map, tp, read_stated(a.stated_icp, icp_map.get("stated_icp_codes", {})))
+    chk += caller_checks(callers, result)
     path = os.path.join(a.out_dir, f"ICP_funnel_report_{a.leadtype}.xlsx")
     fresh = f"Data pulled {datetime.now(IST):%d %b %Y, %I:%M %p} IST"
     write_xlsx(result, chk, path, f"Leads, TimePay and sales per ICP · {a.bootcamp} · {a.leadtype}", fresh)
     ok_file = verify_written(path, result)
     chk.append(("PASS" if ok_file else "FAIL", "Saved file re-read: ICP rows add up", path))
     write_xlsx(result, chk, path, f"Leads, TimePay and sales per ICP · {a.bootcamp} · {a.leadtype}", fresh)
+    caller_path = os.path.join(a.out_dir, f"Caller_list_{a.leadtype}.xlsx")
+    write_caller_xlsx(callers, caller_path, f"Caller list · {a.bootcamp} · {a.leadtype}", fresh, icp_map, result)
     for c in chk:
         if c[0] != "PASS":
             print(f"{c[0]:5} {c[1]}: {c[2]}")
     fails = [c for c in chk if c[0] == "FAIL"]
-    print(f"{len(chk) - len(fails)} of {len(chk)} checks not failed -> {path}")
+    print(f"{len(chk) - len(fails)} of {len(chk)} checks not failed -> {path} and {caller_path}")
     if fails:
         print("REPORT NOT READY: fix the FAIL checks above before sharing.", file=sys.stderr)
         return 3

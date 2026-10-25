@@ -86,3 +86,37 @@ def test_shipped_maps_are_consistent():
         m = json.load(open(os.path.join(fi.MAPS_DIR, name), encoding="utf-8"))
         assert set(m["pages"].values()) <= set(m["icps"]), name
         assert set(m["general_segments"]) == {s for s, v in m["pages"].items() if v == "General"}, name
+
+
+def test_caller_list_priorities_tabs_and_icp_choice(tmp_path):
+    from analytics import funnel_icp_callers as fc
+
+    m = {**MAP, "playbook": {"Retired": {"open_with": "R line", "story": "R story", "day": "Day 1"}},
+         "stated_icp_codes": {"E": "Retired", "F": "General"}}
+    leads = LEADS + [lead("9000000004", "edu-a", "2026-10-03T13:00"), lead("9000000005", "ret-a", "2026-10-03T14:00")]
+    logs = LOGS + [{"call_id": 5, "to": "9000000004", "status": "Contacted", "disposition": "Not Interested NEW"},
+                   {"call_id": 6, "to": "9000000005", "status": "Contacted", "disposition": "Call Back NEW",
+                    "summary": "Asked to call after 6 PM", "start_time": "2026-10-04T10:00:00"}]
+    tp = fi.timepay_by_phone(logs)
+    r = fi.build(leads, SALES, m, tp)
+    stated = {"9000000003": "Retired", "9000000004": "General"}
+    rows = {x["Phone"]: x for x in fc.caller_rows(leads, r, m, tp, stated)}
+    assert rows["9876543210"]["tab"] == "Already enrolled" and rows["9876543210"]["Priority"] == ""
+    assert rows["9000000004"]["tab"] == "Do not call"
+    assert rows["9000000004"]["ICP to use"] == "Teachers / educators"  # call "General" never overrides the ad
+    assert rows["9000000003"]["ICP to use"] == "Retired" and rows["9000000003"]["Check"]
+    assert rows["9000000003"]["Open with"] == "R line"
+    cb = rows["9000000005"]
+    assert (cb["prio"], cb["What they told the AI agent"], cb["Last AI call (IST)"]) == \
+        (2, "Asked to call after 6 PM", "2026-10-04T10:00:00")
+    assert all(c[0] == "PASS" for c in fc.caller_checks(list(rows.values()), r))
+    path = os.path.join(tmp_path, "c.xlsx")
+    fc.write_caller_xlsx(list(rows.values()), path, "t", "f", m, r)
+    assert openpyxl.load_workbook(path).sheetnames == ["How to use", "Call list", "Already enrolled", "Do not call"]
+
+
+def test_shipped_maps_have_a_playbook_for_every_icp():
+    for name in os.listdir(fi.MAPS_DIR):
+        m = json.load(open(os.path.join(fi.MAPS_DIR, name), encoding="utf-8"))
+        assert set(m["playbook"]) == set(m["icps"]), name
+        assert set(m["stated_icp_codes"].values()) <= set(m["icps"]), name
