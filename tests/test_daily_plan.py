@@ -842,3 +842,35 @@ def test_another_team_gets_its_own_file_names_and_plan_state(monkeypatch):
     assert seen == {"state": "plan_state/ID_Closure", "leader": "Darshan Gowda"}
     cli.main(["fetch", "2026-10-20"])
     assert seen["state"] == "plan_state"
+    monkeypatch.setattr(cli, "cmd_fetch", lambda a: seen.update(mail=a.mail_list))
+    cli.main(["--team", "Team Puja Malik (DSV+Women AI)", "fetch", "2026-10-20"])
+    assert seen["mail"] == "team_puja_malik_dsv_women_ai"                       # never Elite's list by default
+    cli.main(["fetch", "2026-10-20"])
+    assert seen["mail"] == "elite"
+
+
+def test_a_team_that_also_collects_gets_a_plan_without_collection_leads():
+    leads = [dict(LEADS[0], mx_Bootcamp_collections="Remote Work for Women Bootcamp Collection - 1st August'26"),
+             dict(LEADS[1], mx_Bootcamp_collections="Community Webinar Collections"),
+             dict(LEADS[2], ProspectStage="Booking fees received"),          # untagged, but a booking fee is collection work
+             dict(LEADS[3], ProspectStage="Call Back Later")]
+    assert [l["ProspectID"] for l in leads] == ["L1", "L2", "L3", "L4"]
+    calls = [call("u1", f"L{i}", "2026-10-09 05:00:00", "Answered", 300) for i in (1, 2, 3, 4)]
+    zips = [{"ProspectActivityId": f"z{i}", "RelatedProspectId": f"L{i}", "ActivityEvent": 237} for i in (1, 4)]
+    raw = {"group": "Team Puja Malik (DSV+Women AI)", "users": USERS, "fetched_at": "2026-10-10T08:30:00+00:00", "leads": leads,
+           "calls": calls, "zip_activities": zips}
+    s = Snap(raw, leader="Puja Malik")
+    assert set(s.leads) == {"L4"} and {c["lead_id"] for c in s.calls} == {"L4"} and s.excluded == {"L1", "L2", "L3"}
+    assert [z["ProspectActivityId"] for z in s.raw["zip_activities"]] == ["z4"]
+    enrolled = [{"ProspectID": "L1"}, {"ProspectID": "L4"}, {"ProspectID": "L9", "mx_Bootcamp_collections": "ID Bootcamp Collection"}]
+    assert [l["ProspectID"] for l in s.sales(enrolled)] == ["L4"]
+    elite = Snap(dict(raw, group="Team Elite Calling"), leader="Tara L")       # every other team keeps every lead
+    assert len(elite.leads) == 4 and elite.sales(enrolled) == enrolled
+
+
+def test_merged_snapshots_keep_their_group(tmp_path):
+    from analytics.daily_plan.common import load_snapshots
+
+    f = tmp_path / "snap.json"
+    json.dump({"group": "Team X", "users": USERS, "fetched_at": "2026-10-10T08:30:00+00:00", "leads": LEADS, "calls": []}, open(f, "w"))
+    assert load_snapshots([str(f)])["group"] == "Team X"

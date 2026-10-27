@@ -134,7 +134,7 @@ def cmd_build(a):
     before = previous_working_day(snap, prev)
     prev_plan = state.resolve(state.load(a.state_dir, prev), snap.leads)
     reads = rows.load_reads(p["reads"])
-    enrolled = json.load(open(p["enrolled"])) if os.path.exists(p["enrolled"]) else []
+    enrolled = snap.sales(json.load(open(p["enrolled"])) if os.path.exists(p["enrolled"]) else [])
     R = rows.build_rows(snap, a.date, reads, prev_plan, enrolled)
     F = review.facts(snap, prev, before, prev_plan, reads, enrolled)
     N = json.load(open(p["narrative"])) if os.path.exists(p["narrative"]) else None
@@ -190,7 +190,7 @@ def cmd_status(a):
         snap_path, enr_path = a.snapshot or p["snap"], a.enrolled or p["enrolled"]
     snap = Snap(load_snapshots([snap_path]), a.leader)
     plan = state.resolve(state.load(a.state_dir, a.date), snap.leads)
-    enrolled = json.load(open(enr_path)) if os.path.exists(enr_path) else []
+    enrolled = snap.sales(json.load(open(enr_path)) if os.path.exists(enr_path) else [])
     S = status.build(snap, a.date, plan, enrolled, a.leader)
     os.makedirs(p["out"], exist_ok=True)
     stem = os.path.join(p["out"], f"{short_name(a.team)}_status_{S['at'].replace(':', '')}")
@@ -483,6 +483,8 @@ def main(argv=None):
     a = ap.parse_args(argv)
     if a.team != TEAM and a.state_dir == "plan_state":  # another team's plan must not overwrite Elite's state
         a.state_dir = os.path.join("plan_state", short_name(a.team))
+    if a.team != TEAM and a.mail_list == MAIL_LIST:  # nor go to Elite's mailing list
+        a.mail_list = short_name(a.team).lower()
     {"revival-prepare": cmd_revival_prepare, "revival-build": cmd_revival_build, "share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
      "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build,
      "weekly-prepare": cmd_weekly_prepare, "weekly-build": cmd_weekly_build,

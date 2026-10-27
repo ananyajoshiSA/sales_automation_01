@@ -38,7 +38,7 @@ LEAD_COLUMNS = [
     "mx_Zip_Intent_Type", "mx_Zip_Intent_Score", "mx_Zip_Quality_Score", "mx_Zip_AI_Disposition",
     "mx_Zip_Objection_Category", "mx_Zip_Objection", "mx_Zip_Disposition", "mx_Zip_Intent",
     "mx_Zip_Intent_Justification", "mx_Zip_Talking_Points", "mx_Zip_Team_Follow_up_date_and_time",
-    "mx_Report_Type", "mx_Lead_Request_type",
+    "mx_Report_Type", "mx_Lead_Request_type", "mx_Bootcamp_collections",
 ]
 BULK_RETRIES = 2        # further tries of the bulk read after a 403, before reading lead by lead
 BULK_RETRY_WAIT = 120   # seconds between them

@@ -162,6 +162,17 @@ Not Interested, May buy later, Irrelevant lead, Invalid or Duplicate stay off th
 stands), unless the lead has rung us since and is waiting for a call back, or the reader rates it tier A (about to pay).
 The morning report counts how many were left off.
 
+## Other teams
+
+Every step takes `--team "<LeadSquared group>" --leader "<name>"` before the command, for example
+`--team "ID Closure" --leader "Darshan Gowda"`. Another team's files are named after its group and its plan state lives in
+`plan_state/<group>/`. It mails to the list named after its group (`LIST_ID_CLOSURE`) unless `--mail-list` names another.
+
+`Team Puja Malik (DSV+Women AI)` (leader Puja Malik) does sales calling and bootcamp collections, so its report covers
+sales leads only (`SALES_ONLY` in `common.py`). A lead with any "Bootcamp collections" tag, webinar collections included,
+or in Booking fees received or Collections done, is left out with its calls, Zipteams notes and enrolment. On 27 Oct
+that left out 5,237 of the team's 43,490 leads.
+
 ## Lead flow (Shivangi's request, 11 Oct)
 
 Every report now shows, for the leads that came in, how fast each was first dialled, how many attempts it got, whether it

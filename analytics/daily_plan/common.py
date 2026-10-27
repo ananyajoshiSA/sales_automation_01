@@ -16,11 +16,18 @@ REAL_SECS = 120
 CLOSED = ("Course Enrolled",)
 DEAD = ("Not Interested", "Irrelevant", "Irrelevant lead", "Invalid", "Invalid lead", "Duplicate")  # LeadSquared says "Irrelevant lead"
 SHELVED = DEAD + ("May buy later",)  # the caller closed the lead for now: off the call sheets unless it calls us or is about to pay
+SALES_ONLY = frozenset({"Team Puja Malik (DSV+Women AI)"})  # teams that also collect bootcamp balances: their plan covers sales leads only
+COLLECTION_STAGES = ("Booking fees received", "Collections done")
 
 
 def short_name(team: str) -> str:
     """File-name prefix for a team's reports: "Elite" for the default team, else the group name with underscores."""
     return "Elite" if team == TEAM else re.sub(r"\W+", "_", team).strip("_")
+
+
+def is_collection(lead: dict) -> bool:
+    """A collection lead: any "Bootcamp collections" tag (webinar collections too), or a booking-fee or collections stage without one."""
+    return bool((lead.get("mx_Bootcamp_collections") or "").strip()) or lead.get("ProspectStage") in COLLECTION_STAGES
 
 
 def p10(x) -> str | None:
@@ -50,7 +57,7 @@ def load_snapshots(paths: list[str]) -> dict:
         leads.update({l["ProspectID"]: l for l in s["leads"]})
         calls.update({c["activity_id"]: c for c in s["calls"]})
         zips.update({z.get("ProspectActivityId") or id(z): z for z in s.get("zip_activities", [])})
-    return {"users": snaps[-1]["users"], "fetched_at": snaps[-1]["fetched_at"], "leads": list(leads.values()),
+    return {"group": snaps[-1].get("group"), "users": snaps[-1]["users"], "fetched_at": snaps[-1]["fetched_at"], "leads": list(leads.values()),
             "calls": list(calls.values()), "zip_activities": list(zips.values())}
 
 
@@ -58,6 +65,12 @@ class Snap:
     """A snapshot with the lookups every step needs."""
 
     def __init__(self, snap: dict, leader: str = LEADER):
+        # a team in SALES_ONLY works collections too: those leads, their calls and Zip notes are not in its plan
+        self.excluded = {l["ProspectID"] for l in snap["leads"] if is_collection(l)} if snap.get("group") in SALES_ONLY else set()
+        if self.excluded:
+            snap = {**snap, "leads": [l for l in snap["leads"] if l["ProspectID"] not in self.excluded],
+                    "calls": [c for c in snap["calls"] if c.get("lead_id") not in self.excluded],
+                    "zip_activities": [z for z in snap.get("zip_activities", []) if z.get("RelatedProspectId") not in self.excluded]}
         self.raw = snap
         self.users = {u["ID"]: name_of(u) for u in snap["users"]}
         self.callers = sorted(n for n in self.users.values() if n != leader)
@@ -73,6 +86,12 @@ class Snap:
         for lid, l in self.leads.items():
             if p10(l.get("Phone")):
                 self.phone_lead.setdefault(p10(l["Phone"]), lid)
+
+    def sales(self, enrolled: list[dict]) -> list[dict]:
+        """``enrolled`` without the collection leads this snapshot leaves out."""
+        if not self.excluded:
+            return enrolled
+        return [l for l in enrolled if l["ProspectID"] not in self.excluded and not is_collection(l)]
 
     def phone(self, c: dict) -> str | None:
         return p10(c.get("lead_number")) or p10((self.leads.get(c["lead_id"]) or {}).get("Phone"))
