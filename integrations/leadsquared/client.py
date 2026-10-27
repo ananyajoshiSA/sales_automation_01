@@ -506,6 +506,15 @@ class LeadSquaredClient:
         ]
 
     def iter_leads_by_group(self, group: str, columns: Iterable[str] | None = None, **kwargs) -> Iterator[dict]:
-        """Yield every lead owned by a member of the given user group."""
+        """Yield every lead owned by a member of the given user group, each once.
+
+        Sorted by ``CreatedOn``, which edits don't change: paging by ``ModifiedOn`` while callers edit leads moved rows
+        between pages, and on 27 Oct 2026 one owner's 9,558 rows held 840 repeats and missed as many leads.
+        """
+        kwargs = {"sort_by": "CreatedOn", "descending": False, **kwargs}
+        seen: set = set()
         for user in self.get_users_in_group(group):
-            yield from self.iter_leads("OwnerId", user["ID"], page_size=1000, columns=columns, **kwargs)
+            for lead in self.iter_leads("OwnerId", user["ID"], page_size=1000, columns=columns, **kwargs):
+                if lead.get("ProspectID") not in seen:
+                    seen.add(lead.get("ProspectID"))
+                    yield lead

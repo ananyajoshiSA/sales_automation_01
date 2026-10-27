@@ -105,6 +105,20 @@ def test_iter_leads_pages(client):
 
 
 @responses.activate
+def test_group_leads_are_read_by_created_date_and_kept_once(client):
+    responses.get(HOST + "UserManagement.svc/Users.Get", json=[{"ID": "u1", "MemberOfGroups": ["Team X"]},
+                                                                 {"ID": "u2", "MemberOfGroups": ["Other"]},
+                                                                 {"ID": "u3", "MemberOfGroups": ["Team X"]}])
+    url = HOST + "LeadManagement.svc/Leads.Get"
+    responses.post(url, json=[{"ProspectID": "a"}, {"ProspectID": "b"}])
+    responses.post(url, json=[{"ProspectID": "b"}, {"ProspectID": "c"}])  # b moved owner while the group was read
+    assert [l["ProspectID"] for l in client.iter_leads_by_group("team x")] == ["a", "b", "c"]
+    bodies = [json.loads(c.request.body) for c in responses.calls[1:]]
+    assert {(b["Sorting"]["ColumnName"], b["Sorting"]["Direction"]) for b in bodies} == {("CreatedOn", "0")}
+    assert [b["Parameter"]["LookupValue"] for b in bodies] == ["u1", "u3"]
+
+
+@responses.activate
 def test_post_activity(client):
     responses.post(
         HOST + "ProspectActivity.svc/Create",
