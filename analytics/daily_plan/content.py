@@ -284,7 +284,8 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
         "hours": HOURS, "ab_rules": AB_RULES,
         "excluded_note": (f"Removed from the call order after re-reading {pl}'s calls: {cnt('not_interested')} clear not-interested, {cnt('irrelevant')} irrelevant/invalid, "
                           f"{cnt('21day')} 21-day course (Rs 100 community — pass to support), {cnt('already_student')} existing students (support), {cnt('dnc', 'support')} do-not-call/support, "
-                          f"{cnt('shelved')} marked Not Interested, May buy later or Irrelevant in LeadSquared (back on the sheet only if they ring us)."),
+                          f"{cnt('shelved')} marked Not Interested, May buy later or Irrelevant in LeadSquared (back on the sheet only if they ring us)"
+                          + (f", {cnt('collection')} bootcamp collection leads not tagged in LeadSquared (collection work, not this sheet)" if cnt('collection') else "") + "."),
         "overview_note": "'Likely today' takes about 60% of each A lead's 3-day chance, 35% of B and 30% of the rest; P leads have already paid a booking and count 0. Judgement-based estimates.",
         "review": {"title": f"{pl} review: what worked, what didn't, missed opportunities",
                    "headline": N.get("headline") or f"<b>{pl}: {len(confirmed)} confirmed enrollment(s).</b> {T['dials']:,} dials, {T['answer_pct']}% answered, {T['real']} real conversations; full ask in {ask} of {conv}.",

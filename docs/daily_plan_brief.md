@@ -16,6 +16,9 @@ Rules:
 - BOOTCAMP REGISTRATION (status bootcamp): the only payment is the Rs 10 bootcamp registration fee, or a free bootcamp
   sign-up, even if the stage says Course Enrolled. This is NOT an enrollment. Treat the lead as a normal prospect (tier and
   chance by real interest; the bootcamp is a step towards the course) and say "Rs 10 bootcamp registration" in payment_evidence.
+- COLLECTION (status collection, tier D), for the DSV + Women AI team only: the lead paid a booking fee at a bootcamp earlier and
+  the calls are about collecting the balance. That is collection work, not a sales lead, even if LeadSquared has no collection tag.
+  A lead paying their first booking on these calls is still paid_new.
 - Exclude (tier D, status set accordingly): 21-day course / Rs 100 community enquiries (status "21day"), existing students,
   do-not-call requests, support queries, irrelevant/invalid/duplicate, a clear and reasoned "not interested".
 - Tiers: A = can close today (payment agreed/in progress, link asked, EMI docs moving); B = hot follow-up (real interest,
@@ -33,7 +36,7 @@ date asked, true/false), link_sent_on_call (true/false), who_decides_asked (true
 
 Output: write ONE JSON object per lead, one per line (JSONL) to the output file you are given, with keys:
 lead_id, name, owner, phone, course, friday_summary (1–2 plain sentences: what happened on yesterday's calls, with IST times),
-status (one of: paid_new, bootcamp, already_student, active, dnc, support, 21day, irrelevant, not_interested, unreachable),
+status (one of: paid_new, bootcamp, already_student, active, dnc, support, 21day, irrelevant, not_interested, unreachable, collection),
 payment_evidence (text or ""), paid_on (YYYY-MM-DD of the first payment, "" if not paid or the date is unknown), tier (A/B/F/R/C/D), chance (int %), why (2–3 sentences, plain language, concrete facts and dates),
 opening_line (what the caller says first, in quotes, natural Indian-English), exact_ask (the precise ask for today), objection
 (the one to prepare for, with a 1-line answer), who_decides, how_pay, real_blocker, best_time (IST), callback_requested

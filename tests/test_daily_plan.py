@@ -874,3 +874,9 @@ def test_merged_snapshots_keep_their_group(tmp_path):
     f = tmp_path / "snap.json"
     json.dump({"group": "Team X", "users": USERS, "fetched_at": "2026-10-10T08:30:00+00:00", "leads": LEADS, "calls": []}, open(f, "w"))
     assert load_snapshots([str(f)])["group"] == "Team X"
+
+
+def test_a_collection_lead_found_on_reading_stays_off_the_sheets():
+    reads = {"L2": {"lead_id": "L2", "name": "Lead2", "status": "collection", "tier": "B", "chance": 15}}
+    R = rows.build_rows(snap([]), "2026-10-10", reads, {}, [])
+    assert not any(R["by_owner"].values()) and R["dropped"][0]["status"] == "collection"
