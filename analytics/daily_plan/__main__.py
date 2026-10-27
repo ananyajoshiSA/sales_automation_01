@@ -147,6 +147,9 @@ def cmd_build(a):
         C["data_note"] = (f"Data: LeadSquared pulled {R['built_at']} IST. Salesa transcripts: {info.get('transcript_numbers')} numbers searched "
                           f"(≤10 numbers per request, ≤9 requests per run); {info.get('with_transcript')} had a transcript, {info.get('without_transcript')} did not. "
                           "Zipteams notes cross-checked, never used alone. An enrollment is a lead in Course Enrolled or one who said on a call that they paid. Chances are estimates.")
+    if snap.excluded:
+        C["data_note"] = (C.get("data_note") or "") + (f" Sales leads only: {len(snap.excluded):,} bootcamp and webinar collection leads "
+                                                       "(tagged, or at Booking fees received / Collections done) are left out with their calls.")
     for k, v in (("rows", R), ("facts", F), ("content", C)):
         json.dump(v, open(p[k], "w"), indent=1, default=str)
     os.makedirs(p["out"], exist_ok=True)
