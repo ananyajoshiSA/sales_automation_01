@@ -866,6 +866,27 @@ def test_a_team_that_also_collects_gets_a_plan_without_collection_leads():
     assert [l["ProspectID"] for l in s.sales(enrolled)] == ["L4"]
     elite = Snap(dict(raw, group="Team Elite Calling"), leader="Tara L")       # every other team keeps every lead
     assert len(elite.leads) == 4 and elite.sales(enrolled) == enrolled
+    raw["calls"] += [call("u1", "X1", "2026-10-09 06:00:00", "Answered", 200), call("u1", "X2", "2026-10-09 06:10:00")]
+    raw["outside_leads"] = {"X1": {"OwnerIdName": "Parked", "mx_Bootcamp_collections": "ID Bootcamp Collection - 18th July'26"},
+                            "X2": {"OwnerIdName": "Other team", "ProspectStage": "Call Back Later"}}
+    s = Snap(raw, leader="Puja Malik")
+    assert {c["lead_id"] for c in s.calls} == {"L4", "X2"}                   # a collection lead parked with another owner is left out
+
+
+def test_snapshot_records_collection_tags_of_leads_owned_elsewhere(monkeypatch):
+    import scripts.fetch_team_data as ftd
+
+    looked = []
+
+    class C:
+        def get_lead_by_id(self, lid):
+            looked.append(lid)
+            return {"ProspectID": lid, "OwnerIdName": "Parked", "mx_Bootcamp_collections": "Tag", "Phone": "+91-9000000000"}
+
+    calls = [{"lead_id": "L1"}, {"lead_id": "X1"}, {"lead_id": "X2"}, {"lead_id": None}]
+    got = ftd.outside_leads(C(), calls, {"L1"}, {"X1": {"OwnerIdName": "Known"}, "X9": {}})
+    assert looked == ["X2"] and set(got) == {"X1", "X2"}                     # read once; an earlier pull's lookup is reused
+    assert got["X2"] == {"OwnerIdName": "Parked", "ProspectStage": None, "mx_Bootcamp_collections": "Tag"}   # no PII kept
 
 
 def test_merged_snapshots_keep_their_group(tmp_path):

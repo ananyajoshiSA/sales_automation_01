@@ -22,6 +22,7 @@ import time
 from datetime import datetime, timedelta
 
 from analytics.daily_plan import revival
+from analytics.daily_plan.common import SALES_ONLY
 from analytics.zip_calls import ZIP_LATE_WINDOW
 from integrations.leadsquared import (
     PHONE_INBOUND, PHONE_OUTBOUND, LeadSquaredClient, LeadSquaredError, parse_activity_note, parse_phone_call,
@@ -136,6 +137,17 @@ def per_lead_reads(c, leads, users, d0, last, zip_to, since, cache):
     return calls, payments, zip_acts
 
 
+def outside_leads(c, calls, lead_ids, known: dict) -> dict:
+    """Collection tag and stage of each lead the team called that another team owns, so a team in SALES_ONLY can leave
+    out collection leads parked with other owners. Leads looked up by an earlier pull are not read again."""
+    out = {lid: known[lid] for lid in {x.get("lead_id") for x in calls} - lead_ids if lid in known}
+    for lid in sorted({x.get("lead_id") for x in calls if x.get("lead_id")} - lead_ids - set(out)):
+        l = c.get_lead_by_id(lid) or {}
+        out[lid] = {k: l.get(k) for k in ("OwnerIdName", "ProspectStage", "mx_Bootcamp_collections")}
+    log(f"{len(out)} leads owned outside the team were called")
+    return out
+
+
 def main(group, start, end, out, prev=None):
     c = LeadSquaredClient()
     d0 = ist_day_start(start)
@@ -176,13 +188,14 @@ def main(group, start, end, out, prev=None):
         zip_acts = _merge(base.get("zip_activities", []), zip_acts, "ProspectActivityId",
                           lambda r: started(r.get("CreatedOn"), zip_to) and r.get("RelatedProspectId") in lead_ids)
     log(f"payments {len(payments)}, zip {len(zip_acts)}")
+    outside = outside_leads(c, calls, lead_ids, (base or {}).get("outside_leads", {})) if group in SALES_ONLY else {}
 
     json.dump(
         {
             "group": group, "start": start, "end": end,
             "fetched_at": now_utc().isoformat(),
             "users": users, "leads": leads, "calls": calls,
-            "payments": payments, "zip_activities": zip_acts, "source": source,
+            "payments": payments, "zip_activities": zip_acts, "outside_leads": outside, "source": source,
         },
         open(out, "w"),
     )

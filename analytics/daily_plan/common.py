@@ -52,21 +52,24 @@ def name_of(u: dict) -> str:
 def load_snapshots(paths: list[str]) -> dict:
     """Merge fetch_team_data snapshots; the latest wins for leads and users."""
     snaps = sorted((json.load(open(p)) for p in paths), key=lambda s: s["fetched_at"])
-    leads, calls, zips = {}, {}, {}
+    leads, calls, zips, outside = {}, {}, {}, {}
     for s in snaps:
+        outside.update(s.get("outside_leads") or {})
         leads.update({l["ProspectID"]: l for l in s["leads"]})
         calls.update({c["activity_id"]: c for c in s["calls"]})
         zips.update({z.get("ProspectActivityId") or id(z): z for z in s.get("zip_activities", [])})
     return {"group": snaps[-1].get("group"), "users": snaps[-1]["users"], "fetched_at": snaps[-1]["fetched_at"], "leads": list(leads.values()),
-            "calls": list(calls.values()), "zip_activities": list(zips.values())}
+            "calls": list(calls.values()), "zip_activities": list(zips.values()), "outside_leads": outside}
 
 
 class Snap:
     """A snapshot with the lookups every step needs."""
 
     def __init__(self, snap: dict, leader: str = LEADER):
-        # a team in SALES_ONLY works collections too: those leads, their calls and Zip notes are not in its plan
-        self.excluded = {l["ProspectID"] for l in snap["leads"] if is_collection(l)} if snap.get("group") in SALES_ONLY else set()
+        # a team in SALES_ONLY works collections too: those leads (with the ones parked with other owners, from
+        # ``outside_leads``), their calls and Zip notes are not in its plan
+        self.excluded = ({l["ProspectID"] for l in snap["leads"] if is_collection(l)}
+                         | {lid for lid, l in (snap.get("outside_leads") or {}).items() if is_collection(l)}) if snap.get("group") in SALES_ONLY else set()
         if self.excluded:
             snap = {**snap, "leads": [l for l in snap["leads"] if l["ProspectID"] not in self.excluded],
                     "calls": [c for c in snap["calls"] if c.get("lead_id") not in self.excluded],
