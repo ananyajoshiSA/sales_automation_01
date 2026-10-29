@@ -1,8 +1,10 @@
 """Fetch a team's leads and phone/payment/Zip activity for a date range into a JSON snapshot.
 
-    python scripts/fetch_team_data.py "Team Elite Calling" 2026-10-02 2026-10-07 data/snapshot.json [previous_snapshot.json]
+    python scripts/fetch_team_data.py "Team Elite Calling" [more groups...] 2026-10-02 2026-10-07 data/snapshot.json [previous_snapshot.json]
 
-Dates are IST calendar days (end inclusive). Calls are kept if made by a team
+Dates are IST calendar days (end inclusive). Several groups (one leader's teams) are fetched as one team.
+Activity days are read FETCH_WORKERS (default 8) at a time; every read still waits at the shared admission gate.
+Calls are kept if made by a team
 member or made to a lead the team owns, by when they started, including calls edited up to 3 days later.
 
 Given an earlier snapshot of the same team that starts on or before ``start``, only activities edited since
@@ -40,6 +42,8 @@ LEAD_COLUMNS = [
     "mx_Zip_Objection_Category", "mx_Zip_Objection", "mx_Zip_Disposition", "mx_Zip_Intent",
     "mx_Zip_Intent_Justification", "mx_Zip_Talking_Points", "mx_Zip_Team_Follow_up_date_and_time",
     "mx_Report_Type", "mx_Lead_Request_type", "mx_Bootcamp_collections",
+    "mx_Bot_Discovery_Done_Date", "mx_Bot_Call_Comments", "mx_Bot_Calling_Status", "mx_Conversation_Summary",
+    "mx_Occupation", "mx_Education_Qualification",
 ]
 BULK_RETRIES = 2        # further tries of the bulk read after a 403, before reading lead by lead
 BULK_RETRY_WAIT = 120   # seconds between them
@@ -47,6 +51,7 @@ sleep = time.sleep
 PAYMENT_SUCCESS = 213
 ZIP_EVENTS = (236, 237)
 ACTIVITY_DATES = ("ProspectActivityDate_Max", "mx_Last_Called_Date_DT", "ModifiedOn")
+WORKERS = int(os.environ.get("FETCH_WORKERS", "8"))
 
 
 def log(*a):
@@ -71,18 +76,24 @@ def _merge(old: list[dict], new: list[dict], key: str, keep) -> list[dict]:
 def bulk_reads(c, d0, last, zip_to, since, user_ids, lead_ids):
     """Calls, payments and Zip notes from the company-wide activity endpoint."""
     calls, payments, zip_acts = [], [], []
+
+    def mine(a):  # filtered inside each reading worker, so only the team's rows are held in memory
+        call = parse_phone_call(a)
+        return call["user_id"] in user_ids or call["lead_id"] in lead_ids
+
+    def theirs(a):
+        return a.get("RelatedProspectId") in lead_ids
+
     for ev in (PHONE_OUTBOUND, PHONE_INBOUND):
-        n = kept = 0
-        for a in c.iter_activities_started(ev, d0, last, edited_since=since):
-            n += 1
-            call = parse_phone_call(a)
-            if call["user_id"] in user_ids or call["lead_id"] in lead_ids:
-                calls.append(call)
+        kept = 0
+        for a in c.iter_activities_started(ev, d0, last, edited_since=since, workers=WORKERS, keep=mine):
+            if mine(a):
+                calls.append(parse_phone_call(a))
                 kept += 1
-        log(f"event {ev}: {n} total, {kept} kept")
+        log(f"event {ev}: {kept} kept")
     for ev, sink in ((PAYMENT_SUCCESS, payments),) + tuple((z, zip_acts) for z in ZIP_EVENTS):
         to = last if ev == PAYMENT_SUCCESS else zip_to
-        for a in c.iter_activities_started(ev, d0, to, edited_since=since):
+        for a in c.iter_activities_started(ev, d0, to, edited_since=since, workers=WORKERS, keep=theirs):
             if a.get("RelatedProspectId") in lead_ids:
                 a["note"] = parse_activity_note(a.get("ActivityEvent_Note"))
                 sink.append(a)
@@ -148,20 +159,22 @@ def outside_leads(c, calls, lead_ids, known: dict) -> dict:
     return out
 
 
-def main(group, start, end, out, prev=None):
+def main(group: str | list[str], start, end, out, prev=None):
     c = LeadSquaredClient()
+    groups = [group] if isinstance(group, str) else list(group)
+    team = " + ".join(groups)
     d0 = ist_day_start(start)
     d1 = min(ist_day_start(end) + timedelta(days=1), now_utc())
     base = json.load(open(prev)) if isinstance(prev, str) else prev
-    since = reusable(base, group, start)
+    since = reusable(base, team, start)
     if since:
         log(f"reusing {base['fetched_at']} snapshot; reading edits since {since.isoformat()}")
 
-    users = c.get_users_in_group(group)
+    users = list({u["ID"]: u for g in groups for u in c.get_users_in_group(g)}.values())
     user_ids = {u["ID"] for u in users}
-    log(f"{len(users)} users in {group!r}")
+    log(f"{len(users)} users in {', '.join(map(repr, groups))}")
 
-    leads = list(c.iter_leads_by_group(group, columns=LEAD_COLUMNS))
+    leads = list({l["ProspectID"]: l for g in groups for l in c.iter_leads_by_group(g, columns=LEAD_COLUMNS)}.values())
     lead_ids = {l["ProspectID"] for l in leads}
     log(f"{len(leads)} team-owned leads")
 
@@ -188,11 +201,11 @@ def main(group, start, end, out, prev=None):
         zip_acts = _merge(base.get("zip_activities", []), zip_acts, "ProspectActivityId",
                           lambda r: started(r.get("CreatedOn"), zip_to) and r.get("RelatedProspectId") in lead_ids)
     log(f"payments {len(payments)}, zip {len(zip_acts)}")
-    outside = outside_leads(c, calls, lead_ids, (base or {}).get("outside_leads", {})) if group in SALES_ONLY else {}
+    outside = outside_leads(c, calls, lead_ids, (base or {}).get("outside_leads", {})) if team in SALES_ONLY else {}
 
     json.dump(
         {
-            "group": group, "start": start, "end": end,
+            "group": team, "groups": groups, "start": start, "end": end,
             "fetched_at": now_utc().isoformat(),
             "users": users, "leads": leads, "calls": calls,
             "payments": payments, "zip_activities": zip_acts, "outside_leads": outside, "source": source,
@@ -202,5 +215,12 @@ def main(group, start, end, out, prev=None):
     log(f"saved {out}: {len(calls)} calls, {len(payments)} payments, {len(zip_acts)} zip activities")
 
 
+def cli(argv: list[str]) -> tuple:
+    """GROUP [GROUP ...] START END OUT [PREVIOUS]: the groups run up to the first date."""
+    i = next(k for k, x in enumerate(argv) if len(x) == 10 and x[4] == "-" and x[7] == "-" and x.replace("-", "").isdigit())
+    groups = argv[:i]
+    return (groups[0] if len(groups) == 1 else groups, *argv[i:i + 4])
+
+
 if __name__ == "__main__":
-    main(*sys.argv[1:6])
+    main(*cli(sys.argv[1:]))

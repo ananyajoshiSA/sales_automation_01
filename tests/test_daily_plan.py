@@ -277,7 +277,7 @@ class _FakeLSQ:
     def iter_leads_by_group(self, group, columns=None):
         return iter([{"ProspectID": "L1"}, {"ProspectID": "L2"}])
 
-    def iter_activities_started(self, ev, d0, d1, edited_since=None):
+    def iter_activities_started(self, ev, d0, d1, edited_since=None, **_):
         self.reads.append((ev, edited_since))
         return iter(self.acts.get(ev, []))
 
@@ -313,6 +313,31 @@ def test_incremental_snapshot_reuses_old_rows_and_takes_fresh_edits(monkeypatch,
     assert {s for _, s in fake.reads} == {_utc("2026-10-10 14:00:00")}   # edits read from 2 h before the last pull
     assert ftd.reusable(prev, "Team X", "2026-10-06") is None         # the old pull doesn't cover the new start
     assert ftd.reusable(prev, "Team Y", "2026-10-08") is None
+
+
+def test_snapshot_of_several_groups_is_one_team_and_the_command_line_takes_them_all(monkeypatch, tmp_path):
+    import scripts.fetch_team_data as ftd
+    from integrations.timeutil import utc as _utc
+
+    class Two(_FakeLSQ):
+        def get_users_in_group(self, group):
+            return [{"ID": "u1"}, {"ID": "u2" if group == "B" else "u1"}]
+
+        def iter_leads_by_group(self, group, columns=None):
+            return iter([{"ProspectID": "L1"}, {"ProspectID": "L3" if group == "B" else "L2"}])
+
+    fake = Two({22: [_act("a1", "L3", "2026-10-10 05:00:00", "2026-10-10 05:01:00")]})
+    monkeypatch.setattr(ftd, "LeadSquaredClient", lambda: fake)
+    monkeypatch.setattr(ftd, "now_utc", lambda: _utc("2026-10-11 05:00:00"))
+    out = tmp_path / "snap.json"
+    ftd.main(["A", "B"], "2026-10-10", "2026-10-10", str(out))
+    snap = json.load(open(out))
+    assert (snap["group"], snap["groups"]) == ("A + B", ["A", "B"])
+    assert sorted(u["ID"] for u in snap["users"]) == ["u1", "u2"] and sorted(l["ProspectID"] for l in snap["leads"]) == ["L1", "L2", "L3"]
+    assert [c["activity_id"] for c in snap["calls"]] == ["a1"]
+    assert ftd.cli(["Team X", "2026-10-07", "2026-10-11", "o.json"]) == ("Team X", "2026-10-07", "2026-10-11", "o.json")
+    assert ftd.cli(["Team X", "2026-10-07", "2026-10-11", "o.json", "p.json"]) == ("Team X", "2026-10-07", "2026-10-11", "o.json", "p.json")
+    assert ftd.cli(["A", "B", "2026-10-07", "2026-10-11", "o.json"]) == (["A", "B"], "2026-10-07", "2026-10-11", "o.json")
 
 
 def test_snapshot_falls_back_to_per_lead_reads_when_bulk_is_refused(monkeypatch, tmp_path):
@@ -362,7 +387,7 @@ def test_snapshot_retries_a_refused_bulk_read_before_falling_back(monkeypatch, t
     class RefusedOnce(_FakeLSQ):
         refusals = 1
 
-        def iter_activities_started(self, ev, d0, d1, edited_since=None):
+        def iter_activities_started(self, ev, d0, d1, edited_since=None, **_):
             if self.refusals:
                 self.refusals -= 1
                 raise LeadSquaredError("Access Denied", status_code=403)

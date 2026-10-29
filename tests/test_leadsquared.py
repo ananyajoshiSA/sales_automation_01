@@ -218,6 +218,30 @@ def test_iter_activities_started_reads_later_edits_and_keeps_by_start(client):
 
 
 @responses.activate
+def test_iter_activities_started_reads_days_in_parallel_and_filters_in_each_worker(client):
+    from integrations.timeutil import IST
+
+    url = HOST + "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+    by_day = {"2026-10-04 18:30:00": [{"ProspectActivityId": "a", "CreatedOn": "2026-10-05 05:00:00", "RelatedProspectId": "mine"},
+                                      {"ProspectActivityId": "x", "CreatedOn": "2026-10-05 05:00:00", "RelatedProspectId": "other"}],
+              "2026-10-05 18:30:00": [{"ProspectActivityId": "b", "CreatedOn": "2026-10-06 05:00:00", "RelatedProspectId": "mine"},
+                                      {"ProspectActivityId": "a", "CreatedOn": "2026-10-05 05:00:00", "RelatedProspectId": "mine"}],
+              "2026-10-06 18:30:00": [{"ProspectActivityId": "late", "CreatedOn": "2026-10-07 05:00:00", "RelatedProspectId": "mine"}]}
+
+    def reply(request):
+        rows = by_day[json.loads(request.body)["Parameter"]["FromDate"]]
+        return 200, {}, json.dumps({"RecordCount": len(rows), "List": rows})
+
+    responses.add_callback(responses.POST, url, callback=reply)
+    d0 = datetime(2026, 10, 5, tzinfo=IST)
+    got = list(client.iter_activities_started(22, d0, d0 + timedelta(days=2, seconds=-1), margin=timedelta(days=1),
+                                              now=datetime(2026, 10, 9, tzinfo=IST), workers=3,
+                                              keep=lambda a: a["RelatedProspectId"] == "mine"))
+    assert [g["ProspectActivityId"] for g in got] == ["a", "b"]  # day order, repeat and other lead dropped, "late" outside
+    assert len(responses.calls) == 3
+
+
+@responses.activate
 def test_iter_activities_started_never_reads_past_now(client):
     from integrations.timeutil import IST
 
@@ -245,6 +269,24 @@ def test_iter_activities_started_can_read_only_recent_edits(client):
     assert [g["ProspectActivityId"] for g in got] == ["edited", "new"]
     (w,) = [json.loads(c.request.body)["Parameter"] for c in responses.calls]
     assert (w["FromDate"], w["ToDate"]) == ("2026-10-07 03:30:00", "2026-10-07 05:30:00")
+
+
+@responses.activate
+def test_iter_activities_started_combines_recent_edits_with_parallel_days(client):
+    """``edited_since`` and ``workers`` together: only days from the last edit time are read, several at once."""
+    from integrations.timeutil import IST
+
+    url = HOST + "ProspectActivity.svc/CustomActivity/RetrieveByActivityEvent"
+    responses.post(url, json={"List": [{"ProspectActivityId": "e", "CreatedOn": "2026-10-05 05:00:00", "RelatedProspectId": "mine"},
+                                       {"ProspectActivityId": "o", "CreatedOn": "2026-10-05 05:00:00", "RelatedProspectId": "other"}]})
+    d0 = datetime(2026, 10, 1, tzinfo=IST)
+    since = datetime(2026, 10, 6, tzinfo=IST)
+    got = list(client.iter_activities_started(22, d0, datetime(2026, 10, 8, tzinfo=IST) - timedelta(seconds=1),
+                                              margin=timedelta(0), now=datetime(2026, 10, 9, tzinfo=IST), edited_since=since,
+                                              workers=3, keep=lambda a: a["RelatedProspectId"] == "mine"))
+    assert [g["ProspectActivityId"] for g in got] == ["e"]  # read twice (two days), kept once
+    froms = sorted(json.loads(c.request.body)["Parameter"]["FromDate"] for c in responses.calls)
+    assert froms == ["2026-10-05 18:30:00", "2026-10-06 18:30:00"]  # nothing before edited_since
 
 
 def test_parse_phone_call_keeps_the_edit_time_and_ignores_note_start_times():
