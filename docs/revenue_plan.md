@@ -91,6 +91,42 @@ that updates as callers fill in their sheets. Leads are ordered by tier:
 Each tier's chance of enrolling is an estimate until `tier_outcomes` has measured it on at least 30
 leads. After that, the measured rate is used.
 
+## Consolidated plan with Claude's lead reading (Inayat's teams)
+
+The rule plan tiers every lead; Claude then reads the leads that matter and its tier, chance, opening line and ask
+replace the rule's. This is how the daily plan for Inayat Khan's teams (Corporate law trainees, Team Bootcamp +Anas,
+Team Bootcamp +Jyoti) is built. `G` stands for the three group names, `D` for today, `P` for the last plan's day.
+
+```bash
+# 1. Data: fresh leads and the calls and notes since 2 days before the last plan, cached as they land (resumable;
+#    exit 75 = the gate deferred, rerun the same command later). Merge with the last plan's snapshot in step 2.
+python scripts/fetch_team_resumable.py G <P minus 2 days> D data/inayat_snap_D.json
+# 2. Rule plan; then the AI voice agent's discovery for its leads; then the plan again with it.
+python scripts/plan_review.py plan data/inayat_snap_P.json data/inayat_snap_D.json --date D --since 2026-09-01 \
+    --leader "Inayat Khan" --out data/inayat_plan_D.json --leads-out data/inayat_leads_D.json
+python scripts/fetch_bot_calls.py data/inayat_leads_D.json data/inayat_bot_D.json
+python scripts/plan_review.py plan ... --bot-calls data/inayat_bot_D.json --out data/inayat_plan_D.json \
+    --snapshot-out data/inayat_snapshot_D_merged.json
+# 3. Leads to read (read before and touched since the last plan's data, plus new A, B and missed callbacks),
+#    in 8 files, with the brief filled from docs/plan_review_brief.md and docs/plan_teams/inayat.md.
+python scripts/plan_review.py pack data/inayat_plan_D.json --snapshot data/inayat_snapshot_D_merged.json \
+    --reviews "data/review/out_*.json" "data/review/r2_out_*.json" "data/review/20*/out_*.json" \
+    --changed-since <last plan's data time, UTC> --out-dir data/review/D --context docs/plan_teams/inayat.md \
+    --today "<weekday D month year>" --data-to "<D HH:MM IST>" --previous "<P, data to HH:MM IST>" --promise-by "<D + 3 days>"
+# 4. One subagent per file: "Read data/review/D/brief.md and follow it exactly with K = k". Then:
+python scripts/plan_review.py check data/review/D
+# 5. Workbook (focus list, cover and PDF from it as before).
+python scripts/plan_review.py merge data/inayat_plan_D.json --reviews <the same globs> "data/review/D/out_*.json" \
+    --team "Inayat Khan's teams" --date-label "<Day D Mon year>" --out exports/plans/call_plan_Inayat_D.xlsx
+python scripts/build_focus_list.py exports/plans/call_plan_Inayat_D.json exports/plans/Inayat_focus_D --meta data/inayat_meta_D.json \
+    --into exports/plans/call_plan_Inayat_D.xlsx
+python scripts/build_plan_pdf.py exports/plans/call_plan_Inayat_D.json exports/plans/Inayat_plan_D.html --meta data/inayat_meta_D.json
+```
+
+Review files are applied oldest first, so a lead's latest reading wins; a lead read before with nothing new keeps its
+reading. The meta JSON (cover text: how the last plan went, dialer lines to fix, notes) is written per day from the
+data; `scripts/build_plan_pdf.py` lists its keys. Every file here holds lead details: `data/` and `exports/` only.
+
 ## Snapshot inputs
 
 `python scripts/fetch_team_data.py "Team" 2026-09-23 2026-10-07 data/snapshot.json` fetches a team's
