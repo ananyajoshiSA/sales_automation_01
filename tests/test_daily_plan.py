@@ -653,6 +653,22 @@ def test_daily_plan_mails_to_the_elite_list_by_default(monkeypatch):
     assert seen["list"] == "deepanshi"
 
 
+def test_team_options_work_before_or_after_the_command(monkeypatch):
+    """A routine wrote "build <date> --mail --mail-list puja"; that order used to stop the run before anything was sent."""
+    from analytics.daily_plan import __main__ as cli
+    seen = []
+    monkeypatch.setattr(cli, "cmd_build", lambda a: seen.append((a.team, a.leader, a.mail_list, a.state_dir, a.mail, a.publish_state)))
+    team = ["--team", "Team Puja Malik (DSV+Women AI)", "--leader", "Puja Malik"]
+    cli.main(team + ["--mail-list", "puja", "build", "2026-10-30", "--publish-state", "--mail"])
+    cli.main(team + ["build", "2026-10-30", "--publish-state", "--mail", "--mail-list", "puja"])
+    cli.main(["build", "2026-10-30", "--mail", "--publish-state", "--mail-list", "puja", "--team", "Team Puja Malik (DSV+Women AI)",
+              "--leader", "Puja Malik"])
+    assert seen[0] == seen[1] == seen[2] == ("Team Puja Malik (DSV+Women AI)", "Puja Malik", "puja",
+                                             "plan_state/Team_Puja_Malik_DSV_Women_AI", True, True)
+    cli.main(["build", "2026-10-30"])  # nothing given either side: the Elite defaults, as before
+    assert seen[-1][1:4] == (cli.LEADER, "elite", "plan_state")
+
+
 def test_restaged_students_and_old_payments_are_not_the_days_enrollments():
     from analytics.daily_plan import review
     reads = {"L1": {"status": "already_student"}, "L3": {"status": "paid_new", "paid_on": "2026-09"}, "L5": {"status": "paid_new", "paid_on": "2026-10-09"}}

@@ -483,6 +483,9 @@ def main(argv=None):
     wb = sub.add_parser("weekly-build"); wb.add_argument("start"); wb.add_argument("end"); wb.add_argument("--allow-missing", action="store_true")
     lp = sub.add_parser("weekly-leader-prepare"); lp.add_argument("start"); lp.add_argument("end"); lp.add_argument("--per-batch", type=int, default=175)
     lb = sub.add_parser("weekly-leader-build"); lb.add_argument("start"); lb.add_argument("end")
+    for p in sub.choices.values():  # the team options also work after the command (a routine wrote "build ... --mail-list puja")
+        for flag in ("--team", "--leader", "--mail-list", "--state-dir"):
+            p.add_argument(flag, default=argparse.SUPPRESS, help="same as before the command")
     a = ap.parse_args(argv)
     if a.team != TEAM and a.state_dir == "plan_state":  # another team's plan must not overwrite Elite's state
         a.state_dir = os.path.join("plan_state", short_name(a.team))
