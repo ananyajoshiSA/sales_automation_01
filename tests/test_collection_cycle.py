@@ -59,7 +59,8 @@ def test_assignment_day_deadline_and_state():
     assert wed["on_time"] and wed["delay_wh"] == 3.0 and wed["real_talks"] == 1 and wed["enrolled"]
     assert not state(a, T("2026-10-28 11:00"))["enrolled"]
     sb = state(b, T("2026-10-28 20:00"))
-    assert not sb["first_dial"] and sb["overdue_wh"] == 1.0          # due Wed 19:00
+    assert not sb["first_dial"] and sb["overdue_wh"] == 0.0          # due Thu 11:00
+    assert state(b, T("2026-10-29 11:30"))["overdue_wh"] == 0.5
     sb = state(b, T("2026-10-29 13:00"))
     assert sb["delay_wh"] == 13.0 and not sb["on_time"]
 
