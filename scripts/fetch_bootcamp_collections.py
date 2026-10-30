@@ -5,7 +5,9 @@ for, and reads every lead with one of those tags across the whole account (so le
 collection teams are counted too). Writes ``meta.json``, ``tagged_leads.json`` and ``hist.jsonl``
 (resumable) into ``out_dir``. Read-only.
 
-    python scripts/fetch_bootcamp_collections.py 2026-06 2026-10 data/bc
+A fourth argument keeps only the bootcamps that started on that day (one weekend's collection cycle).
+
+    python scripts/fetch_bootcamp_collections.py 2026-06 2026-10 data/bc [2026-10-24]
 """
 
 from __future__ import annotations
@@ -19,16 +21,17 @@ from integrations.leadsquared import LeadSquaredClient
 from integrations.timeutil import now_utc
 from scripts.fetch_lead_histories import main as fetch_histories
 
-COLUMNS = ["ProspectID", "FirstName", "LastName", "OwnerId", "OwnerIdName", "ProspectStage", "CreatedOn", "mx_Bootcamp_collections",
+COLUMNS = ["ProspectID", "FirstName", "LastName", "Phone", "Mobile", "OwnerId", "OwnerIdName", "ProspectStage", "CreatedOn", "mx_Bootcamp_collections",
            "mx_Enquired_Course", "mx_Course_Fees", "mx_Bootcamp_attended", "mx_Next_follow_up_date"]
 
 
-def main(first_month: str, last_month: str, out_dir: str) -> None:
+def main(first_month: str, last_month: str, out_dir: str, bootcamp_day: str | None = None) -> None:
     c = LeadSquaredClient()
     os.makedirs(out_dir, exist_ok=True)
     field = next(f for f in c.get_lead_metadata() if f.get("SchemaName") == "mx_Bootcamp_collections")
     tags = [o["Value"] for o in field.get("Options") or []
-            if o.get("Value") and first_month <= parse_tag(o["Value"])[1][:7] <= last_month]
+            if o.get("Value") and first_month <= parse_tag(o["Value"])[1][:7] <= last_month
+            and (not bootcamp_day or parse_tag(o["Value"])[1] == bootcamp_day)]
     leads, seen = [], set()
     for tag in tags:
         for l in c.iter_leads("mx_Bootcamp_collections", tag, page_size=1000, columns=COLUMNS):
@@ -52,4 +55,4 @@ def main(first_month: str, last_month: str, out_dir: str) -> None:
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    main(*sys.argv[1:5])
