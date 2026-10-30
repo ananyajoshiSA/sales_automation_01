@@ -159,10 +159,18 @@ def apply_reviews(plan: dict, reviews: dict) -> Counter:
     return moved
 
 
+def merged(snaps: list[dict], since: str) -> dict:
+    """Calls and notes from every snapshot; users and leads from the latest only, so a lead that has left the team
+    since an older snapshot is not planned for its old owner."""
+    out = merge_snapshots(snaps)
+    last = max(snaps, key=lambda s: s["fetched_at"])
+    out.update({"leads": last["leads"], "group": last.get("group"), "groups": last.get("groups"), "start": since,
+                "payments": []})
+    return out
+
+
 def cmd_plan(a) -> None:
-    snap = merge_snapshots([json.load(open(p)) for p in a.snapshots])
-    last = json.load(open(a.snapshots[-1]))
-    snap.update({"group": last.get("group"), "groups": last.get("groups"), "start": a.since, "payments": []})
+    snap = merged([json.load(open(p)) for p in a.snapshots], a.since)
     bot = json.load(open(a.bot_calls)) if a.bot_calls else None
     p = build_plan(snap, a.date, since=a.since, leaders=a.leader, inbound=not a.no_inbound, course=a.course,
                    bot_calls=bot, bot_campaign=a.bot_campaign)

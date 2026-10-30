@@ -112,3 +112,16 @@ def test_parse_utc_reads_the_usual_forms():
         pr.parse_utc("14 Oct")
     with pytest.raises(SystemExit):
         pr.parse_utc("2026-10-14T08:40")  # no zone: ambiguous
+
+
+def test_merged_takes_leads_from_the_latest_snapshot_and_calls_from_all():
+    old = {"fetched_at": "2026-10-14T08:40:00+00:00", "users": [], "group": "T",
+           "leads": [{"ProspectID": "L1", "OwnerIdName": "Ravi K"}, {"ProspectID": "L2", "OwnerIdName": "Ravi K"}],
+           "calls": [{"activity_id": "c1", "lead_id": "L1"}], "zip_activities": []}
+    new = {"fetched_at": "2026-10-23T06:45:00+00:00", "users": [{"ID": "u"}], "group": "T", "groups": ["T"],
+           "leads": [{"ProspectID": "L1", "OwnerIdName": "Asha M"}],
+           "calls": [{"activity_id": "c2", "lead_id": "L1"}], "zip_activities": []}
+    m = pr.merged([old, new], "2026-09-01")
+    assert m["leads"] == new["leads"]  # L2 left the team; L1's owner is today's
+    assert {c["activity_id"] for c in m["calls"]} == {"c1", "c2"}
+    assert m["start"] == "2026-09-01" and m["groups"] == ["T"]
