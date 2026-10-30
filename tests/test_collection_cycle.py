@@ -65,5 +65,12 @@ def test_assignment_day_deadline_and_state():
     assert sb["delay_wh"] == 13.0 and not sb["on_time"]
 
 
+def test_team_dial_before_owner_change_counts_as_on_time():
+    hist = {"a": [call("2026-10-26 10:40"), owner("2026-10-26 11:30", "Seller", "Vedahi Rana")]}
+    a = cycle_leads([lead("a")], hist, META, "2026-10-24", "Mayur")[0]
+    s = state(a, T("2026-10-26 20:00"))
+    assert s["first_dial"] == T("2026-10-26 10:40") and s["delay_wh"] == 0.0 and s["on_time"] and s["dials"] == 1
+
+
 def test_short_bootcamp_name():
     assert short_bootcamp("US Accounting Bootcamp Collection - 24th October'26") == "US Accounting 24 Oct"

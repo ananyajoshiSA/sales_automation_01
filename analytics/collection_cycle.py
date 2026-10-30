@@ -3,7 +3,7 @@
 A cycle lead is a lead tagged for one of the cycle's bootcamps and held by one of the team's callers (its owner now, or
 the last team caller who owned it). It is assigned at its first owner change to a team member after the bootcamp
 started (or, without one, when its stage became "Booking fees received"), and must be dialled within 12 working
-hours (10:00–20:00 IST). Enrolled = the stage reached Course Enrolled or Collections done.
+hours (10:00–20:00 IST); a team member's dial before the owner change counts as on time. Enrolled = the stage reached Course Enrolled or Collections done.
 
     python -m analytics.collection_cycle data/nov_w1 2026-10-24 Mayur "2026-10-28 20:00" out.json
 """
@@ -93,8 +93,8 @@ def cycle_leads(leads: list[dict], hist: dict[str, list], meta: dict, bootcamp_d
         assigned = to_team[0] if to_team else (booked[0] if booked else (stages[0][0] if stages else None))
         if not assigned:
             continue
-        calls = [c for c in (_call(a) | {"id": a.get("Id")} for a in acts if a.get("EventCode") in (21, 22))
-                 if c["t"] and c["t"] >= start and not BOT.search(c["by"])]
+        calls = [c | {"team": team_member(team, c["by"], side)} for c in (_call(a) | {"id": a.get("Id")} for a in acts
+                 if a.get("EventCode") in (21, 22)) if c["t"] and c["t"] >= start and not BOT.search(c["by"])]
         enrolled = next((t for t, s, _ in stages if s in COLLECTED and t >= start), None)
         lost = next((t for t, s, _ in stages if s in LOST | DEFERRED), None)
         forms = [{"t": utc(a["CreatedOn"]), "status": (_fields(a).get("Status") or "").replace("\xa0", " "),
@@ -113,7 +113,8 @@ def cycle_leads(leads: list[dict], hist: dict[str, list], meta: dict, bootcamp_d
 def state(lead: dict, cut: datetime) -> dict:
     """What was true of the lead at ``cut``: calls, talks, first-dial timing, enrolment or drop."""
     calls = [c for c in lead["calls"] if c["t"] <= cut]
-    dials = [c for c in calls if c["out"] and c["t"] >= lead["assigned"]]
+    # callers often dial from the allocation sheet before the LSQ owner change is saved: such a dial counts (0 h late)
+    dials = [c for c in calls if c["out"] and (c["t"] >= lead["assigned"] or c.get("team"))]
     real = [c for c in calls if c["answered"] and c["dur"] >= REAL_SECS]
     first = dials[0]["t"] if dials else None
     delay = working_hours_between(lead["assigned"], first) if first else None
