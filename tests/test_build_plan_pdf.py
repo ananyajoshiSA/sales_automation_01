@@ -36,3 +36,9 @@ def test_team_without_inbound_gets_no_missed_call_steps_and_sees_discovery(tmp_p
     doc = (tmp_path / "out.html").read_text()
     assert "missed call" not in doc.lower() and "inbound" not in doc.lower() and "<th>M</th>" not in doc
     assert "Discovery so far:</b> Bot, 5 Oct" in doc
+
+
+def test_cover_grows_with_a_long_note_instead_of_spilling_onto_the_next_page():
+    from scripts.build_plan_pdf import CSS
+    cover = next(line for line in CSS.splitlines() if line.startswith(".cover {"))
+    assert "min-height" in cover and " height:" not in cover.replace("min-height", "")

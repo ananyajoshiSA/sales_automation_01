@@ -125,7 +125,7 @@ body { font-family: Carlito, "Liberation Sans", Arial, sans-serif; color: #1d232
 h1, h2, h3 { font-family: Caladea, "Liberation Serif", Georgia, serif; color: #123f36; line-height: 1.2; margin: 0; }
 h1 { font-size: 26pt; } h2 { font-size: 17pt; margin: 0 0 6pt; } h3 { font-size: 12.5pt; margin: 14pt 0 5pt; }
 p { margin: 5pt 0; } ul, ol { margin: 4pt 0; padding-left: 16pt; } li { margin: 2.5pt 0; }
-.cover { height: 260mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; }
+.cover { min-height: 260mm; display: flex; flex-direction: column; justify-content: space-between; page-break-after: always; }
 .cover .band { background: #1f4e46; color: #fff; padding: 22pt 24pt; border-radius: 6pt; }
 .cover .band h1 { color: #fff; } .cover .band p { color: #dcebe6; font-size: 12pt; }
 .eyebrow { text-transform: uppercase; letter-spacing: 1.5pt; font-size: 9pt; color: #9fd0c3; }
