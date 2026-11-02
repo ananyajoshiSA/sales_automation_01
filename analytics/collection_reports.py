@@ -59,7 +59,8 @@ def row(lead: dict, cut: datetime, judged: dict | None, pool: dict, fee: int) ->
                 "followup": j.get("wed_hot_followup", ""), "outcome": j.get("wed_hot_outcome", "")}
     if s["dropped"]:
         j = judged or {}
-        return {**r, "status": "dropped", "why": j.get("drop_reason") or s["stage"], "later": j.get("later_batch_offered", "—")}
+        return {**r, "status": "dropped", "why": j.get("drop_reason") or s["stage"], "later": j.get("later_batch_offered", "—"),
+                "followup": j.get("wed_hot_followup", ""), "outcome": j.get("wed_hot_outcome", "")}
     if not judged:
         raise ValueError(f"no judgement for open lead {lead['phone']} ({lead['caller']})")
     st = judged["status"]
@@ -181,7 +182,8 @@ td.n, th.n { text-align:right; } tr.sub td { background:#F6F5F1; font-weight:bol
 
 
 def chip(st: str) -> str:
-    return f'<span class="chip" style="background:{COL[st]};color:{INK[st]}">{LABEL[st]}</span>'
+    # the short label fits the narrow status column; the legend keeps the full one
+    return f'<span class="chip" style="background:{COL[st]};color:{INK[st]}">{LABEL[st].replace(" yet", "")}</span>'
 
 
 def legend() -> str:
@@ -486,7 +488,7 @@ class Report:
                       '<th style="width:13%">Bootcamp · day</th><th>Drop reason</th><th style="width:10%">Later batch offered?</th><th style="width:6%">Talks</th></tr>')
             for i, (l, s) in enumerate(drops, 1):
                 D_.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(l["caller"])}</td><td>{e(bootcamp_label(l))}</td>'
-                          f'<td>{e(s["why"])}</td><td>{e(s.get("later", "—"))}</td><td>{s["real_talks"]}</td></tr>')
+                          f'<td>{e(s["why"])}</td><td>{e(str(s.get("later", "—")).capitalize())}</td><td>{s["real_talks"]}</td></tr>')
             D_.append("</table>")
         if risk:
             D_.append('<table><tr><th style="width:3%">#</th><th style="width:11%">Number</th><th style="width:10%">Lead</th><th style="width:10%">Caller</th>'
