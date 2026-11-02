@@ -187,6 +187,15 @@ generated. Setup, step by step: [docs/email_report.md](docs/email_report.md).
 |---|---|
 | `REPORT_EMAIL_URL`, `REPORT_EMAIL_TOKEN` | The mailer's web app `/exec` address and its upload token |
 
+## Collection reports
+
+Community and bootcamp collection reports from the two Google collection sheets and LeadSquared:
+[docs/collections.md](docs/collections.md).
+
+| Variable | Description |
+|---|---|
+| `COMMUNITY_COLLECTION_SHEET_ID`, `BOOTCAMP_POOL_SHEET_ID` | IDs of the Community Webinar Collection Sheet and the Bootcamp Pool data sheet (shared by link; keep them out of the repo) |
+
 ## Tests
 
 ```bash

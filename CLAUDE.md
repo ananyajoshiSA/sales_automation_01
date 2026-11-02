@@ -23,9 +23,10 @@ LeadSquared lead count.
 
 | Path | What it is |
 |---|---|
-| `integrations/` | API clients: `leadsquared` (CRM), `transcripts` (Salesa), `zipteams`; read-only `google_ads`, `meta_ads`, `zoom` (attendance), `timepay` (AI voice-agent logs), `growthx` (funnel leads and bootcamp checkouts); `env.py` loads `.env` |
+| `integrations/` | API clients: `leadsquared` (CRM), `transcripts` (Salesa), `zipteams`; read-only `google_ads`, `meta_ads`, `zoom` (attendance), `gsheets` (link-shared Google Sheets as .xlsx), `timepay` (AI voice-agent logs), `growthx` (funnel leads and bootcamp checkouts); `env.py` loads `.env` |
 | `scripts/` | Bulk fetchers (IST date ranges → JSON/JSONL in `data/`), `build_plan_pdf.py` |
 | `analytics/` | Reports: the daily `team_performance` report (rules in `docs/report/`), `call_integrity`, `nightly_plan` / `call_plan`, `coaching`, `revenue`, `lost_leads`, `tier_outcomes`, `team_report`, `team_compare`, `fresh_leads`, `lead_priority`, `dnp_report`, `accountability` (who really assigned or transferred each lead, [docs/accountability.md](docs/accountability.md)), `enrolment_store` (first enrolments read from LeadSquared once and kept); shared definitions in `definitions.py`. Guide: [docs/revenue_plan.md](docs/revenue_plan.md) |
+| `analytics/collections/` | Community and bootcamp collection reports (PDF + workbook, rupee amounts) from the two Google collection sheets joined to LeadSquared's Bootcamp collections tags, with no manual step; fetch with `scripts/fetch_collections.py`. Guide: [docs/collections.md](docs/collections.md) |
 | `analytics/daily_plan/` | The scheduled 09:00 report (previous day's review + today's call plan, PDF and workbook) and the 14:00 / 17:00 status checks; email when SMTP settings exist. Runbook: [docs/daily_plan.md](docs/daily_plan.md) |
 | `analytics/convintel/` | Conversation intelligence (additive): every call inventoried with a status until its transcript is analysed, the 3-minute REAL_CALL rule (this module only), every transcript read by Claude itself (no model API, no keyword rules), possibly-not-real call flags, team analytics, snapshots and an offline HTML page (`page/`). `python -m analytics.convintel status`. Guide: [docs/conversation_intelligence.md](docs/conversation_intelligence.md) |
 | `tests/` | pytest (HTTP mocked with `responses`) |
