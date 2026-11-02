@@ -11,6 +11,7 @@ Sheet IDs are not code: they give access to student data, so they come from the 
 from __future__ import annotations
 
 import os
+import re
 import time
 
 import requests
@@ -30,7 +31,8 @@ def sheet_id(env_name: str) -> str:
     value = (os.environ.get(env_name) or "").strip()
     if not value:
         raise SheetError(f"{env_name} is not set: add the sheet's ID to the environment settings or .env")
-    return value
+    match = re.search(r"/d/([A-Za-z0-9_-]+)", value)
+    return match.group(1) if match else value
 
 
 def download_xlsx(sheet: str, path: str, *, session: requests.Session | None = None, retries: int = 3,
