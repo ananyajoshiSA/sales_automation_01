@@ -463,10 +463,8 @@ class Report:
                     f'<td></td><td class="n">{lakh(mis)}</td>'
                     f'<td class="n">{lakh(sum(s["value"] for _, s in self.rows if s["status"] not in ("enrolled", "dropped")))}</td></tr>')
         mis_n = sum(b["recovered"] for b in pool["bootcamps"].values())
-        note = (f'<p class="muted">Enrolled and recovery are from LeadSquared up to {when(self.cut)} IST. Collected is the pool sheet MIS of '
-                f'{e(pool["as_of"])} ({mis_n} leads); the {m["enrolled"] - mis_n} leads enrolled after it are not in that amount yet. '
-                f'Still open = course price (pool sheet, by day) minus the ₹{self.cfg["fee"]:,} booking fee for each open lead. '
-                'Median days to pay counts from assignment to enrolment.</p>' if m["enrolled"] != mis_n else "")
+        note = f'<p class="muted">{self.reconcile()} Still open = course price (pool sheet, by day) minus the ₹{self.cfg["fee"]:,} booking fee for each ' \
+               'open lead. Median days to pay counts from assignment to enrolment.</p>'
         # Wednesday's hot leads
         H = ['<table><tr><th style="width:3%">#</th><th style="width:10.5%">Number</th><th style="width:9%">Lead</th><th style="width:9%">Caller</th>'
              '<th style="width:12%">Bootcamp · day</th><th style="width:18%">Wednesday: hot because</th><th style="width:8%">Called at promised time?</th>'
@@ -503,6 +501,24 @@ class Report:
                 + f'<h2>Wednesday’s hot leads — what happened ({len(wed_hot)})</h2><p class="muted">Not called at the promised time first.</p>'
                 + "".join(H) + "".join(D_) + "</div>")
         return page, extra
+
+    def reconcile(self) -> str:
+        """LeadSquared against the pool sheet MIS, bootcamp by bootcamp: the two are updated by different people."""
+        pool = self.cfg["pool"]
+        diff = []
+        for b, p in pool["bootcamps"].items():
+            x = [s for l, s in self.rows if l["bootcamp"] == b]
+            c = counts([(None, s) for s in x])
+            if c["enrolled"] != p["recovered"]:
+                diff.append(f'{e(b)}: {c["enrolled"]} enrolled in LSQ, {p["recovered"]} recovered in the MIS')
+            if "dropped" in p and c["dropped"] != p["dropped"]:
+                diff.append(f'{e(b)}: {c["dropped"]} dropped in LSQ, {p["dropped"]} in the MIS')
+        head = (f'Enrolled, dropped and recovery are from LeadSquared up to {when(self.cut)} IST; collected money is the pool sheet MIS of '
+                f'{e(pool["as_of"])}.')
+        if not diff:
+            return head + " The two agree on every bootcamp."
+        return (head + ' <span class="bad">They differ</span> — ' + "; ".join(diff) + ". TLs to update the LSQ stage or the sheet "
+                "so both show the same leads.")
 
     def defs(self) -> str:
         return f"""<div class="brk note"><b>How to read this.</b> <b>Within 12 h</b>: first dial within {WINDOW_HOURS} working hours
