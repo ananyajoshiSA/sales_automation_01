@@ -32,6 +32,13 @@ def in_week(rows: list[dict], start: date) -> list[dict]:
     return [r for r in rows if lo <= str(r.get("date") or "")[:10] <= hi]
 
 
+def by_lead(rows: list[dict]) -> list[tuple[dict, list[dict]]]:
+    """Each team lead's totals and their members, biggest balance first."""
+    leads = sorted(group(rows, "team"), key=lambda g: -g["balance_open"])
+    return [(L, sorted(group([r for r in rows if (r.get("team") or "(blank)") == L["team"]], "owner"),
+                       key=lambda g: -g["received"])) for L in leads]
+
+
 def html_doc(R: dict, rows: list[dict], start: date) -> str:
     end = start + timedelta(days=6)
     T = R["total"]
@@ -52,17 +59,27 @@ def html_doc(R: dict, rows: list[dict], start: date) -> str:
     lead = (f"{T['students']} bootcamp students were entered, {rs(T['received'])} received, {rs(T['balance_open'])} still to "
             f"collect. " + (f"Biggest balance to chase: {e(top['owner'])} ({rs(top['balance_open'])}, {top['pending']} pending)."
                             if top else ""))
+    mcols = [c for c in pcols if c[0] != "team"]
+    lcols = [("team", "Team leader")] + [c for c in pcols if c[0] not in ("owner", "team")]
+    leads = by_lead(rows)
+    money = {"received", "balance_open"}
+    lead_html = f"<h2>By team leader</h2>{render._table([L for L, _ in leads] + [{**tot, 'team': 'Total'}], lcols, money_keys=money)}"
+    lead_html += "<h2>Team members under each team leader</h2>"
+    for L, members in leads:
+        lead_html += (f"<h3>{e(L['team'])} &middot; {L['students']} students, {rs(L['received'])} received, "
+                      f"{rs(L['balance_open'])} still to collect</h3>"
+                      + render._table(members + [{**L, 'owner': 'Team leader total'}], mcols, money_keys=money))
     fl = ""
     if flagged:
         fl = "<h2>Sheet and LeadSquared disagree</h2>" + render._table(
             [{**r} for r in flagged[:5]], [("owner", "Team member"), ("name", "Student"), ("status", "Sheet status"),
                                             ("lsq_stage", "LeadSquared stage"), ("flag", "Why")])
     return (f"<html><head><meta charset=utf-8><style>{render.CSS}</style></head><body>"
-            f"<h1>Bootcamp collections: weekly by team member</h1>"
+            f"<h1>Bootcamp collections: weekly by team leader and team member</h1>"
             f"<div class=muted>{start:%a %d %b} to {end:%a %d %b %Y} (IST) &middot; data read {e(R.get('fetched_at_ist', ''))} "
             f"&middot; students grouped by the sheet's date column</div>"
             f"<div class=lead>{lead}</div><div class=tiles>{tiles_html}</div>"
-            f"<h2>By team member</h2>{render._table(people + [tot], pcols, money_keys={'received', 'balance_open'})}"
+            f"{lead_html}"
             f"<h2>By bootcamp</h2>{render._table(camps, ccols, limit=8, money_keys={'received', 'balance_open'})}{fl}"
             f"<div class=muted>Pending = booking fee paid, balance not yet collected. Still to collect covers Pending and "
             f"Instalments students. Students the sheet marks Drop are excluded from it. Report built "
