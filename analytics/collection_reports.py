@@ -240,7 +240,8 @@ def bullet_svg(rows, target: int) -> str:
 class Report:
     def __init__(self, cfg: dict, kind: str, cut: datetime):
         self.cfg, self.kind, self.cut = cfg, kind, cut
-        self.title = "Wednesday check" if kind == "wed" else "Friday review"
+        # a review made on another day keeps the Friday format but names its own day
+        self.title = "Wednesday check" if kind == "wed" else f"{cut.astimezone(IST):%A} review"
         self.rows = snapshot(cfg, cut)
         self.latest = max(l["wk"] for l, _ in self.rows)
         self.org = org(self.rows)
@@ -512,7 +513,7 @@ promised time. <b>Payment intent</b>: the mode and date the lead gave. <b>Hot</b
 date or mode agreed, link asked for, loan documents shared, or the lead called us back. <b>Warm</b>: a real talk, interested, with an open
 objection or no date. <b>Cold</b>: "not now" or a deferral with no date, or unanswered since the last talk. A lead we failed to dial (dialer
 failures) keeps its grade; the failure shows in the act box. <b>Not reached yet</b>: no real talk so far. <b>Enrolled</b>: LeadSquared stage
-Course Enrolled or Collections done. <b>Enrolled value (est.)</b>: course price from the pool sheet minus the booking fee, for each enrolled
+Course Enrolled or Collections done, or Loan pending saved as "loan done" / "loan process done". <b>Enrolled value (est.)</b>: course price from the pool sheet minus the booking fee, for each enrolled
 lead — an estimate; LeadSquared holds no paid amount for these leads, so actual money is the pool sheet MIS total. Hot / warm / cold and the
 reasons were read from each lead's LeadSquared notes and Salesa call transcripts; transcripts have no speaker labels, so check the call
 recording before quoting a lead.</div>"""

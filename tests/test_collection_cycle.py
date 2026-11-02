@@ -17,8 +17,8 @@ def owner(t, prev, cur):
     return {"EventCode": 3001, "CreatedOn": utc(t), "Data": [{"Key": "PreviousOwner", "Value": prev}, {"Key": "CurrentOwner", "Value": cur}]}
 
 
-def stage(t, cur):
-    return {"EventCode": 3002, "CreatedOn": utc(t), "Data": [{"Key": "CurrentStage", "Value": cur}]}
+def stage(t, cur, comment=""):
+    return {"EventCode": 3002, "CreatedOn": utc(t), "Data": [{"Key": "CurrentStage", "Value": cur}, {"Key": "Comment", "Value": comment}]}
 
 
 def call(t, status="Answered", dur=200, out=True):
@@ -70,6 +70,15 @@ def test_team_dial_before_owner_change_counts_as_on_time():
     a = cycle_leads([lead("a")], hist, META, "2026-10-24", "Mayur")[0]
     s = state(a, T("2026-10-26 20:00"))
     assert s["first_dial"] == T("2026-10-26 10:40") and s["delay_wh"] == 0.0 and s["on_time"] and s["dials"] == 1
+
+
+def test_loan_done_counts_as_enrolled():
+    hist = {"a": [owner("2026-10-26 11:00", "Seller", "Vedahi Rana"), stage("2026-10-27 12:00", "Loan pending", "Docs shared"),
+                  stage("2026-10-28 19:35", "Loan pending", "Loan process done")],
+            "b": [owner("2026-10-26 11:00", "Seller", "Vedahi Rana"), stage("2026-10-27 12:00", "Loan pending", "loan not done yet")]}
+    L = {x["lead_id"]: x for x in cycle_leads([lead("a"), lead("b")], hist, META, "2026-10-24", "Mayur")}
+    assert state(L["a"], T("2026-10-28 20:00"))["enrolled"] and not state(L["a"], T("2026-10-28 19:00"))["enrolled"]
+    assert not state(L["b"], T("2026-10-28 20:00"))["enrolled"]
 
 
 def test_short_bootcamp_name():
