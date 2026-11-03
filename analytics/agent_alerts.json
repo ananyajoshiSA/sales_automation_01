@@ -1,0 +1,13 @@
+{
+ "note": "One entry per live TimePay discovery campaign. Add the next batch's campaigns here (TimePay campaign id, GrowthX leadtype, ICP map in analytics/funnel_icp_maps, the agent id it should use). Remove a campaign once its bootcamp has run.",
+ "rules": {"target": 0.30},
+ "campaigns": {
+  "women":   {"name": "Women AI (14 Nov)",            "timepay": "DUXydUlSFrHKTydsOPka", "leadtype": "women-remote-nov",         "map": "women",             "agent": "PLZHIIESOLBEZXVDpPyc", "from": "2026-10-15T00:00:00"},
+  "usacc":   {"name": "US Accounting (14 Nov)",       "timepay": "MIxdPfHvGDcZBTNOztYT", "leadtype": "us-accounting-nov",        "map": "usacc",        "agent": "pMGhdfogeowJELIkqpaL", "from": "2026-10-15T00:00:00"},
+  "id":      {"name": "Independent Director (14 Nov)","timepay": "BVBkqgstfALrUOyPPTyn", "leadtype": "independent-director-nov", "map": "id", "agent": "YxgYyXTELGLVedpvoQZf", "from": "2026-10-15T00:00:00"},
+  "corplaw": {"name": "US Corporate Law (21 Nov)",    "timepay": "yFUbQjAUCpuOUuojsSmk", "leadtype": "US-Corporate-Law-nov",     "map": "corplaw",     "agent": "UFbEpthjpWVTjtywNbkj", "from": "2026-10-15T00:00:00"},
+  "acw":     {"name": "Academic Writing (21 Nov)",    "timepay": "EoOWyfGwRVZAeFMTlZQn", "leadtype": "acw-nov-2026",             "map": "acw",     "agent": "ksoDjNWsHCxxncoWsgJT", "from": "2026-10-15T00:00:00"},
+  "iplaw":   {"name": "IP Law (28 Nov)",              "timepay": "glzPvUHDNxhTGggmKvzZ", "leadtype": "ip-law-nov",               "map": "iplaw",               "agent": "LozmBSzmJtFKigdfYyLK", "from": "2026-10-15T00:00:00"},
+  "patent":  {"name": "Global Patent (28 Nov)",       "timepay": "oFwADuLBKrCWbTbEoeeE", "leadtype": "global-patent-nov",        "map": "patent",        "agent": "QkUxTcBrWkucWslWVJzY", "from": "2026-10-15T00:00:00"}
+ }
+}
