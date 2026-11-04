@@ -17,3 +17,11 @@ def test_sheet_id_accepts_a_full_url(monkeypatch):
     from integrations.gsheets import sheet_id
     monkeypatch.setenv("X_SHEET_ID", "https://docs.google.com/spreadsheets/d/abc_123-XY/edit#gid=0")
     assert sheet_id("X_SHEET_ID") == "abc_123-XY"
+
+
+def test_by_lead_groups_members_under_their_leader():
+    from analytics.collections.weekly import by_lead
+    base = {"status": "", "outcome": "Pending", "balance": 0, "received": 0, "price": 0, "subvention": 0, "discount": 0}
+    rows = [{**base, "team": "A", "owner": "x"}, {**base, "team": "A", "owner": "y"}, {**base, "team": "B", "owner": "z"}]
+    out = {L["team"]: (L["students"], [m["owner"] for m in ms]) for L, ms in by_lead(rows)}
+    assert out["A"][0] == 2 and sorted(out["A"][1]) == ["x", "y"] and out["B"] == (1, ["z"])
