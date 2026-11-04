@@ -43,11 +43,16 @@ def test_reports_list_numbers_not_ids_and_follow_wednesday_hot_leads(tmp_path):
     doc = wed.html()
     assert "+91-0000000003" in doc and "Technology Law 24 Oct · D2" in doc and '"a"' not in doc
     assert "1 lead not called yet" in doc
+    # columns removed at the user's request (Nov 2026); "not reached" renamed
+    for gone in ("Median 1st call", ">1st call<", "Booking fees, all teams", "Median days to pay", "Not reached"):
+        assert gone not in doc
+    assert "DNP/No real conversation" in doc
     fri = Report(cfg, "fri", T("2026-10-30 12:00"))
     st = {l["lead_id"]: s for l, s in fri.rows}
     assert st["a"]["status"] == "enrolled" and st["a"]["value"] == 56600 and st["b"]["value"] == 56600
     doc = fri.html()
     assert "Wednesday’s 1 hot leads" in doc and "Call missed" in doc and "1 were not called at the time promised" in doc
+    assert "Median days to pay" not in doc and "Booking fees, all teams" not in doc and ">1st call<" not in doc
     assert "agree on every bootcamp" in doc and "Thursday review" not in doc and "Friday review" in doc
     cfg["pool"]["bootcamps"]["Technology Law 24 Oct"]["recovered"] = 2
     assert "1 enrolled in LSQ, 2 recovered in the MIS" in Report(cfg, "fri", T("2026-10-30 12:00")).html()

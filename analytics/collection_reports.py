@@ -27,7 +27,7 @@ CHROME = "/opt/pw-browsers/chromium"
 e = lambda s: html.escape(str(s))
 COL = {"enrolled": "#2a78d6", "hot": "#b3440f", "warm": "#eb6834", "cold": "#f6b38f", "notreached": "#d6d9de", "dropped": "#7b8089"}
 INK = {"enrolled": "#fff", "hot": "#fff", "warm": "#1d1d1b", "cold": "#1d1d1b", "notreached": "#1d1d1b", "dropped": "#fff"}
-LABEL = {"enrolled": "Enrolled", "hot": "Hot", "warm": "Warm", "cold": "Cold", "notreached": "Not reached yet", "dropped": "Dropped"}
+LABEL = {"enrolled": "Enrolled", "hot": "Hot", "warm": "Warm", "cold": "Cold", "notreached": "DNP/No real conversation", "dropped": "Dropped"}
 ORDER = ["enrolled", "hot", "warm", "cold", "notreached", "dropped"]
 GRADED = {"hot", "warm", "cold", "notreached"}
 DIALER_SHARE = 0.5  # CLAUDE.md: 50%+ of dials ending in CallFailure is a dialer issue
@@ -172,7 +172,7 @@ table { border-collapse:collapse; width:100%; margin:2px 0 6px; font-size:8.2px;
 th { background:#EDEBE4; text-align:left; font-size:7.8px; color:#14213D; } th,td { border:1px solid #d9d6cf; padding:2px 4px; vertical-align:top; }
 td.n, th.n { text-align:right; } tr.sub td { background:#F6F5F1; font-weight:bold; } tr { page-break-inside: avoid; }
 .ph { font-family:'DejaVu Sans Mono', monospace; white-space:nowrap; font-size:7.8px; }
-.chip { display:inline-block; padding:0 4px; border-radius:6px; font-size:7.5px; font-weight:bold; white-space:nowrap; }
+.chip { display:inline-block; padding:0 4px; border-radius:6px; font-size:7.5px; font-weight:bold; }
 .legend span { display:inline-block; margin-right:9px; font-size:8px; } .legend i { display:inline-block; width:8px; height:8px; margin-right:3px;
   vertical-align:-1px; border-radius:2px; }
 .wk { font-size:9.5px; color:#fff; background:#14213D; padding:2px 6px; margin:8px 0 3px; font-weight:bold; }
@@ -183,7 +183,7 @@ td.n, th.n { text-align:right; } tr.sub td { background:#F6F5F1; font-weight:bol
 
 def chip(st: str) -> str:
     # the short label fits the narrow status column; the legend keeps the full one
-    return f'<span class="chip" style="background:{COL[st]};color:{INK[st]}">{LABEL[st].replace(" yet", "")}</span>'
+    return f'<span class="chip" style="background:{COL[st]};color:{INK[st]}">{LABEL[st]}</span>'
 
 
 def legend() -> str:
@@ -273,7 +273,7 @@ class Report:
         t = [("Booking-fee leads", n, f"{latest_n} from the latest weekend"),
              ("Not called yet", len(not_called), f"{over} past the 12-hour window"),
              ("Called within 12 h", f"{pct(ot, len(judged))}%", f"{ot} of {len(judged)} due so far · median {med:.1f} working h"),
-             ("Hot leads", c["hot"], f'{c["warm"]} warm · {c["cold"]} cold · {c["notreached"]} not reached'),
+             ("Hot leads", c["hot"], f'{c["warm"]} warm · {c["cold"]} cold · {c["notreached"]} DNP/No real conversation'),
              ("Enrolled", f'{c["enrolled"]} ({pct(c["enrolled"], n)}%)', f'{c["dropped"]} dropped · target {self.cfg["target"]}%+'),
              ("Collected (pool MIS)", lakh(mis), f'{mis_n} leads, MIS {pool["as_of"]} · {lakh(sum(s["value"] for _, s in open_))} still open')]
         alert = {"Not called yet": bool(not_called), "Called within 12 h": ot < .85 * len(judged),
@@ -311,7 +311,7 @@ class Report:
                 + (" since Wednesday." if since else " on these leads."))
         never = [(l, s) for l, s in open_ if s["status"] == "notreached" and s["dials"] >= 10]
         if never:
-            items.append(f"<b>{len(never)} leads not reached after 10+ dials</b>: send a WhatsApp, try another number or the TL's line "
+            items.append(f"<b>{len(never)} leads DNP/No real conversation after 10+ dials</b>: send a WhatsApp, try another number or the TL's line "
                          "(listed on the TL pages).")
         return items
 
@@ -331,8 +331,8 @@ class Report:
 
     def caller_table(self) -> str:
         H = ['<table><tr><th style="width:17%">AD → TL → caller</th><th class="n">Leads</th><th class="n">Not called</th>'
-             '<th class="n">Within 12 h</th><th class="n">Median 1st call (wh)</th><th class="n">Hot</th><th class="n">Warm</th><th class="n">Cold</th>'
-             '<th class="n">Not reached</th><th class="n">Enrolled</th><th class="n">Dropped</th><th class="n">Call-backs kept</th>'
+             '<th class="n">Within 12 h</th><th class="n">Hot</th><th class="n">Warm</th><th class="n">Cold</th>'
+             '<th class="n">DNP/No real conversation</th><th class="n">Enrolled</th><th class="n">Dropped</th><th class="n">Call-backs kept</th>'
              '<th class="n" style="width:8%">Enrolled value (est.)</th><th class="n" style="width:8%">Still open</th></tr>']
         cut = self.cut
 
@@ -341,11 +341,10 @@ class Report:
             due = [(l, s) for l, s in x if due_passed(l, s, cut)]
             ot = sum(s["on_time"] for _, s in due)
             otp = pct(ot, len(due))
-            med = median([s["delay_wh"] for _, s in x if s["called"]])
             kept, prom = sum(s["cb"][0] for _, s in x), sum(s["cb"][1] for _, s in x)
             nc = sum(not s["called"] and s["status"] not in ("enrolled", "dropped") for _, s in x)
             return (f'<tr class="{"sub" if sub else ""}"><td>{label}</td><td class="n">{n}</td><td class="n">{f"<span class=bad>{nc}</span>" if nc else 0}</td>'
-                    f'<td class="n"><span{" class=bad" if due and otp < 70 else ""}>{otp}%</span></td><td class="n">{"—" if med is None else f"{med:.1f}"}</td>'
+                    f'<td class="n"><span{" class=bad" if due and otp < 70 else ""}>{otp}%</span></td>'
                     f'<td class="n">{c["hot"]}</td><td class="n">{c["warm"]}</td><td class="n">{c["cold"]}</td><td class="n">{c["notreached"]}</td>'
                     f'<td class="n">{c["enrolled"]} ({pct(c["enrolled"], n)}%)</td><td class="n">{c["dropped"]}</td>'
                     f'<td class="n"><span{" class=bad" if kept < prom else ""}>{kept}/{prom}</span></td>'
@@ -375,21 +374,17 @@ class Report:
     # -- lead lists -------------------------------------------------------------------------------------------
     def lead_rows(self, x) -> str:
         H = ['<table><tr><th style="width:2.5%">#</th><th style="width:10%">Number</th><th style="width:9%">Lead</th><th style="width:11%">Bootcamp · day</th>'
-             '<th style="width:6.5%">1st call</th><th style="width:4.5%">Tries / days</th><th style="width:7%">Status</th>'
-             '<th style="width:19.5%">Why (LSQ notes and transcripts)</th><th style="width:10.5%">Payment intent</th><th style="width:5%">Call-backs kept</th>'
+             '<th style="width:4.5%">Tries / days</th><th style="width:9%">Status</th>'
+             '<th style="width:24%">Why (LSQ notes and transcripts)</th><th style="width:10.5%">Payment intent</th><th style="width:5%">Call-backs kept</th>'
              '<th style="width:14.5%">Next step</th></tr>']
         rank = {"hot": 1, "warm": 2, "notreached": 3, "cold": 4}
         key = lambda t: (0, -t[1]["overdue_wh"]) if not t[1]["called"] else (rank[t[1]["status"]], t[0]["assigned"])
         for i, (l, s) in enumerate(sorted(x, key=key), 1):
-            if s["called"]:
-                fc = f'{s["delay_wh"]:.1f} wh' + (' <span class="bad">late</span>' if not s["on_time"] else "")
-            else:
-                fc = f'<span class="bad">overdue {s["overdue_wh"]:.1f} wh</span>' if s["overdue_wh"] else f'due {when(l["due"], "%a %H:%M")}'
             cb = f'{s["cb"][0]}/{s["cb"][1]}' if s["cb"][1] else "—"
             if s["cb"][0] < s["cb"][1]:
                 cb = f'<span class="bad">{cb}</span>'
             why = e(s["why"]) + (f'<br><span class="bad">At risk: {e(s["risk"])}</span>' if s["risk"] else "")
-            H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(bootcamp_label(l))}</td><td>{fc}</td>'
+            H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(bootcamp_label(l))}</td>'
                      f'<td>{s["dials"]} / {s["dial_days"]}</td><td>{chip(s["status"])}</td><td>{why}</td><td>{e(s["intent"])}</td>'
                      f'<td>{cb}</td><td>{e(s["nxt"])}</td></tr>')
         return "".join(H) + "</table>"
@@ -402,14 +397,14 @@ class Report:
                 x = [(l, s) for l, s in open_ if l["tl"] == tl]
                 out = ['<div class="brk">' + self.header(f"open leads · TL {tl} (AD {ad})"),
                        f'<p class="muted">{len(x)} open leads. Every open lead of the month stays listed until it is enrolled or dropped. '
-                       'Order: not called (most overdue first), hot, warm, not reached, cold.</p>']
+                       'Order: not called (most overdue first), hot, warm, DNP/No real conversation, cold.</p>']
                 for c in cs:
                     y = [(l, s) for l, s in x if l["caller"] == c]
                     if not y:
                         continue
                     cc = counts(y)
                     out.append(f'<h3>{e(c)} — {len(y)} open · {sum(not s["called"] for _, s in y)} not called · {cc["hot"]} hot · '
-                               f'{cc["warm"]} warm · {cc["cold"]} cold · {cc["notreached"]} not reached</h3>')
+                               f'{cc["warm"]} warm · {cc["cold"]} cold · {cc["notreached"]} DNP/No real conversation</h3>')
                     for wk in sorted({l["wk"] for l, _ in y}, reverse=True):
                         z = [(l, s) for l, s in y if l["wk"] == wk]
                         title = (f"Latest weekend — Weekend {wk} ({self.wk_label[wk]})" if wk == self.latest
@@ -438,35 +433,34 @@ class Report:
                  f"<b>{len(drops)} dropped this month</b>; {len(risk)} more at risk of dropping (asked for refund, later batch or "
                  "cannot proceed) — TL to call each today (page 2)."]
         # bootcamp performance
-        bl, prow = [], ['<table><tr><th style="width:21%">Bootcamp</th><th class="n">Booking fees, all teams</th><th class="n">To this team (D1+D2)</th>'
+        bl, prow = [], ['<table><tr><th style="width:24%">Bootcamp</th><th class="n">Leads (D1+D2)</th>'
                         '<th class="n">Enrolled</th><th class="n">Recovery</th><th class="n">Dropped</th><th class="n">Open</th>'
-                        '<th class="n">Median days to pay</th><th class="n">Collected (pool MIS)</th><th class="n">Still open</th></tr>']
+                        '<th class="n">Collected (pool MIS)</th><th class="n">Still open</th></tr>']
         for wk in sorted({l["wk"] for l, _ in self.rows}, reverse=True):
             head = f'{"Latest — " if wk == self.latest else ""}Weekend {wk} ({self.wk_label[wk]})'
             bl.append((None, 0, head))
-            prow.append(f'<tr class="sub"><td colspan="10">{e(head)}</td></tr>')
+            prow.append(f'<tr class="sub"><td colspan="8">{e(head)}</td></tr>')
             names = Counter(l["bootcamp"] for l, _ in self.rows if l["wk"] == wk)
             for b, _ in names.most_common():
                 x = [(l, s) for l, s in self.rows if l["wk"] == wk and l["bootcamp"] == b]
                 c, p = counts(x), pool["bootcamps"].get(b, {})
                 d = Counter(l["day"] for l, _ in x)
-                days = median([(s["enrolled_at"] - l["assigned"]).total_seconds() / 86400 for l, s in x if s["status"] == "enrolled"])
                 bl.append((b, pct(c["enrolled"], len(x)), f'{pct(c["enrolled"], len(x))}% ({c["enrolled"]} of {len(x)})'))
-                prow.append(f'<tr><td>{e(b)}</td><td class="n">{p.get("all_teams", "—")}</td><td class="n">{len(x)} ({d[1]}+{d[2]})</td>'
+                prow.append(f'<tr><td>{e(b)}</td><td class="n">{len(x)} ({d[1]}+{d[2]})</td>'
                             f'<td class="n">{c["enrolled"]}</td><td class="n">{pct(c["enrolled"], len(x))}%</td><td class="n">{c["dropped"]}</td>'
-                            f'<td class="n">{len(x) - c["enrolled"] - c["dropped"]}</td><td class="n">{"—" if days is None else f"{days:.1f}"}</td>'
+                            f'<td class="n">{len(x) - c["enrolled"] - c["dropped"]}</td>'
                             f'<td class="n">{lakh(p["recovered_amount"]) + " (" + str(p["recovered"]) + ")" if p else "—"}</td>'
                             f'<td class="n">{lakh(sum(s["value"] for _, s in x if s["status"] not in ("enrolled", "dropped")))}</td></tr>')
         m = counts(self.rows)
         n = len(self.rows)
         mis = sum(b["recovered_amount"] for b in pool["bootcamps"].values())
-        prow.append(f'<tr class="sub"><td>Month so far</td><td></td><td class="n">{n}</td><td class="n">{m["enrolled"]}</td>'
+        prow.append(f'<tr class="sub"><td>Month so far</td><td class="n">{n}</td><td class="n">{m["enrolled"]}</td>'
                     f'<td class="n">{pct(m["enrolled"], n)}%</td><td class="n">{m["dropped"]}</td><td class="n">{n - m["enrolled"] - m["dropped"]}</td>'
-                    f'<td></td><td class="n">{lakh(mis)}</td>'
+                    f'<td class="n">{lakh(mis)}</td>'
                     f'<td class="n">{lakh(sum(s["value"] for _, s in self.rows if s["status"] not in ("enrolled", "dropped")))}</td></tr>')
         mis_n = sum(b["recovered"] for b in pool["bootcamps"].values())
         note = f'<p class="muted">{self.reconcile()} Still open = course price (pool sheet, by day) minus the ₹{self.cfg["fee"]:,} booking fee for each ' \
-               'open lead. Median days to pay counts from assignment to enrolment.</p>'
+               'open lead.</p>'
         # Wednesday's hot leads
         H = ['<table><tr><th style="width:3%">#</th><th style="width:10.5%">Number</th><th style="width:9%">Lead</th><th style="width:9%">Caller</th>'
              '<th style="width:12%">Bootcamp · day</th><th style="width:18%">Wednesday: hot because</th><th style="width:8%">Called at promised time?</th>'
@@ -530,7 +524,7 @@ far / different days with a dial. <b>Call-backs kept</b>: call-backs promised to
 promised time. <b>Payment intent</b>: the mode and date the lead gave. <b>Hot</b>: a real talk (answered, 2 min+) and a buying step — payment
 date or mode agreed, link asked for, loan documents shared, or the lead called us back. <b>Warm</b>: a real talk, interested, with an open
 objection or no date. <b>Cold</b>: "not now" or a deferral with no date, or unanswered since the last talk. A lead we failed to dial (dialer
-failures) keeps its grade; the failure shows in the act box. <b>Not reached yet</b>: no real talk so far. <b>Enrolled</b>: LeadSquared stage
+failures) keeps its grade; the failure shows in the act box. <b>DNP/No real conversation</b>: no real conversation (answered, 2 min+) so far — the lead did not pick up, or every call was under 2 minutes. <b>Enrolled</b>: LeadSquared stage
 Course Enrolled or Collections done, or Loan pending saved as "loan done" / "loan process done". <b>Enrolled value (est.)</b>: course price from the pool sheet minus the booking fee, for each enrolled
 lead — an estimate; LeadSquared holds no paid amount for these leads, so actual money is the pool sheet MIS total. Hot / warm / cold and the
 reasons were read from each lead's LeadSquared notes and Salesa call transcripts; transcripts have no speaker labels, so check the call
