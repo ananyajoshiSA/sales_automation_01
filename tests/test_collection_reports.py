@@ -80,3 +80,14 @@ def test_mode_groups():
     assert mode_of("Card EMI or loan · undecided") == "Undecided"
     assert mode_of("3 instalments offered; 4 asked") == "Instalments"
     assert mode_of("—") == "No mode yet"
+
+
+def test_header_shows_when_leadsquared_was_read_not_a_later_cut_off(tmp_path):
+    cfg = cycle(tmp_path)
+    j = json.loads((tmp_path / "w1" / "j.json").read_text())
+    j["c"] = {"2026-10-28": {"status": "notreached", "why": "Not called", "next": "Call now"}}
+    (tmp_path / "w1" / "j.json").write_text(json.dumps(j))
+    meta = tmp_path / "w1" / "meta.json"
+    meta.write_text(json.dumps({**json.loads(meta.read_text()), "fetched_at_utc": "2026-10-28 13:40:00"}))
+    doc = Report(cfg, "wed", T("2026-10-28 20:00")).html()
+    assert "stages up to Wed 28 Oct 2026, 19:10 IST" in doc

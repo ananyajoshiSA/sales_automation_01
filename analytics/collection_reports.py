@@ -22,7 +22,7 @@ from datetime import datetime
 
 from analytics.collection_cycle import WINDOW_HOURS, cycle_leads, state
 from analytics.collection_scorecard import load
-from integrations.timeutil import IST
+from integrations.timeutil import IST, utc
 
 CHROME = "/opt/pw-browsers/chromium"
 e = lambda s: html.escape(str(s))
@@ -86,6 +86,12 @@ def snapshot(cfg: dict, cut: datetime) -> list[tuple[dict, dict]]:
             j = (judged.get(l["lead_id"]) or {}).get(cut.date().isoformat())
             out.append(({**l, "wk": w["n"], "wk_label": w["label"]}, row(l, cut, j, cfg["pool"], cfg["fee"])))
     return out
+
+
+def read_at(data_dir: str) -> datetime:
+    """When LeadSquared was read for this weekend: the report cannot know anything later, whatever its cut-off."""
+    meta = json.load(open(os.path.join(data_dir, "meta.json")))
+    return utc(meta["fetched_at_utc"]) if meta.get("fetched_at_utc") else datetime.max.replace(tzinfo=IST)
 
 
 def mode_of(intent: str) -> str:
@@ -278,6 +284,7 @@ class Report:
         self.org = org(self.rows)
         self.wk_label = {l["wk"]: l["wk_label"] for l, _ in self.rows}
         self.gaps = sheet_gaps(self.rows, cfg["pool"], cut)
+        self.data_to = min([cut] + [read_at(w["data_dir"]) for w in cfg["weekends"]])
         for _, s in self.gaps[0]:
             s["sheet_enrolled"] = True
 
@@ -287,7 +294,7 @@ class Report:
         pool = self.cfg["pool"]["as_of"]
         return (f'<h1>{e(self.cfg["team"])} · {self.title} · {e(part)}</h1>'
                 f'<div class="meta">{e(self.cfg["month"])} collections so far: {wks}. LeadSquared calls and stages up to '
-                f'{when(self.cut, "%a %d %b %Y, %H:%M")} IST; Salesa transcripts of those calls; Bootcamp pool sheet MIS of {e(pool)}.</div>')
+                f'{when(self.data_to, "%a %d %b %Y, %H:%M")} IST; Salesa transcripts of those calls; Bootcamp pool sheet MIS of {e(pool)}.</div>')
 
     def tiles(self) -> str:
         rows, n = self.rows, len(self.rows)
