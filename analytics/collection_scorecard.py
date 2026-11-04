@@ -43,7 +43,7 @@ MAYUR_TLS = {
 }
 PUJA_GROUP_TL = {"Team Women AI": "Nancy Bajaj", "DSV - UK (Aditya)": "Aditya Chugh",
                  "DSV-Domestic-(Shivam Sharma)": "Shivam Sharma"}
-AD_OF_TL = {"Sonal Tripathi": "Sahil Arora", "Anjali Srivastava": "Raunak Mandilwar", "Ayush Srivastava": "Raunak Mandilwar",
+AD_OF_TL = {"Sonal Tripathi": "Sahil Arora", "Anjali Srivastava": "Raunak Mandilwar", "Ayush Srivastava": "Sahil Arora",
             "Prawal Singh": "Raunak Mandilwar", "Nancy Bajaj": "Anmol Gakhar", "Aditya Chugh": "Anmol Gakhar",
             "Shivam Sharma": "Anmol Gakhar"}
 ADS = {"Sahil Arora": "Mayur", "Raunak Mandilwar": "Mayur", "Anmol Gakhar": "Puja / Anmol"}

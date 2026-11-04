@@ -53,7 +53,7 @@ def test_hierarchy_maps_side_ad_and_tl():
     assert h["Asha Rao"] == ("Puja / Anmol", "Anmol Gakhar", "Nancy Bajaj")
     assert h["Vedahi Rana"] == ("Mayur", "Sahil Arora", "Sonal Tripathi")
     assert h["Raunak Mandilwar"] == ("Mayur", "Raunak Mandilwar", "(AD)")
-    assert h["Himanshi"] == ("Mayur", "Raunak Mandilwar", "Ayush Srivastava")
+    assert h["Himanshi"] == ("Mayur", "Sahil Arora", "Ayush Srivastava")
     assert h["New Joiner"] == ("Mayur", "Not known", "Not known")
     assert "Someone Else" not in h
 

@@ -13,8 +13,8 @@ those live only in `data/` and `exports/` (git-ignored).
 - Target: **85%+ lead-wise recovery per month.**
 - Two teams. Each lead is credited to the last team caller who held it.
   - **Mayur — Elite Changemakers.** AD Sahil Arora → TL Sonal Tripathi (Dipak Kumar Verma, Vedahi Rana,
-    Shikha Chahar, Yamini Billore). AD Raunak Mandilwar → TL Anjali Srivastava (Devika Singh, Kanika
-    Verma, …), TL Ayush Srivastava (Ayush, Aisha Sami, Himanshi), TL Prawal Singh.
+    Shikha Chahar, Yamini Billore) and TL Ayush Srivastava (Ayush, Aisha Sami, Himanshi; moved from Raunak
+    on 4 Nov 2026). AD Raunak Mandilwar → TL Anjali Srivastava (Devika Singh, Kanika Verma, …) and TL Prawal Singh.
   - **Anmol Gakhar — Puja Malik.** TLs Nancy Bajaj, Aditya Chugh and Shivam Sharma, by LeadSquared group.
 - The **Bootcamp Pool sheet** ("Bootcamp Pool data – '2026 – '27", tab "Main MIS Teamwise Split – <month>")
   is kept centrally and is the source of prices and money collected. The Drive connector cannot open the
