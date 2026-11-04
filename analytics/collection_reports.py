@@ -547,7 +547,7 @@ class Report:
                 diff.append(f'{e(b)}: {c["enrolled"]} enrolled in LSQ, {p["recovered"]} recovered in the MIS')
             if "dropped" in p and c["dropped"] != p["dropped"]:
                 diff.append(f'{e(b)}: {c["dropped"]} dropped in LSQ, {p["dropped"]} in the MIS')
-        head = (f'Enrolled, dropped and recovery are from LeadSquared up to {when(self.cut)} IST; collected money is the pool sheet MIS of '
+        head = (f'Enrolled, dropped and recovery are from LeadSquared up to {when(self.data_to)} IST; collected money is the pool sheet MIS of '
                 f'{e(pool["as_of"])}.')
         if not diff:
             return head + " The two agree on every bootcamp."
