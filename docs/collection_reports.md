@@ -108,7 +108,10 @@ Code: `analytics/collection_cycle.py` (cycle leads, assignment, 12-hour window, 
 - **Anmol, Global Academic Writers:** the sheet lists 62 enrolled, LSQ 56. Six paid leads are not updated
   in LSQ, and one sheet number is wrong (11 digits). Both now show on the gaps page.
 - **Mayur, Wednesday check 4 Nov 2026 (both November weekends, 128 leads):** built from the live pool sheet;
-  63 open leads graded. Anmol's still to do.
+  63 open leads graded.
+- **Anmol, Wednesday check 4 Nov 2026 (both November weekends, 204 leads):** 99 open leads graded. The MIS row for
+  Anmol's AI for Business Growth (Senior AI) copies Global Academic Writers' day split and price; the Mastersheet
+  prices all 6 students at ₹55,000 (Day 1), which the report uses.
 - **Open:**
   - Per-lead money from the Mastersheet ("Money received") instead of price minus booking fee (est.), if the user wants it.
   - Delivery (email or other) and scheduled runs.
