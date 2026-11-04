@@ -62,7 +62,8 @@ def workbook(R: dict, path: str) -> str:
     ws = _sheet(wb, "Summary", [("k", "Measure"), ("v", "Value")],
                 [{"k": label, "v": R["total"][k]} for k, label in SUMMARY_COLS], first=True)
     ws.append([])
-    ws.append(["Data as of (IST)", R["fetched_at_ist"]])
+    ws.append(["Sheet downloaded (IST)", R["sheet_read_ist"]])
+    ws.append(["LeadSquared read (IST)", R["fetched_at_ist"]])
     ws.append(["Students matched to LeadSquared", f"{R['checks']['matched']:,} of {R['checks']['students']:,}"])
     _sheet(wb, "Who to call", CALL_COLS, R["call_list"])
     for key, title in (("by_month", "By month"), ("by_team", "By team"), ("by_collector", "By collector"),
@@ -146,8 +147,8 @@ def html_doc(R: dict, call_limit: int = 40) -> str:
     kind = R["kind"]
     title = TITLES[kind]
     H = [f"<html><head><meta charset='utf-8'><style>{CSS}</style></head><body>"]
-    H.append(f"<h1>{title}</h1><div class=muted>Data as of {e(R['fetched_at_ist'])} IST: the collection sheet and "
-             f"LeadSquared read at that time. Amounts come from the sheet; LeadSquared stages and owners are shown beside them.</div>")
+    H.append(f"<h1>{title}</h1><div class=muted>Collection sheet downloaded {e(R['sheet_read_ist'])} IST; LeadSquared read "
+             f"{e(R['fetched_at_ist'])} IST. Amounts come from the sheet; LeadSquared stages and owners are shown beside them.</div>")
     top = R["call_list"][:10]
     H.append(f"<div class=lead><b>Do first:</b> {len(R['call_list']):,} students still owe {e(rs(T['balance_open']))}. "
              f"The 10 largest balances add up to {e(rs(sum(x['balance'] for x in top)))}; the list below starts with them. "

@@ -83,7 +83,9 @@ def missing_from_sheet(rows: list[dict], tagged: list[tuple[str, dict]], kind: s
 
 
 def build(rows: list[dict], tagged: list[tuple[str, dict]], kind: str, sheet_note: dict, meta: dict,
-          pairs: dict | None = None) -> dict:
+          pairs: dict | None = None, sheet_read_ist: str = "") -> dict:
+    """The report for one kind. ``sheet_read_ist`` is when the sheet was downloaded (the LeadSquared read time if
+    unknown, as the fetch downloads both together)."""
     for r in rows:
         r["flag"] = disagreement(r)
         r["lsq_team"] = meta.get("team_of_owner", {}).get(r.get("lsq_owner_id") or "", "")
@@ -91,7 +93,8 @@ def build(rows: list[dict], tagged: list[tuple[str, dict]], kind: str, sheet_not
     months = {r["month"] for r in rows}
     unmatched = [r for r in rows if not r["lsq_id"]]
     R = {
-        "kind": kind, "fetched_at_ist": meta.get("fetched_at_ist", ""), "sheet": sheet_note,
+        "kind": kind, "fetched_at_ist": meta.get("fetched_at_ist", ""),
+        "sheet_read_ist": sheet_read_ist or meta.get("fetched_at_ist", ""), "sheet": sheet_note,
         "total": summarise(rows),
         "by_month": group(rows, "month"),
         "by_team": group(rows, "team"),

@@ -223,3 +223,33 @@ def test_download_xlsx(tmp_path):
     responses.replace(responses.GET, url, body=b"<html>Sign in</html>", status=200)
     with pytest.raises(SheetError, match="shared"):
         download_xlsx("abc", str(tmp_path / "s.xlsx"))
+
+
+@responses.activate
+def test_every_build_downloads_the_latest_sheets_unless_saved(tmp_path, monkeypatch):
+    from analytics.collections import __main__ as build
+    monkeypatch.setenv("COMMUNITY_COLLECTION_SHEET_ID", "comm")
+    monkeypatch.setenv("BOOTCAMP_POOL_SHEET_ID", "boot")
+    data, out = tmp_path / "d", tmp_path / "o"
+    data.mkdir()
+    community_book(data / "fresh.xlsx")
+    fresh = (data / "fresh.xlsx").read_bytes()
+    (data / "community.xlsx").write_bytes(b"old copy")
+    (data / "lsq_tags.jsonl").write_text("")
+    json.dump({"fetched_at_ist": "2026-11-03 09:00", "tags": []}, open(data / "meta.json", "w"))
+    url = "https://docs.google.com/spreadsheets/d/comm/export?format=xlsx"
+    responses.add(responses.GET, url, body=fresh, status=200)
+    seen = []
+    monkeypatch.setattr(build.render, "workbook", lambda R, p: seen.append(R) or p)
+    monkeypatch.setattr(build.render, "pdf", lambda R, h, p: p)
+    build.main(str(data), str(out), "community")
+    build.main(str(data), str(out), "community")
+    assert len(responses.calls) == 2                       # one download per build, not one per day
+    assert (data / "community.xlsx").read_bytes() == fresh
+    assert seen[-1]["sheet_read_ist"] == json.load(open(data / "sheets.json"))["community"]
+    assert seen[-1]["fetched_at_ist"] == "2026-11-03 09:00"   # LeadSquared is not read again
+    build.main(str(data), str(out), "community", saved=True)
+    assert len(responses.calls) == 2
+    responses.replace(responses.GET, url, body=b"<html>Sign in</html>", status=200)
+    with pytest.raises(SheetError):                       # never falls back to the older copy silently
+        build.main(str(data), str(out), "community")

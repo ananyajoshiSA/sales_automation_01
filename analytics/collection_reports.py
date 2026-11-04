@@ -6,7 +6,11 @@ LeadSquared through ``analytics.collection_cycle``; hot / warm / cold, the reaso
 the next step come from a judgements file written after reading each lead's LSQ notes and Salesa transcripts.
 Booking fees per bootcamp, prices and money collected come from the Bootcamp pool sheet (``pool`` in the config).
 
-    python -m analytics.collection_reports wed|fri <config.json> "<YYYY-MM-DD HH:MM cut-off, IST>" <out.pdf>
+Every build first downloads the latest pool sheet (``BOOTCAMP_POOL_SHEET_ID``) next to the config and refreshes the
+config's MIS figures from the month's "Main MIS Teamwise Split" tab (``analytics.collections.pool_mis``), saving
+them back into the config. ``--saved`` builds from the config as it is (no download). A failed download stops.
+
+    python -m analytics.collection_reports wed|fri <config.json> "<YYYY-MM-DD HH:MM cut-off, IST>" <out.pdf> [--saved]
 """
 
 from __future__ import annotations
@@ -22,7 +26,9 @@ from datetime import datetime
 
 from analytics.collection_cycle import WINDOW_HOURS, cycle_leads, state
 from analytics.collection_scorecard import load
-from integrations.timeutil import IST, utc
+from analytics.collections.pool_mis import load_mis, refresh_pool
+from integrations.gsheets import download_xlsx, sheet_id
+from integrations.timeutil import IST, now_utc, utc
 
 CHROME = "/opt/pw-browsers/chromium"
 e = lambda s: html.escape(str(s))
@@ -292,6 +298,8 @@ class Report:
     def header(self, part: str) -> str:
         wks = " · ".join(f'Weekend {n} ({e(lab)}){" — latest" if n == self.latest else ""}' for n, lab in sorted(self.wk_label.items()))
         pool = self.cfg["pool"]["as_of"]
+        if self.cfg["pool"].get("read_at_ist"):
+            pool += f', downloaded {self.cfg["pool"]["read_at_ist"]} IST'
         return (f'<h1>{e(self.cfg["team"])} · {self.title} · {e(part)}</h1>'
                 f'<div class="meta">{e(self.cfg["month"])} collections so far: {wks}. LeadSquared calls and stages up to '
                 f'{when(self.data_to, "%a %d %b %Y, %H:%M")} IST; Salesa transcripts of those calls; Bootcamp pool sheet MIS of {e(pool)}.</div>')
@@ -621,12 +629,30 @@ def write_pdf(doc: str, path: str) -> None:
                     f"--print-to-pdf={os.path.abspath(path)}", os.path.abspath(hp)], check=True, capture_output=True, timeout=180)
 
 
-def main(kind: str, config: str, cut: str, out: str) -> None:
-    rep = Report(json.load(open(config)), kind, ist(cut))
+def refresh_from_sheet(cfg: dict, folder: str) -> list[str]:
+    """Download the pool sheet into ``folder`` and refresh ``cfg["pool"]`` from its MIS tab; returns notes."""
+    path = os.path.join(folder, "bootcamp_pool.xlsx")
+    download_xlsx(sheet_id("BOOTCAMP_POOL_SHEET_ID"), path)
+    read_at = now_utc().astimezone(IST).strftime("%Y-%m-%d %H:%M")
+    tab, as_of, mis = load_mis(path, cfg["month"])
+    notes = refresh_pool(cfg["pool"], mis, as_of, cfg["side"])
+    cfg["pool"]["read_at_ist"] = read_at
+    return [f"Pool sheet downloaded {read_at} IST; MIS tab '{tab}' of {as_of or 'no date'}"] + notes
+
+
+def main(kind: str, config: str, cut: str, out: str, saved: bool = False) -> None:
+    cfg = json.load(open(config))
+    if not saved:
+        for note in refresh_from_sheet(cfg, os.path.dirname(os.path.abspath(config))):
+            print(note, file=sys.stderr)
+        with open(config, "w") as fh:
+            json.dump(cfg, fh, indent=1, ensure_ascii=False)
+    rep = Report(cfg, kind, ist(cut))
     os.makedirs(os.path.dirname(os.path.abspath(out)), exist_ok=True)
     write_pdf(rep.html(), out)
     print(f"{len(rep.rows)} leads → {out}")
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:5])
+    args = [a for a in sys.argv[1:] if a != "--saved"]
+    main(*args[:4], saved="--saved" in sys.argv[1:])

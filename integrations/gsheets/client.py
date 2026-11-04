@@ -10,15 +10,20 @@ Sheet IDs are not code: they give access to student data, so they come from the 
 
 from __future__ import annotations
 
+import json
 import os
 import re
+import sys
 import time
 
 import requests
 
 from integrations.env import load_dotenv
+from integrations.timeutil import IST, now_utc
 
 EXPORT = "https://docs.google.com/spreadsheets/d/{id}/export?format=xlsx"
+# file name in a collections data folder -> environment setting holding that sheet's ID
+COLLECTION_SHEETS = {"community": "COMMUNITY_COLLECTION_SHEET_ID", "bootcamp": "BOOTCAMP_POOL_SHEET_ID"}
 XLSX_MAGIC = b"PK"
 
 
@@ -64,3 +69,19 @@ def download_xlsx(sheet: str, path: str, *, session: requests.Session | None = N
         os.replace(tmp, path)
         return len(r.content)
     raise SheetError("sheet download failed")
+
+
+def download_collection_sheets(data_dir: str, kinds=tuple(COLLECTION_SHEETS)) -> str:
+    """Download the latest copy of each collection sheet in ``kinds`` into ``data_dir`` (``community.xlsx``,
+    ``bootcamp.xlsx``), replacing any saved copy, and note the time in ``sheets.json``; returns that IST time."""
+    os.makedirs(data_dir, exist_ok=True)
+    for kind in kinds:
+        size = download_xlsx(sheet_id(COLLECTION_SHEETS[kind]), os.path.join(data_dir, f"{kind}.xlsx"))
+        print(f"{kind} sheet: {size / 1e6:.1f} MB downloaded", file=sys.stderr)
+    when = now_utc().astimezone(IST).strftime("%Y-%m-%d %H:%M")
+    path = os.path.join(data_dir, "sheets.json")
+    read = json.load(open(path)) if os.path.exists(path) else {}
+    read.update({kind: when for kind in kinds})
+    with open(path, "w") as fh:
+        json.dump(read, fh, indent=1)
+    return when

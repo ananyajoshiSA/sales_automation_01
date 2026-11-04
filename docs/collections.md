@@ -14,6 +14,13 @@ python -m analytics.collections data/collections/2026-11-03 exports/collections/
 
 Add `community` or `bootcamp` as a third argument to the second command to build one report only.
 
+**Every build downloads the latest sheets.** The second command first downloads a fresh copy of the sheet(s) it is
+building from, over the copies in the data folder, so building again later in the day uses the sheet as it is then.
+It does not read LeadSquared again (that comes from the fetch; fetch into a new folder for fresh LeadSquared data).
+The report header and workbook show both times: when the sheet was downloaded and when LeadSquared was read. Add
+`--saved` to build from the saved copies without downloading. A failed download stops the build; it never falls
+back to an older copy.
+
 ## Sources
 
 | Source | What it gives | How it is read |
@@ -64,6 +71,6 @@ stops with a clear error. It never produces an empty report.
 ## Files
 
 `integrations/gsheets/` (download), `scripts/fetch_collections.py` (fetch), `analytics/collections/`
-(`tags`, `sheets`, `match`, `report`, `render`, `__main__`), `tests/test_collections.py`. Inputs stay under `data/`
+(`tags`, `sheets`, `match`, `report`, `render`, `__main__`, `pool_mis`), `tests/test_collections.py`. Inputs stay under `data/`
 and outputs under `exports/`, both git-ignored. To email a report to a team, add a `LIST_<NAME>` in the mailer's
 Script Properties and send with `scripts/email_report.py --to-list <name>`.

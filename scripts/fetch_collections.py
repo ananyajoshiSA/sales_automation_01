@@ -20,7 +20,7 @@ import sys
 
 from analytics.collections.tags import is_collection_tag, tag_kind, tag_date
 from analytics.definitions import team_of
-from integrations.gsheets import download_xlsx, sheet_id
+from integrations.gsheets import download_collection_sheets
 from integrations.leadsquared import AdmissionDeferred, LeadSquaredClient
 from integrations.timeutil import IST, now_utc
 
@@ -28,7 +28,6 @@ DEFERRED_EXIT = 75
 TAG_FIELD = "mx_Bootcamp_collections"
 COLUMNS = ["ProspectID", "FirstName", "LastName", "Phone", "Mobile", "EmailAddress", "OwnerId", "OwnerIdName",
            "ProspectStage", TAG_FIELD, "mx_Funnel_name", "CreatedOn", "ModifiedOn"]
-SHEETS = {"community": "COMMUNITY_COLLECTION_SHEET_ID", "bootcamp": "BOOTCAMP_POOL_SHEET_ID"}
 
 
 def wanted_tags(options: list[str], first_month: str) -> list[str]:
@@ -45,9 +44,7 @@ def wanted_tags(options: list[str], first_month: str) -> list[str]:
 
 def main(out_dir: str, first_month: str = "2025-11") -> int:
     os.makedirs(out_dir, exist_ok=True)
-    for name, env in SHEETS.items():
-        size = download_xlsx(sheet_id(env), os.path.join(out_dir, f"{name}.xlsx"))
-        print(f"{name} sheet: {size / 1e6:.1f} MB", file=sys.stderr)
+    download_collection_sheets(out_dir)
     c = LeadSquaredClient()
     done_path = os.path.join(out_dir, "lsq_tags.jsonl")
     done = set()

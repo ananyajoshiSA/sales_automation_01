@@ -91,9 +91,16 @@ PYTHONPATH=. .venv/bin/python scripts/fetch_bootcamp_collections.py 2026-10 2026
 # 4. Write data/<dir>/report_config_<team>.json: side, team, month, fee, target, wed_cut, weekends,
 #    pool (as_of, per bootcamp: price [D1, D2], all_teams, recovered, recovered_amount, pending,
 #    pending_amount, dropped; optional lists_as_of + enrolled_list [[name, phone], …])
-# 5. Build
+# 5. Build (downloads the latest pool sheet first and refreshes the config's MIS figures; add --saved to skip that)
 .venv/bin/python -m analytics.collection_reports wed|fri data/<dir>/report_config_<team>.json "YYYY-MM-DD HH:MM" exports/collection_reports/<name>.pdf
 ```
+
+**Latest pool sheet on every build.** Step 5 downloads the Bootcamp pool sheet next to the config
+(`bootcamp_pool.xlsx`), reads the month's "Main MIS Teamwise Split" tab and updates each config bootcamp's counts and
+amounts (all_teams, recovered, pending, dropped and their amounts) plus `as_of`, then saves the config. A config
+bootcamp is updated only when exactly one MIS row of the team's side, on the same date, carries its course; the
+others keep their figures and are printed as notes. Prices and the enrolled lists are never overwritten (the MIS
+once copied a wrong price). The header shows the MIS date and the download time. Code: `analytics/collections/pool_mis.py`.
 
 Code: `analytics/collection_cycle.py` (cycle leads, assignment, 12-hour window, state at a cut-off) and
 `analytics/collection_reports.py` (the PDF). Tests: `tests/test_collection_cycle.py` and

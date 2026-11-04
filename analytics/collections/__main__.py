@@ -3,9 +3,14 @@
 Each report is a PDF (who to call first, then money by month, team, collector and community or bootcamp, then the
 data checks) and a workbook with every student. Runs with no manual step: students are matched to LeadSquared by
 phone then email, bootcamps paired to their LeadSquared tag, communities typed from Funnel name; whatever cannot be
-placed is labelled and kept in the totals. Reads files only.
+placed is labelled and kept in the totals.
 
-    python -m analytics.collections data/collections/2026-11-03 exports/collections/2026-11-03 [community|bootcamp]
+Every build first downloads the latest copy of the sheets it reads, over the copies the fetch saved, so a report
+built several times in one day always uses the sheet as it is at that moment. LeadSquared is not read again: its
+leads come from the fetch. ``--saved`` builds from the saved sheet copies instead (no download). A failed download
+stops the build rather than fall back to an older copy.
+
+    python -m analytics.collections data/collections/2026-11-03 exports/collections/2026-11-03 [community|bootcamp] [--saved]
 """
 
 from __future__ import annotations
@@ -18,6 +23,7 @@ from analytics.collections import render
 from analytics.collections.match import LeadIndex, assign_community, match_students, pair_bootcamps
 from analytics.collections.report import build
 from analytics.collections.sheets import read_bootcamp, read_community
+from integrations.gsheets import download_collection_sheets
 
 
 def load_tagged(data_dir: str) -> list[tuple[str, dict]]:
@@ -31,6 +37,8 @@ def load_tagged(data_dir: str) -> list[tuple[str, dict]]:
 
 def reports(data_dir: str, which: tuple[str, ...] = ("community", "bootcamp")) -> dict[str, dict]:
     meta = json.load(open(os.path.join(data_dir, "meta.json")))
+    read = os.path.join(data_dir, "sheets.json")
+    sheets_at = json.load(open(read)) if os.path.exists(read) else {}
     tagged = load_tagged(data_dir)
     index = LeadIndex(tagged)
     out = {}
@@ -38,20 +46,23 @@ def reports(data_dir: str, which: tuple[str, ...] = ("community", "bootcamp")) -
         rows, note = read_community(os.path.join(data_dir, "community.xlsx"))
         match_students(rows, index, "community")
         assign_community(rows)
-        out["community"] = build(rows, tagged, "community", note, meta)
+        out["community"] = build(rows, tagged, "community", note, meta, sheet_read_ist=sheets_at.get("community", ""))
     if "bootcamp" in which:
         rows, note = read_bootcamp(os.path.join(data_dir, "bootcamp.xlsx"))
         match_students(rows, index, "bootcamp")
         pairs = pair_bootcamps(rows, meta.get("tags") or [t for t, _ in tagged])
-        out["bootcamp"] = build(rows, tagged, "bootcamp", note, meta, pairs)
+        out["bootcamp"] = build(rows, tagged, "bootcamp", note, meta, pairs, sheet_read_ist=sheets_at.get("bootcamp", ""))
     return out
 
 
-def main(data_dir: str, out_dir: str, which: str = "") -> list[str]:
+def main(data_dir: str, out_dir: str, which: str = "", saved: bool = False) -> list[str]:
     os.makedirs(out_dir, exist_ok=True)
     day = os.path.basename(os.path.normpath(data_dir))
+    kinds = (which,) if which else ("community", "bootcamp")
+    if not saved:
+        download_collection_sheets(data_dir, kinds)
     files = []
-    for kind, R in reports(data_dir, (which,) if which else ("community", "bootcamp")).items():
+    for kind, R in reports(data_dir, kinds).items():
         base = os.path.join(out_dir, f"{kind.title()}_collections_{day}")
         files.append(render.workbook(R, base + ".xlsx"))
         files.append(render.pdf(R, base + ".html", base + ".pdf"))
@@ -64,4 +75,5 @@ def main(data_dir: str, out_dir: str, which: str = "") -> list[str]:
 
 
 if __name__ == "__main__":
-    main(*sys.argv[1:4])
+    args = [a for a in sys.argv[1:] if a != "--saved"]
+    main(*args[:3], saved="--saved" in sys.argv[1:])
