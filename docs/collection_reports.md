@@ -17,8 +17,10 @@ those live only in `data/` and `exports/` (git-ignored).
     on 4 Nov 2026). AD Raunak Mandilwar → TL Anjali Srivastava (Devika Singh, Kanika Verma, …) and TL Prawal Singh.
   - **Anmol Gakhar — Puja Malik.** TLs Nancy Bajaj, Aditya Chugh and Shivam Sharma, by LeadSquared group.
 - The **Bootcamp Pool sheet** ("Bootcamp Pool data – '2026 – '27", tab "Main MIS Teamwise Split – <month>")
-  is kept centrally and is the source of prices and money collected. The Drive connector cannot open the
-  live sheet, so the user sends MIS screenshots and enrolled lists. These go in the report config.
+  is kept centrally and is the source of prices and money collected. Since 4 Nov 2026 it is read directly:
+  `integrations.gsheets` downloads it as .xlsx with `BOOTCAMP_POOL_SHEET_ID` (no screenshots needed). The MIS tab gives
+  price, recovered, pending and dropped per bootcamp and side; the "Mastersheet" tab has one row per student, and
+  MIS "recovered" = Mastersheet status Disbursed, Installments or One shot (checked: the counts match the MIS).
 - LeadSquared is read-only for this work. No writes.
 
 ## The reports (finalised with the user)
@@ -105,7 +107,9 @@ Code: `analytics/collection_cycle.py` (cycle leads, assignment, 12-hour window, 
   - These PDFs predate the latest format changes and the loan-done rule. Rebuild them when asked.
 - **Anmol, Global Academic Writers:** the sheet lists 62 enrolled, LSQ 56. Six paid leads are not updated
   in LSQ, and one sheet number is wrong (11 digits). Both now show on the gaps page.
+- **Mayur, Wednesday check 4 Nov 2026 (both November weekends, 128 leads):** built from the live pool sheet;
+  63 open leads graded. Anmol's still to do.
 - **Open:**
-  - Live pool sheet access, for per-lead money and automatic reconciliation.
+  - Per-lead money from the Mastersheet ("Money received") instead of price minus booking fee (est.), if the user wants it.
   - Delivery (email or other) and scheduled runs.
   - Moving the transcript and grading steps into the repo.
