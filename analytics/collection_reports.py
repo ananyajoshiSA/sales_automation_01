@@ -14,6 +14,7 @@ from __future__ import annotations
 import html
 import json
 import os
+import re
 import subprocess
 import sys
 from collections import Counter, defaultdict
@@ -101,17 +102,45 @@ def mode_of(intent: str) -> str:
     return "Other"
 
 
+def digits10(phone: str | None) -> str:
+    return re.sub(r"\D", "", phone or "")[-10:]
+
+
+def sheet_gaps(rows, pool: dict, cut: datetime) -> tuple[list, list, list, list[str]]:
+    """Leads the pool sheet's enrolled lists and LeadSquared disagree on, for bootcamps whose list was given.
+
+    Returns (sheet enrolled but open in LSQ, enrolled in LSQ but not in the sheet, sheet entries matched by name only
+    (number differs), bootcamps checked). A list newer than the cut-off is not used: its later enrolments would look
+    like gaps."""
+    as_of = pool.get("lists_as_of")
+    if not as_of or cut.date().isoformat() < as_of:
+        return [], [], [], []
+    sheet_only, lsq_only, by_name, checked = [], [], [], []
+    for b, p in pool["bootcamps"].items():
+        if not p.get("enrolled_list"):
+            continue
+        checked.append(b)
+        team = [(l, s) for l, s in rows if l["bootcamp"] == b]
+        by_phone = {digits10(l["phone"]): (l, s) for l, s in team}
+        by_nm = {l["name"].strip().lower(): (l, s) for l, s in team}
+        seen = set()
+        for name, phone in p["enrolled_list"]:
+            hit = by_phone.get(digits10(phone))
+            if not hit and name.strip().lower() in by_nm:
+                hit = by_nm[name.strip().lower()]
+                by_name.append((hit[0], hit[1], phone))
+            if not hit:
+                continue  # another team's lead
+            seen.add(hit[0]["lead_id"])
+            if hit[1]["status"] != "enrolled":
+                sheet_only.append(hit)
+        lsq_only += [(l, s) for l, s in team if s["status"] == "enrolled" and l["lead_id"] not in seen]
+    return sheet_only, lsq_only, by_name, checked
+
+
 def counts(rows) -> dict:
     c = Counter(s["status"] for _, s in rows)
     return {k: c.get(k, 0) for k in ORDER}
-
-
-def median(xs):
-    xs = sorted(x for x in xs if x is not None)
-    if not xs:
-        return None
-    m = len(xs) // 2
-    return xs[m] if len(xs) % 2 else (xs[m - 1] + xs[m]) / 2
 
 
 def pct(a, b) -> int:
@@ -162,7 +191,7 @@ body { font-family: 'DejaVu Sans', Arial, sans-serif; color:#1d1d1b; font-size:9
 h1 { font-size:17px; margin:0 0 2px; color:#14213D; } h2 { font-size:12.5px; margin:8px 0 4px; color:#14213D; }
 h3 { font-size:11px; margin:8px 0 3px; color:#14213D; background:#EDEBE4; padding:3px 6px; }
 .meta { color:#52514e; font-size:9px; margin-bottom:6px; }
-.tiles { display:grid; grid-template-columns: repeat(6,1fr); gap:5px; margin:6px 0 8px; }
+.tiles { display:grid; grid-template-columns: repeat(5,1fr); gap:5px; margin:6px 0 8px; }
 .tile { border:1px solid #d9d6cf; border-radius:5px; padding:5px 7px; } .tile b { font-size:16px; display:block; color:#14213D; }
 .tile span { font-size:8px; color:#52514e; } .tile.alert b { color:#a3390b; }
 .act { border-left:4px solid #b3440f; background:#FBF1EA; padding:6px 9px; margin:4px 0 8px; } .act ol { margin:2px 0 0 15px; padding:0; }
@@ -248,6 +277,9 @@ class Report:
         self.latest = max(l["wk"] for l, _ in self.rows)
         self.org = org(self.rows)
         self.wk_label = {l["wk"]: l["wk_label"] for l, _ in self.rows}
+        self.gaps = sheet_gaps(self.rows, cfg["pool"], cut)
+        for _, s in self.gaps[0]:
+            s["sheet_enrolled"] = True
 
     # -- shared blocks ---------------------------------------------------------------------------------------
     def header(self, part: str) -> str:
@@ -258,26 +290,21 @@ class Report:
                 f'{when(self.cut, "%a %d %b %Y, %H:%M")} IST; Salesa transcripts of those calls; Bootcamp pool sheet MIS of {e(pool)}.</div>')
 
     def tiles(self) -> str:
-        rows, n, cut = self.rows, len(self.rows), self.cut
+        rows, n = self.rows, len(self.rows)
         open_ = [(l, s) for l, s in rows if s["status"] not in ("enrolled", "dropped")]
         not_called = [(l, s) for l, s in open_ if not s["called"]]
         over = sum(1 for _, s in not_called if s["overdue_wh"] > 0)
-        judged = [(l, s) for l, s in rows if due_passed(l, s, cut)]
-        ot = sum(s["on_time"] for _, s in judged)
         c = counts(rows)
         latest_n = sum(1 for l, _ in rows if l["wk"] == self.latest)
         pool = self.cfg["pool"]
         mis = sum(b["recovered_amount"] for b in pool["bootcamps"].values())
         mis_n = sum(b["recovered"] for b in pool["bootcamps"].values())
-        med = median([s["delay_wh"] for _, s in rows if s["called"]])
         t = [("Booking-fee leads", n, f"{latest_n} from the latest weekend"),
              ("Not called yet", len(not_called), f"{over} past the 12-hour window"),
-             ("Called within 12 h", f"{pct(ot, len(judged))}%", f"{ot} of {len(judged)} due so far · median {med:.1f} working h"),
              ("Hot leads", c["hot"], f'{c["warm"]} warm · {c["cold"]} cold · {c["notreached"]} DNP/No real conversation'),
              ("Enrolled", f'{c["enrolled"]} ({pct(c["enrolled"], n)}%)', f'{c["dropped"]} dropped · target {self.cfg["target"]}%+'),
              ("Collected (pool MIS)", lakh(mis), f'{mis_n} leads, MIS {pool["as_of"]} · {lakh(sum(s["value"] for _, s in open_))} still open')]
-        alert = {"Not called yet": bool(not_called), "Called within 12 h": ot < .85 * len(judged),
-                 "Enrolled": c["enrolled"] < self.cfg["target"] / 100 * n}
+        alert = {"Not called yet": bool(not_called), "Enrolled": c["enrolled"] < self.cfg["target"] / 100 * n}
         return '<div class="tiles">' + "".join(
             f'<div class="tile{" alert" if alert.get(k) else ""}"><span>{e(k)}</span><b>{e(v)}</b><span>{e(sub)}</span></div>' for k, v, sub in t) + "</div>"
 
@@ -309,6 +336,9 @@ class Report:
             items.append("<b>Dialer problem — fix before judging the caller</b>: " + ", ".join(
                 f"{e(k)} {f} of {n} dials failed ({pct(f, n)}%)" for k, f, n in dial)
                 + (" since Wednesday." if since else " on these leads."))
+        if self.gaps[0] or self.gaps[1]:
+            items.append(f"<b>Pool sheet and LeadSquared disagree on {len(self.gaps[0]) + len(self.gaps[1])} leads</b> — TLs to fix the LSQ "
+                         "stage or the sheet (listed on the last page).")
         never = [(l, s) for l, s in open_ if s["status"] == "notreached" and s["dials"] >= 10]
         if never:
             items.append(f"<b>{len(never)} leads DNP/No real conversation after 10+ dials</b>: send a WhatsApp, try another number or the TL's line "
@@ -383,7 +413,8 @@ class Report:
             cb = f'{s["cb"][0]}/{s["cb"][1]}' if s["cb"][1] else "—"
             if s["cb"][0] < s["cb"][1]:
                 cb = f'<span class="bad">{cb}</span>'
-            why = e(s["why"]) + (f'<br><span class="bad">At risk: {e(s["risk"])}</span>' if s["risk"] else "")
+            why = e(s["why"]) + (f'<br><span class="bad">At risk: {e(s["risk"])}</span>' if s["risk"] else "") \
+                + ('<br><span class="bad">Pool sheet shows enrolled — confirm payment, update LSQ</span>' if s.get("sheet_enrolled") else "")
             H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(bootcamp_label(l))}</td>'
                      f'<td>{s["dials"]} / {s["dial_days"]}</td><td>{chip(s["status"])}</td><td>{why}</td><td>{e(s["intent"])}</td>'
                      f'<td>{cb}</td><td>{e(s["nxt"])}</td></tr>')
@@ -459,7 +490,7 @@ class Report:
                     f'<td class="n">{lakh(mis)}</td>'
                     f'<td class="n">{lakh(sum(s["value"] for _, s in self.rows if s["status"] not in ("enrolled", "dropped")))}</td></tr>')
         mis_n = sum(b["recovered"] for b in pool["bootcamps"].values())
-        note = f'<p class="muted">{self.reconcile()} Still open = course price (pool sheet, by day) minus the ₹{self.cfg["fee"]:,} booking fee for each ' \
+        note = f'<p class="muted">{self.reconcile(short=True)} Still open = course price (pool sheet, by day) minus the ₹{self.cfg["fee"]:,} booking fee for each ' \
                'open lead.</p>'
         # Wednesday's hot leads
         H = ['<table><tr><th style="width:3%">#</th><th style="width:10.5%">Number</th><th style="width:9%">Lead</th><th style="width:9%">Caller</th>'
@@ -498,7 +529,7 @@ class Report:
                 + "".join(H) + "".join(D_) + "</div>")
         return page, extra
 
-    def reconcile(self) -> str:
+    def reconcile(self, short: bool = False) -> str:
         """LeadSquared against the pool sheet MIS, bootcamp by bootcamp: the two are updated by different people."""
         pool = self.cfg["pool"]
         diff = []
@@ -513,8 +544,42 @@ class Report:
                 f'{e(pool["as_of"])}.')
         if not diff:
             return head + " The two agree on every bootcamp."
+        if short:
+            return head + ' <span class="bad">They differ</span> — see the last page.'
         return (head + ' <span class="bad">They differ</span> — ' + "; ".join(diff) + ". TLs to update the LSQ stage or the sheet "
                 "so both show the same leads.")
+
+    def gaps_page(self) -> str:
+        sheet_only, lsq_only, by_name, checked = self.gaps
+        out = ['<div class="brk">' + self.header("pool sheet vs LeadSquared — gaps to fix"),
+               f'<p>{self.reconcile()}</p>']
+        if not checked:
+            out.append('<p class="muted">Lead by lead check not done: no enrolled list from the pool sheet dated on or after this report. '
+                       'Share the list (name and number per bootcamp) to see which leads differ.</p>')
+        else:
+            unchecked = [b for b in self.cfg["pool"]["bootcamps"] if b not in checked]
+            out.append(f'<p class="muted">Checked lead by lead against the pool sheet’s enrolled list of {e(self.cfg["pool"]["lists_as_of"])} for: '
+                       f'{e(", ".join(checked))}.' + (f' No list for: {e(", ".join(unchecked))}.' if unchecked else "") + "</p>")
+
+            def table(title, x, fix):
+                if not x:
+                    return f"<h2>{title} (0)</h2><p>None.</p>"
+                H = [f"<h2>{title} ({len(x)})</h2><table><tr><th style=\"width:3%\">#</th><th style=\"width:11%\">Number</th><th style=\"width:12%\">Lead</th>"
+                     '<th style="width:16%">Caller (TL)</th><th style="width:15%">Bootcamp · day</th><th style="width:15%">LSQ stage now</th><th>Fix</th></tr>']
+                for i, (l, s) in enumerate(sorted(x, key=lambda t: (t[0]["tl"], t[0]["caller"])), 1):
+                    H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(l["caller"])} ({e(l["tl"])})</td>'
+                             f'<td>{e(bootcamp_label(l))}</td><td>{e(s["stage"] or l["stage_now"])}</td><td>{fix}</td></tr>')
+                return "".join(H) + "</table>"
+            out.append(table("Enrolled in the pool sheet, still open in LeadSquared", sheet_only,
+                             "Confirm the payment; caller to move the LSQ stage to Collections done / Course Enrolled. "
+                             "Until then this report counts the lead as open."))
+            out.append(table("Enrolled in LeadSquared, missing from the pool sheet", lsq_only,
+                             "Check the payment; add the lead to the pool sheet, or correct the LSQ stage."))
+            if by_name:
+                out.append("<h2>Matched by name only — number differs in the sheet</h2><ul>" + "".join(
+                    f'<li>{e(l["name"])}: LSQ <span class="ph">{e(l["phone"])}</span>, sheet <span class="ph">{e(ph)}</span> — correct the sheet.</li>'
+                    for l, _, ph in by_name) + "</ul>")
+        return "".join(out) + "</div>"
 
     def defs(self) -> str:
         return f"""<div class="brk note"><b>How to read this.</b> <b>Within 12 h</b>: first dial within {WINDOW_HOURS} working hours
@@ -532,10 +597,10 @@ recording before quoting a lead.</div>"""
 
     def pages(self) -> list[str]:
         if self.kind == "wed":
-            return [self.summary_page([])] + self.tl_pages() + [self.defs()]
+            return [self.summary_page([])] + self.tl_pages() + [self.defs(), self.gaps_page()]
         wed = snapshot(self.cfg, ist(self.cfg["wed_cut"]))
         page, extra = self.friday_page(wed)
-        return [self.summary_page(extra), page] + self.tl_pages() + [self.defs()]
+        return [self.summary_page(extra), page] + self.tl_pages() + [self.defs(), self.gaps_page()]
 
     def html(self) -> str:
         return f'<!doctype html><html><head><meta charset="utf-8"><style>{CSS}</style></head><body>{"".join(self.pages())}</body></html>'

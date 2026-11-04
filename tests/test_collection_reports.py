@@ -54,8 +54,18 @@ def test_reports_list_numbers_not_ids_and_follow_wednesday_hot_leads(tmp_path):
     assert "Wednesday’s 1 hot leads" in doc and "Call missed" in doc and "1 were not called at the time promised" in doc
     assert "Median days to pay" not in doc and "Booking fees, all teams" not in doc and ">1st call<" not in doc
     assert "agree on every bootcamp" in doc and "Thursday review" not in doc and "Friday review" in doc
+    assert "<span>Called within 12 h</span>" not in doc and "Lead by lead check not done" in doc
     cfg["pool"]["bootcamps"]["Technology Law 24 Oct"]["recovered"] = 2
     assert "1 enrolled in LSQ, 2 recovered in the MIS" in Report(cfg, "fri", T("2026-10-30 12:00")).html()
+    # the sheet's enrolled list: b paid per the sheet (still open in LSQ), a enrolled in LSQ but listed under a wrong number
+    cfg["pool"]["lists_as_of"] = "2026-10-30"
+    cfg["pool"]["bootcamps"]["Technology Law 24 Oct"]["enrolled_list"] = [["Lead b", "+91 00000 00002"], ["Lead a", "9999999999"]]
+    rep = Report(cfg, "fri", T("2026-10-30 12:00"))
+    sheet_only, lsq_only, by_name, checked = rep.gaps
+    assert [l["lead_id"] for l, _ in sheet_only] == ["b"] and not lsq_only and [l["lead_id"] for l, _, _ in by_name] == ["a"]
+    doc = rep.html()
+    assert "Pool sheet shows enrolled" in doc and "disagree on 1 leads" in doc and "correct the sheet" in doc
+    assert Report(cfg, "wed", T("2026-10-28 20:00")).gaps == ([], [], [], [])   # a newer list is not used for an older cut-off
 
 
 def test_judgement_must_agree_with_calls():
