@@ -54,6 +54,11 @@ class CommunityReport(Report):
     SHEET = "Community sheet"
     VALUE_HEAD = "Collected (sheet)"
     BARS_HEAD = "Where each batch’s leads stand (bar length = number of leads)"
+    BAR_ROW, BAR_LABEL = 12, 235
+
+    def collected(self, x) -> float:
+        """Amount paid per the sheet on leads it marks paid: the same money as the tile and the performance page."""
+        return sum(l["received"] for l, _ in x if l["sheet_outcome"] in SHEET_ENROLLED)
 
     def __init__(self, cfg: dict, cut: datetime):
         self.cfg, self.kind, self.cut = cfg, "wed", cut

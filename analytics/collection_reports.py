@@ -235,17 +235,17 @@ def bootcamp_label(l) -> str:
     return l.get("label") or f'{l["bootcamp"]} · D{l["day"]}'
 
 
-def stack_svg(groups) -> str:
+def stack_svg(groups, rowh: int = 18, lab: int = 190) -> str:
     """Bar length = number of leads, so bootcamps of 5 and 100+ stay comparable; segments = status, labelled where they fit."""
     mx = max([sum(c.values()) for _, _, c in groups if c] or [1])
-    w, rowh, lab = 470, 18, 190
+    w = 470
     out, y = [], 2
     for label, sub, c in groups:
         if label is None:
             out.append(f'<text x="0" y="{y + 11}" font-size="9" font-weight="bold" fill="#14213D">{e(sub)}</text>')
             y += 16
             continue
-        out.append(f'<text x="0" y="{y + 12}" font-size="8.6">{e(label)}</text>')
+        out.append(f'<text x="0" y="{y + rowh / 2 + 3}" font-size="8.6">{e(label)}</text>')
         x = lab
         for k in ORDER:
             v = c.get(k, 0)
@@ -254,10 +254,10 @@ def stack_svg(groups) -> str:
             ww = w * v / mx
             out.append(f'<rect x="{x:.1f}" y="{y}" width="{max(ww - 1.5, .8):.1f}" height="{rowh}" rx="2" fill="{COL[k]}"><title>{LABEL[k]}: {v}</title></rect>')
             if ww >= 16:
-                out.append(f'<text x="{x + ww / 2:.1f}" y="{y + 12.5}" font-size="8" text-anchor="middle" fill="{INK[k]}" font-weight="bold">{v}</text>')
+                out.append(f'<text x="{x + ww / 2:.1f}" y="{y + rowh / 2 + 3.5}" font-size="8" text-anchor="middle" fill="{INK[k]}" font-weight="bold">{v}</text>')
             x += ww
-        out.append(f'<text x="{x + 5:.1f}" y="{y + 12.5}" font-size="8" fill="#52514e">{e(sub)}</text>')
-        y += rowh + 5
+        out.append(f'<text x="{x + 5:.1f}" y="{y + rowh / 2 + 3.5}" font-size="8" fill="#52514e">{e(sub)}</text>')
+        y += rowh + (5 if rowh >= 18 else 3)
     return f'<svg width="{lab + w + 150}" height="{y}" aria-label="Lead status by bootcamp">{"".join(out)}</svg>'
 
 
@@ -286,6 +286,11 @@ class Report:
     SHEET = "Pool sheet"
     VALUE_HEAD = "Enrolled value (est.)"
     BARS_HEAD = "Where each bootcamp’s leads stand (bar length = number of leads)"
+    BAR_ROW, BAR_LABEL = 18, 190
+
+    def collected(self, x) -> float:
+        """Money column of the callers table: the estimated value of enrolled leads."""
+        return sum(s["value"] for _, s in x if s["status"] == "enrolled")
 
     def __init__(self, cfg: dict, kind: str, cut: datetime):
         self.cfg, self.kind, self.cut = cfg, kind, cut
@@ -399,7 +404,7 @@ class Report:
                     f'<td class="n">{c["hot"]}</td><td class="n">{c["warm"]}</td><td class="n">{c["cold"]}</td><td class="n">{c["notreached"]}</td>'
                     f'<td class="n">{c["enrolled"]} ({pct(c["enrolled"], n)}%)</td><td class="n">{c["dropped"]}</td>'
                     f'<td class="n"><span{" class=bad" if kept < prom else ""}>{kept}/{prom}</span></td>'
-                    f'<td class="n">{lakh(sum(s["value"] for _, s in x if s["status"] == "enrolled"))}</td>'
+                    f'<td class="n">{lakh(self.collected(x))}</td>'
                     f'<td class="n">{lakh(sum(s["value"] for _, s in x if s["status"] not in ("enrolled", "dropped")))}</td></tr>')
         for ad, tls in self.org.items():
             H.append(line(f"AD {e(ad)}", [(l, s) for l, s in self.rows if l["ad"] == ad], True))
@@ -419,7 +424,7 @@ class Report:
 
     def summary_page(self, extra_items: list[str]) -> str:
         return ('<div class="page">' + self.header("one-glance summary") + self.tiles() + self.act_box(extra_items)
-                + f'<h2>{self.BARS_HEAD}</h2>' + stack_svg(self.bootcamp_groups()) + legend()
+                + f'<h2>{self.BARS_HEAD}</h2>' + stack_svg(self.bootcamp_groups(), self.BAR_ROW, self.BAR_LABEL) + legend()
                 + '<h2>Callers by AD and TL</h2>' + self.caller_table() + self.intent_block() + "</div>")
 
     # -- lead lists -------------------------------------------------------------------------------------------
