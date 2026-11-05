@@ -230,9 +230,9 @@ class CommunityReport(Report):
         def table(title, x, fix, stage=True):
             if not x:
                 return f"<h2>{title} (0)</h2><p>None.</p>"
-            H = [f"<h2>{title} ({len(x)})</h2><table><tr><th style=\"width:3%\">#</th><th style=\"width:11%\">Number</th><th style=\"width:12%\">Lead</th>"
-                 '<th style="width:16%">Caller (TL)</th><th style="width:17%">Batch · booked on</th><th style="width:13%">LSQ stage now</th>'
-                 '<th style="width:11%">Sheet status</th><th>Fix</th></tr>']
+            H = [f"<h2>{title} ({len(x)})</h2><table><tr><th style=\"width:3%\">#</th><th style=\"width:10%\">Number</th><th style=\"width:10%\">Lead</th>"
+                 '<th style="width:14%">Caller (TL)</th><th style="width:16%">Batch · booked on</th><th style="width:11%">LSQ stage now</th>'
+                 '<th style="width:8%">Sheet status</th><th>Fix</th></tr>']
             for i, (l, s) in enumerate(sorted(x, key=lambda t: (t[0]["tl"], t[0]["caller"])), 1):
                 H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(l["caller"])} ({e(l["tl"])})</td>'
                          f'<td>{e(bootcamp_label(l))}</td><td>{e(s["stage"] or l["stage_now"])}</td><td>{e(l["sheet_status"])}</td><td>{fix}</td></tr>')

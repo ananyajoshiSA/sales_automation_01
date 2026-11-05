@@ -106,6 +106,32 @@ Code: `analytics/collection_cycle.py` (cycle leads, assignment, 12-hour window, 
 `analytics/collection_reports.py` (the PDF). Tests: `tests/test_collection_cycle.py` and
 `tests/test_collection_reports.py`. Step 2 and the step 3 merge are still scratch scripts, not in the repo.
 
+## Community collection check (5 Nov 2026)
+
+Same format and grading as the bootcamp check, one PDF per team (`analytics/community_reports.py`), with the changes
+agreed with the user:
+- **Leads:** every row of the Community Webinar Collection Sheet booked in the chosen months, matched to LeadSquared
+  by phone then email (`analytics/community_cycle.py`). Credited to the last collection caller of either team who held
+  it after booking (so no lead counts twice); the sheet's owner only when no collection caller held it in LeadSquared.
+- **Grouping:** booking month (latest first) and batch = community + group number from "Course paid for"
+  ("Independent Director G88–89"; Week_1/2/3 of a group are one batch). Each lead shows its booking date, not D1/D2.
+- **Money:** the sheet's own per lead, no estimates: collected = amount paid on leads the sheet marks Disbursed,
+  One shot or Instalments; balance = the sheet's pending amount on leads open in LeadSquared.
+- **Pages:** summary, the earlier month's performance by batch against 85% (with the latest month so far), drops and
+  leads at risk, TL pages, definitions, and the community sheet vs LeadSquared gaps, checked lead by lead.
+- **Suggested days:** a Tuesday check and a Friday review (48% of bookings land on Sunday, 19% on Thursday,
+  Aug–Nov 2026); not yet confirmed.
+
+```bash
+python -m scripts.fetch_collections data/collections/<day> 2026-10                 # tagged leads + both sheets
+# ids of the months' matched leads -> scripts/fetch_lead_histories.py ids.json data/collections/<day>/hist.jsonl
+# transcripts, timelines and grading as for bootcamps (scratch); judgements keyed by lead id and cut-off date
+python -m analytics.community_reports <config.json> "YYYY-MM-DD HH:MM" exports/collection_reports/<name>.pdf
+```
+
+Config: side, team, months, target, data_dir, groups_meta (a meta.json with `member_groups`), judgements,
+lsq_read_at, sheet_read_at.
+
 ## Status (4 Nov 2026)
 
 - **Delivered for November weekend 1 (24–26 Oct bootcamps):**
@@ -116,6 +142,7 @@ Code: `analytics/collection_cycle.py` (cycle leads, assignment, 12-hour window, 
   in LSQ, and one sheet number is wrong (11 digits). Both now show on the gaps page.
 - **Mayur, Wednesday check 4 Nov 2026 (both November weekends, 128 leads):** built from the live pool sheet;
   63 open leads graded.
+- **Community checks 5 Nov 2026 (October and November bookings):** Mayur 218 leads, Anmol 159; 188 open leads graded.
 - **Anmol, Wednesday check 4 Nov 2026 (both November weekends, 204 leads):** 99 open leads graded. The MIS row for
   Anmol's AI for Business Growth (Senior AI) copies Global Academic Writers' day split and price; the Mastersheet
   prices all 6 students at ₹55,000 (Day 1), which the report uses.
