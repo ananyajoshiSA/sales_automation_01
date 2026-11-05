@@ -36,6 +36,17 @@ def test_lead_is_credited_from_leadsquared_with_the_sheets_money():
     # LeadSquared's owner is outside the team: the sheet's owner is credited, and the gaps page says so
     assert b["caller"] == "Vedahi Rana" and b["credited_by"] == "sheet" and b["calls"] == []
     assert [r["why_left"] for r in left] == ["no lead"]
+    # held by the other team in LeadSquared after booking: never credited to this team from the sheet
+    hist["d"] = [owner("2026-10-18 11:00", "Seller", "Kanika Verma"), owner("2026-10-19 11:00", "Kanika Verma", "Seller")]
+    leads["d"] = lead("d", owner_name="Seller")
+    groups = {**GROUPS, "Kanika Verma": ["Team Puja Malik (DSV+Women AI)"]}
+    got, _ = community_leads([sheet("d")], leads, hist, groups, "Mayur", ("2026-10",))
+    assert got == []
+    # held by this team, now owned by the other team's caller: it is the other team's lead only
+    leads["d"] = lead("d", owner_name="Kanika Verma")
+    hist["d"] = [owner("2026-10-18 11:00", "Seller", "Vedahi Rana"), owner("2026-10-19 11:00", "Vedahi Rana", "Kanika Verma")]
+    assert community_leads([sheet("d")], leads, hist, groups, "Mayur", ("2026-10",))[0] == []
+    assert community_leads([sheet("d")], leads, hist, groups, "Puja / Anmol", ("2026-10",))[0][0]["caller"] == "Kanika Verma"
 
 
 def test_community_check_lists_numbers_batches_and_sheet_gaps(tmp_path, monkeypatch):

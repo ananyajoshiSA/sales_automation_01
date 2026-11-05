@@ -96,13 +96,14 @@ def community_leads(rows: list[dict], leads: dict[str, dict], hist: dict[str, li
         owners = [(utc(a["CreatedOn"]), (_data(a).get("CurrentOwner") or "").strip()) for a in acts
                   if a.get("EventCode") == 3001 and utc(a["CreatedOn"]) >= start]
         current = (l.get("OwnerIdName") or "").strip()
-        held = [o for _, o in owners if team_member(team, o, side) and team[o][2] != "(AD)"]
+        # the last collection caller of either team who held it after booking decides the team, so no lead counts twice
+        held = [o for _, o in owners if o in team and team[o][2] != "(AD)"]
+        last = current if current in team and team[current][2] != "(AD)" else (held[-1] if held else None)
         caller, credited_by = None, "lsq"
-        if team_member(team, current, side) and team[current][2] != "(AD)":
-            caller = current
-        elif held:
-            caller = held[-1]
-        elif current not in team and r["owner"] in team and team[r["owner"]][0] == side:
+        if last:
+            caller = last if team[last][0] == side else None
+        elif current not in team and not any(o in team for _, o in owners) and r["owner"] in team and team[r["owner"]][0] == side:
+            # only when no collection caller of either team held it in LeadSquared after booking
             caller, credited_by = r["owner"], "sheet"
         if not caller:
             continue
