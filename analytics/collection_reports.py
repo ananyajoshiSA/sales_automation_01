@@ -232,7 +232,7 @@ def legend() -> str:
 
 
 def bootcamp_label(l) -> str:
-    return f'{l["bootcamp"]} · D{l["day"]}'
+    return l.get("label") or f'{l["bootcamp"]} · D{l["day"]}'
 
 
 def stack_svg(groups) -> str:
@@ -281,6 +281,12 @@ def bullet_svg(rows, target: int) -> str:
 
 
 class Report:
+    # wording that differs between bootcamp and community reports (analytics.community_reports)
+    UNIT_HEAD = "Bootcamp · day"
+    SHEET = "Pool sheet"
+    VALUE_HEAD = "Enrolled value (est.)"
+    BARS_HEAD = "Where each bootcamp’s leads stand (bar length = number of leads)"
+
     def __init__(self, cfg: dict, kind: str, cut: datetime):
         self.cfg, self.kind, self.cut = cfg, kind, cut
         # a review made on another day keeps the Friday format but names its own day
@@ -352,7 +358,7 @@ class Report:
                 f"{e(k)} {f} of {n} dials failed ({pct(f, n)}%)" for k, f, n in dial)
                 + (" since Wednesday." if since else " on these leads."))
         if self.gaps[0] or self.gaps[1]:
-            items.append(f"<b>Pool sheet and LeadSquared disagree on {len(self.gaps[0]) + len(self.gaps[1])} leads</b> — TLs to fix the LSQ "
+            items.append(f"<b>{self.SHEET} and LeadSquared disagree on {len(self.gaps[0]) + len(self.gaps[1])} leads</b> — TLs to fix the LSQ "
                          "stage or the sheet (listed on the last page).")
         never = [(l, s) for l, s in open_ if s["status"] == "notreached" and s["dials"] >= 10]
         if never:
@@ -378,7 +384,7 @@ class Report:
         H = ['<table><tr><th style="width:17%">AD → TL → caller</th><th class="n">Leads</th><th class="n">Not called</th>'
              '<th class="n">Within 12 h</th><th class="n">Hot</th><th class="n">Warm</th><th class="n">Cold</th>'
              '<th class="n">DNP/No real conversation</th><th class="n">Enrolled</th><th class="n">Dropped</th><th class="n">Call-backs kept</th>'
-             '<th class="n" style="width:8%">Enrolled value (est.)</th><th class="n" style="width:8%">Still open</th></tr>']
+             f'<th class="n" style="width:8%">{self.VALUE_HEAD}</th><th class="n" style="width:8%">Still open</th></tr>']
         cut = self.cut
 
         def line(label, x, sub=False):
@@ -413,12 +419,12 @@ class Report:
 
     def summary_page(self, extra_items: list[str]) -> str:
         return ('<div class="page">' + self.header("one-glance summary") + self.tiles() + self.act_box(extra_items)
-                + '<h2>Where each bootcamp’s leads stand (bar length = number of leads)</h2>' + stack_svg(self.bootcamp_groups()) + legend()
+                + f'<h2>{self.BARS_HEAD}</h2>' + stack_svg(self.bootcamp_groups()) + legend()
                 + '<h2>Callers by AD and TL</h2>' + self.caller_table() + self.intent_block() + "</div>")
 
     # -- lead lists -------------------------------------------------------------------------------------------
     def lead_rows(self, x) -> str:
-        H = ['<table><tr><th style="width:2.5%">#</th><th style="width:10%">Number</th><th style="width:9%">Lead</th><th style="width:11%">Bootcamp · day</th>'
+        H = ['<table><tr><th style="width:2.5%">#</th><th style="width:10%">Number</th><th style="width:9%">Lead</th><th style="width:11%">' + self.UNIT_HEAD + '</th>'
              '<th style="width:4.5%">Tries / days</th><th style="width:9%">Status</th>'
              '<th style="width:24%">Why (LSQ notes and transcripts)</th><th style="width:10.5%">Payment intent</th><th style="width:5%">Call-backs kept</th>'
              '<th style="width:14.5%">Next step</th></tr>']
@@ -429,7 +435,7 @@ class Report:
             if s["cb"][0] < s["cb"][1]:
                 cb = f'<span class="bad">{cb}</span>'
             why = e(s["why"]) + (f'<br><span class="bad">At risk: {e(s["risk"])}</span>' if s["risk"] else "") \
-                + ('<br><span class="bad">Pool sheet shows enrolled — confirm payment, update LSQ</span>' if s.get("sheet_enrolled") else "")
+                + (f'<br><span class="bad">{self.SHEET} shows enrolled — confirm payment, update LSQ</span>' if s.get("sheet_enrolled") else "")
             H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(bootcamp_label(l))}</td>'
                      f'<td>{s["dials"]} / {s["dial_days"]}</td><td>{chip(s["status"])}</td><td>{why}</td><td>{e(s["intent"])}</td>'
                      f'<td>{cb}</td><td>{e(s["nxt"])}</td></tr>')
