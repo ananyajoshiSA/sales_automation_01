@@ -101,3 +101,12 @@ def test_header_can_say_how_far_transcripts_go(tmp_path):
     assert "Salesa transcripts of those calls" in Report(cfg, "wed", T("2026-10-28 20:00")).html()
     cfg["transcripts_note"] = "Salesa transcripts of calls up to Wed 04 Nov (later calls from LSQ notes)"
     assert "calls up to Wed 04 Nov (later calls from LSQ notes)" in Report(cfg, "wed", T("2026-10-28 20:00")).html()
+
+
+def test_friday_shows_a_follow_up_not_due_yet(tmp_path):
+    cfg = cycle(tmp_path)
+    j = json.loads((tmp_path / "w1" / "j.json").read_text())
+    j["c"] = {d: {"status": "notreached", "why": "Not called", "next": "Call now"} for d in ("2026-10-28", "2026-10-30")}
+    j["b"]["2026-10-30"]["wed_hot_followup"] = "not due yet"
+    (tmp_path / "w1" / "j.json").write_text(json.dumps(j))
+    assert ">Not due yet<" in Report(cfg, "fri", T("2026-10-30 12:00")).html()

@@ -522,11 +522,12 @@ class Report:
         H = ['<table><tr><th style="width:3%">#</th><th style="width:10.5%">Number</th><th style="width:9%">Lead</th><th style="width:9%">Caller</th>'
              '<th style="width:12%">Bootcamp · day</th><th style="width:18%">Wednesday: hot because</th><th style="width:8%">Called at promised time?</th>'
              '<th style="width:7.5%">Now</th><th>What happened since Wednesday</th></tr>']
-        fo = {"no": 0, "none agreed": 1, "yes": 2}
+        fo = {"no": 0, "none agreed": 1, "not due yet": 2, "yes": 3}
         so = {"dropped": 0, "cold": 1, "warm": 2, "notreached": 2, "hot": 3, "enrolled": 4}
         for i, (l, s) in enumerate(sorted(wed_hot, key=lambda t: (fo.get(now[t[0]["lead_id"]]["followup"], 3), so[now[t[0]["lead_id"]]["status"]])), 1):
             f = now[l["lead_id"]]
-            ans = {"yes": "<span class=good>Yes</span>", "no": "<span class=bad>No</span>", "none agreed": "No time agreed"}.get(f["followup"], "—")
+            ans = {"yes": "<span class=good>Yes</span>", "no": "<span class=bad>No</span>", "none agreed": "No time agreed",
+                   "not due yet": "Not due yet"}.get(f["followup"], "—")
             H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(l["caller"])}</td><td>{e(bootcamp_label(l))}</td>'
                      f'<td>{e(s["why"])}</td><td>{ans}</td><td>{chip(f["status"])}</td><td>{e(f["outcome"] or f["why"])}</td></tr>')
         H.append("</table>")
