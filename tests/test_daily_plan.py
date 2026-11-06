@@ -942,3 +942,56 @@ def test_a_collection_lead_found_on_reading_stays_off_the_sheets():
     reads = {"L2": {"lead_id": "L2", "name": "Lead2", "status": "collection", "tier": "B", "chance": 15}}
     R = rows.build_rows(snap([]), "2026-10-10", reads, {}, [])
     assert not any(R["by_owner"].values()) and R["dropped"][0]["status"] == "collection"
+
+
+def test_top_list_ranks_open_leads_and_maps_owner_stage_and_last_call_from_leadsquared(tmp_path):
+    from openpyxl import load_workbook
+
+    from analytics.daily_plan import top
+
+    s = snap([call("u1", "L1", "2026-10-09 05:00:00", "Answered", 300), call("u1", "L2", "2026-10-09 06:00:00", "Answered", 400)])
+    reads = {"L1": {"lead_id": "L1", "status": "active", "tier": "B", "chance": 10, "why": "w1", "next_step": "n1"},
+             "L2": {"lead_id": "L2", "status": "active", "tier": "A", "chance": 10},
+             "L3": {"lead_id": "L3", "status": "active", "tier": "A", "chance": 30},
+             "L4": {"lead_id": "L4", "status": "collection", "tier": "D", "chance": 0},
+             "L5": {"lead_id": "L5", "status": "not_interested", "tier": "C", "chance": 40},
+             "L6": {"lead_id": "L6", "status": "active", "tier": "B", "chance": 20}}
+    ranked = top.rank(s, reads, n=3)
+    assert [r["lead_id"] for r in ranked] == ["L3", "L6", "L2", "L1"]          # chance, then tier; dropped statuses left out
+    live = {"L3": {"ProspectStage": "Course Enrolled"},                          # enrolled since the morning read: skipped
+            "L6": {"FirstName": "Asha", "LastName": "None", "OwnerIdName": "Ravi S", "ProspectStage": "Follow Up For Closure",
+                   "mx_Last_Called_Date_DT": "2026-11-05 06:30:00.000", "Phone": "+91-9000000006"},
+            "L2": {"OwnerIdName": "Asha K", "ProspectStage": "Counselled lead"},
+            "L1": {"OwnerIdName": "Asha K", "ProspectStage": "Call Back Later"}}
+    rows = top.map_current(s, ranked, live.get, n=3)
+    assert [r["lead_id"] for r in rows] == ["L6", "L2", "L1"]
+    assert (rows[0]["name"], rows[0]["owner"], rows[0]["stage"]) == ("Asha", "Ravi S", "Follow Up For Closure")
+    assert rows[0]["last_called"] == "Thu 05 Nov 12:00" and rows[1]["last_called"] == "never"     # UTC shown in IST
+    assert rows[1]["last_real"] == "Fri 09 Oct" and rows[0]["last_real"] == "none on record"
+    top.write_xlsx(rows, "Team X", "Fri 6 Nov 2026 09:00", str(tmp_path / "t.xlsx"))
+    ws = load_workbook(tmp_path / "t.xlsx").active
+    assert ws.title == "Top 3" and ws["D5"].value == "Ravi S" and ws["E5"].value == "Follow Up For Closure"
+    assert "Ravi S" in top.html_doc(rows, "Team X", "Tara L", "Friday 6 November 2026", "09:00")
+
+
+def test_top_command_writes_both_files_and_mails_them(monkeypatch, tmp_path):
+    from analytics.daily_plan import __main__ as cli
+
+    monkeypatch.chdir(tmp_path)
+    d = tmp_path / "data" / "daily" / "2026-10-10"
+    (d / "reads").mkdir(parents=True)
+    json.dump({"group": "Team X", "users": USERS, "fetched_at": "2026-10-10T08:30:00+00:00", "leads": LEADS, "calls": []},
+              open(d / "snap.json", "w"))
+    (d / "reads" / "out_0.jsonl").write_text(json.dumps({"lead_id": "L1", "status": "active", "tier": "A", "chance": 30}) + "\n")
+
+    class Client:
+        def get_lead_by_id(self, lid):
+            return {"OwnerIdName": "Asha K", "ProspectStage": "Counselled lead"}
+
+    sent = {}
+    monkeypatch.setattr("integrations.leadsquared.LeadSquaredClient", Client)
+    monkeypatch.setattr(cli.pdf, "render", lambda h, hp, pp: open(pp, "w").write("pdf"))
+    monkeypatch.setattr(cli.mailer, "send", lambda subj, html, text, to, files, to_list="": sent.update(subj=subj, files=files, to_list=to_list))
+    cli.main(["--team", "Team X", "--leader", "Tara L", "--mail-list", "x", "top", "2026-10-10", "--n", "5", "--mail"])
+    assert [os.path.basename(f) for f in sent["files"]] == ["Team_X_top5_Sat_10_Oct.pdf", "Team_X_top5_Sat_10_Oct.xlsx"]
+    assert sent["to_list"] == "x" and "top 1 leads" in sent["subj"]

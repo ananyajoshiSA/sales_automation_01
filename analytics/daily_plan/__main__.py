@@ -4,6 +4,7 @@
     python -m analytics.daily_plan prepare 2026-10-12            # transcripts, dossiers, reading batches
     #   ... Claude reads every batch -> data/daily/<date>/reads/out_*.jsonl, writes narrative.json ...
     python -m analytics.daily_plan build   2026-10-12 [--mail]   # rows, review, workbook, PDF, state
+    python -m analytics.daily_plan top     2026-10-12 [--n 50] [--mail]   # top leads only, owner/stage/last call read fresh
     python -m analytics.daily_plan status  2026-10-12 [--mail]   # 14:00 / 17:00 status check (fetches today)
     python -m analytics.daily_plan revival-prepare 2026-10-13 --start 2026-07-01 --end 2026-09-20   # older leads to revive
     python -m analytics.daily_plan revival-build 2026-10-13 [--publish-state]
@@ -27,6 +28,7 @@ import glob
 import json
 import os
 import sys
+from collections import Counter
 from datetime import datetime
 
 from analytics.daily_plan import content, dossiers, leadflow, mailer, missed_calls, pdf, pipeline, recalc, review, rows, state, status, transcripts, workbook
@@ -176,6 +178,32 @@ def cmd_build(a):
         if mailer.recipients("REPORT_TO_SUMMARY"):  # leadership copy without lead details, only when a list is set
             mailer.send(f"{a.team}: {RV['day_label']} summary", f"<p>{RV['headline']}</p>{summary}", "See the HTML version.",
                         mailer.recipients("REPORT_TO_SUMMARY"), to_list=a.mail_list)
+
+
+def cmd_top(a):
+    """The top N leads by conversion potential with their owner, stage and last call read fresh from LeadSquared."""
+    from analytics.daily_plan import top
+    from integrations.leadsquared import LeadSquaredClient
+
+    p = paths(a.date)
+    snap = _snap(p, a.leader)
+    reads = rows.load_reads(p["reads"])
+    if not reads:
+        sys.exit(f"no reads in {p['reads']}: run prepare and read every batch first")
+    client = LeadSquaredClient()
+    R = top.map_current(snap, top.rank(snap, reads, a.n), client.get_lead_by_id, a.n)
+    pulled = now_ist().strftime("%a %-d %b %Y %H:%M")
+    day = datetime.strptime(a.date, "%Y-%m-%d")
+    os.makedirs(p["out"], exist_ok=True)
+    stem = os.path.join(p["out"], f"{short_name(a.team)}_top{a.n}_{day:%a_%-d_%b}")
+    top.write_xlsx(R, a.team, pulled, stem + ".xlsx")
+    pdf.render(top.html_doc(R, a.team, a.leader, day.strftime("%A %-d %B %Y"), pulled), stem + ".html", stem + ".pdf")
+    print(f"top {len(R)} -> {stem}.pdf/.xlsx; owners: " + ", ".join(f"{o} {k}" for o, k in Counter(x["owner"] for x in R).most_common()))
+    if a.mail:
+        text = (f"{a.team}: top {len(R)} leads by conversion potential for {day:%a %-d %b}, with current owner, stage and last call "
+                f"from LeadSquared ({pulled} IST). PDF and workbook attached.")
+        mailer.send(f"{a.team}: top {len(R)} leads, {day:%a %-d %b %Y}", f"<p>{html_escape(text)}</p>", text,
+                    mailer.recipients("REPORT_TO"), [stem + ".pdf", stem + ".xlsx"], to_list=a.mail_list)
 
 
 def cmd_status(a):
@@ -468,6 +496,7 @@ def main(argv=None):
     pr = sub.add_parser("prepare"); pr.add_argument("date"); pr.add_argument("--pause", type=int, default=60)
     pr.add_argument("--batches", type=int, default=8); pr.add_argument("--no-transcripts", action="store_true")
     b = sub.add_parser("build"); b.add_argument("date"); b.add_argument("--mail", action="store_true"); b.add_argument("--publish-state", action="store_true")
+    tp = sub.add_parser("top"); tp.add_argument("date"); tp.add_argument("--n", type=int, default=50); tp.add_argument("--mail", action="store_true")
     s = sub.add_parser("status"); s.add_argument("date"); s.add_argument("--mail", action="store_true"); s.add_argument("--no-fetch", action="store_true")
     s.add_argument("--snapshot"); s.add_argument("--enrolled"); s.add_argument("--full", action="store_true")
     rp = sub.add_parser("revival-prepare"); rp.add_argument("date"); rp.add_argument("--start", required=True); rp.add_argument("--end", required=True)
@@ -491,7 +520,7 @@ def main(argv=None):
         a.state_dir = os.path.join("plan_state", short_name(a.team))
     if a.team != TEAM and a.mail_list == MAIL_LIST:  # nor go to Elite's mailing list
         a.mail_list = short_name(a.team).lower()
-    {"revival-prepare": cmd_revival_prepare, "revival-build": cmd_revival_build, "share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "status": cmd_status,
+    {"revival-prepare": cmd_revival_prepare, "revival-build": cmd_revival_build, "share": cmd_share, "fetch": cmd_fetch, "fetch-month": cmd_fetch_month, "prepare": cmd_prepare, "build": cmd_build, "top": cmd_top, "status": cmd_status,
      "pipeline-prepare": cmd_pipeline_prepare, "pipeline-build": cmd_pipeline_build,
      "weekly-prepare": cmd_weekly_prepare, "weekly-build": cmd_weekly_build,
      "weekly-leader-prepare": cmd_weekly_leader_prepare, "weekly-leader-build": cmd_weekly_leader_build}[a.cmd](a)

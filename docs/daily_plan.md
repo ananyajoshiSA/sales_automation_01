@@ -173,6 +173,13 @@ sales leads only (`SALES_ONLY` in `common.py`). A lead with any "Bootcamp collec
 or in Booking fees received or Collections done, is left out with its calls, Zipteams notes and enrolment. On 27 Oct
 that left out 5,237 of the team's 43,490 leads.
 
+Since 7 Nov 2026 this team gets **only its top 50 leads** by conversion potential (the owner's request of 6 Nov): no review,
+feedback or caller sheets. The run is fetch, prepare, read every batch, `build <date> --publish-state` (no narrative and
+no mail: it only saves the plan state the next morning's reading needs), then `top <date> --mail --mail-list puja`. `top`
+ranks the morning's reads (estimated 3-day chance, then tier, then the latest real conversation), leaves out enrolled,
+collection, do-not-call and clear-no leads, and reads each listed lead again from LeadSquared for its current owner,
+stage and last-called time (IST). It writes `<team>_top50_<Day>_<D>_<Mon>.pdf` and `.xlsx` and mails both.
+
 ## Lead flow (Shivangi's request, 11 Oct)
 
 Every report now shows, for the leads that came in, how fast each was first dialled, how many attempts it got, whether it
