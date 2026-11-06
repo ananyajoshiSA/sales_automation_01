@@ -313,7 +313,7 @@ class Report:
             pool += f', downloaded {self.cfg["pool"]["read_at_ist"]} IST'
         return (f'<h1>{e(self.cfg["team"])} · {self.title} · {e(part)}</h1>'
                 f'<div class="meta">{e(self.cfg["month"])} collections so far: {wks}. LeadSquared calls and stages up to '
-                f'{when(self.data_to, "%a %d %b %Y, %H:%M")} IST; Salesa transcripts of those calls; Bootcamp pool sheet MIS of {e(pool)}.</div>')
+                f'{when(self.data_to, "%a %d %b %Y, %H:%M")} IST; {e(self.cfg.get("transcripts_note") or "Salesa transcripts of those calls")}; Bootcamp pool sheet MIS of {e(pool)}.</div>')
 
     def tiles(self) -> str:
         rows, n = self.rows, len(self.rows)
