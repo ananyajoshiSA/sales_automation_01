@@ -142,6 +142,11 @@ lsq_read_at, sheet_read_at.
   in LSQ, and one sheet number is wrong (11 digits). Both now show on the gaps page.
 - **Mayur, Wednesday check 4 Nov 2026 (both November weekends, 128 leads):** built from the live pool sheet;
   63 open leads graded.
+- **Friday reviews 6 Nov 2026 (both teams, both November weekends):** LeadSquared read again into new folders
+  (`data/fri_w1`, `data/fri_w2`) so Wednesday's copy stays; Wednesday's judgements copied in and Friday's added under
+  the Friday date (open leads graded, dropped leads' reasons, Wednesday-hot follow-up). The transcript service refused
+  almost every search on Friday (10 requests a minute, used by something else), so transcripts cover calls up to
+  Wednesday; the header says so (`transcripts_note` in the config).
 - **Community checks 5 Nov 2026 (October and November bookings):** Mayur 218 leads, Anmol 159; 188 open leads graded.
 - **Anmol, Wednesday check 4 Nov 2026 (both November weekends, 204 leads):** 99 open leads graded. The MIS row for
   Anmol's AI for Business Growth (Senior AI) copies Global Academic Writers' day split and price; the Mastersheet
