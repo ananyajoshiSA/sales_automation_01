@@ -967,7 +967,7 @@ def test_top_list_ranks_open_leads_and_maps_owner_stage_and_last_call_from_leads
     assert [r["lead_id"] for r in rows] == ["L6", "L2", "L1"]
     assert (rows[0]["name"], rows[0]["owner"], rows[0]["stage"]) == ("Asha", "Ravi S", "Follow Up For Closure")
     assert rows[0]["last_called"] == "Thu 05 Nov 12:00" and rows[1]["last_called"] == "never"     # UTC shown in IST
-    assert rows[1]["last_real"] == "Fri 09 Oct" and rows[0]["last_real"] == "none on record"
+    assert rows[1]["last_real"] == "Fri 09 Oct" and rows[0]["last_real"] == "none since Fri 09 Oct"
     top.write_xlsx(rows, "Team X", "Fri 6 Nov 2026 09:00", str(tmp_path / "t.xlsx"))
     ws = load_workbook(tmp_path / "t.xlsx").active
     assert ws.title == "Top 3" and ws["D5"].value == "Ravi S" and ws["E5"].value == "Follow Up For Closure"

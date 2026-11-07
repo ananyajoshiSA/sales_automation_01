@@ -45,6 +45,8 @@ def rank(snap: Snap, reads: dict, n: int = 50) -> list[dict]:
 
 def map_current(snap: Snap, ranked: list[dict], get_lead, n: int = 50) -> list[dict]:
     """Each ranked lead with its owner, stage and last-called time as LeadSquared has them now; closed ones are skipped."""
+    first = min((c["t"] for c in snap.calls), default=None)  # the pull holds only the last few days of calls
+    none = f"none since {first:%a %d %b}" if first else "none on record"
     rows = []
     for r in ranked:
         l = get_lead(r["lead_id"]) or {}
@@ -55,7 +57,7 @@ def map_current(snap: Snap, ranked: list[dict], get_lead, n: int = 50) -> list[d
         rows.append({"name": name_of(l) or r.get("name") or "Unnamed lead", "phone": p10(l.get("Phone")) or "",
                      "owner": l.get("OwnerIdName") or "", "stage": stage,
                      "last_called": lc.strftime("%a %d %b %H:%M") if lc else "never",
-                     "last_real": lr.strftime("%a %d %b") if lr else "none on record",
+                     "last_real": lr.strftime("%a %d %b") if lr else none,
                      "tier": r.get("tier") or "", "chance": int(r.get("chance") or 0),
                      "course": r.get("course") or l.get("mx_Enquired_Course") or "", "why": r.get("why") or "",
                      "next": r.get("next_step") or "", "callback": r.get("callback_requested") or "", "lead_id": r["lead_id"]})
@@ -119,6 +121,6 @@ td {{ border-bottom: 1px solid #d0d5d2; padding: 4pt; vertical-align: top; }} tr
 tr.tA td {{ background: #dcefe6; }} tr.tB td {{ background: #eef3fa; }} .s {{ color: #555; font-size: 7.5pt; margin-top: 2pt; }}
 </style></head><body><h1>{e(team)}: top {len(rows)} leads by conversion potential, {e(day_label)}</h1>
 <p class="n">For {e(leader)}. Highest estimated chance of enrolling in the next 3 days first. Sales leads only. Owner, stage and
-last-called time read from LeadSquared {e(pulled)} IST; "last 2+ min talk" is from the call log. Chances are estimates, not targets.</p>
+last-called time read from LeadSquared {e(pulled)} IST; "last 2+ min talk" is from the last few days' call log. Chances are estimates, not targets.</p>
 <table><tr><th>#</th><th>Lead</th><th>Current owner</th><th>Current stage</th><th>Last called</th><th>Last 2+ min talk</th>
 <th>Tier · chance</th><th>Why this lead / next step</th></tr>{body}</table></body></html>"""
