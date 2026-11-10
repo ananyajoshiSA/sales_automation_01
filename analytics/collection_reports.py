@@ -24,7 +24,7 @@ import sys
 from collections import Counter, defaultdict
 from datetime import datetime
 
-from analytics.collection_cycle import WINDOW_HOURS, cycle_leads, state
+from analytics.collection_cycle import SILENT_DAYS, WINDOW_HOURS, cycle_leads, silent_since, state
 from analytics.collection_scorecard import load
 from analytics.collections.pool_mis import load_mis, refresh_pool
 from integrations.gsheets import download_xlsx, sheet_id
@@ -38,6 +38,9 @@ LABEL = {"enrolled": "Enrolled", "hot": "Hot", "warm": "Warm", "cold": "Cold", "
 ORDER = ["enrolled", "hot", "warm", "cold", "notreached", "dropped"]
 GRADED = {"hot", "warm", "cold", "notreached"}
 DIALER_SHARE = 0.5  # CLAUDE.md: 50%+ of dials ending in CallFailure is a dialer issue
+# a lead is listed as at risk of dropping only for one of these reasons (the user's rule, 10 Nov 2026); silence and
+# DNP stay on the lead's row
+RISK_KINDS = ("cancel or refund", "won't continue", "later batch, no date", "no payment route")
 
 
 def ist(s: str) -> datetime:
@@ -75,8 +78,15 @@ def row(lead: dict, cut: datetime, judged: dict | None, pool: dict, fee: int) ->
         raise ValueError(f"{lead['phone']}: judged {st} but LSQ shows it open")
     if (st == "notreached") != (s["real_talks"] == 0):
         raise ValueError(f"{lead['phone']}: judged {st} with {s['real_talks']} real talks")
-    return {**r, "status": st, "why": judged["why"], "intent": judged.get("intent") or "—", "nxt": judged.get("next") or "—",
-            "cb": (judged.get("cb_kept", 0), judged.get("cb_promised", 0)), "risk": judged.get("risk", ""),
+    why = judged["why"]
+    # silent a week despite 2+ dials a day: cold, whatever was agreed before, unless we agreed to wait (exam, salary date)
+    waiting = (judged.get("waiting_until") or "") >= cut.astimezone(IST).date().isoformat()
+    if st in ("hot", "warm") and not waiting and (since := silent_since(lead, cut)):
+        st, why = "cold", f"Silent {SILENT_DAYS} days despite 2+ dials a day (since {when(since, '%d %b')}). Earlier: {why}"
+    kind = judged.get("risk_kind") or ""
+    risk = f"{kind} — {judged.get('risk') or ''}".rstrip(" —") if kind in RISK_KINDS else ""
+    return {**r, "status": st, "why": why, "intent": judged.get("intent") or "—", "nxt": judged.get("next") or "—",
+            "cb": (judged.get("cb_kept", 0), judged.get("cb_promised", 0)), "risk": risk,
             "followup": judged.get("wed_hot_followup", ""), "outcome": judged.get("wed_hot_outcome", "")}
 
 
@@ -430,7 +440,7 @@ class Report:
     # -- lead lists -------------------------------------------------------------------------------------------
     def lead_rows(self, x) -> str:
         H = ['<table><tr><th style="width:2.5%">#</th><th style="width:10%">Number</th><th style="width:9%">Lead</th><th style="width:11%">' + self.UNIT_HEAD + '</th>'
-             '<th style="width:4.5%">Tries / days</th><th style="width:9%">Status</th>'
+             '<th style="width:5.5%">Tries / days · last talk</th><th style="width:8%">Status</th>'
              '<th style="width:24%">Why (LSQ notes and transcripts)</th><th style="width:10.5%">Payment intent</th><th style="width:5%">Call-backs kept</th>'
              '<th style="width:14.5%">Next step</th></tr>']
         rank = {"hot": 1, "warm": 2, "notreached": 3, "cold": 4}
@@ -442,7 +452,8 @@ class Report:
             why = e(s["why"]) + (f'<br><span class="bad">At risk: {e(s["risk"])}</span>' if s["risk"] else "") \
                 + (f'<br><span class="bad">{self.SHEET} shows enrolled — confirm payment, update LSQ</span>' if s.get("sheet_enrolled") else "")
             H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(bootcamp_label(l))}</td>'
-                     f'<td>{s["dials"]} / {s["dial_days"]}</td><td>{chip(s["status"])}</td><td>{why}</td><td>{e(s["intent"])}</td>'
+                     f'<td>{s["dials"]} / {s["dial_days"]}<br><span class="muted">{when(s["last_real"], "%-d %b") if s["last_real"] else "no talk"}</span></td>'
+                     f'<td>{chip(s["status"])}</td><td>{why}</td><td>{e(s["intent"])}</td>'
                      f'<td>{cb}</td><td>{e(s["nxt"])}</td></tr>')
         return "".join(H) + "</table>"
 
@@ -612,11 +623,13 @@ class Report:
         return f"""<div class="brk note"><b>How to read this.</b> <b>Within 12 h</b>: first dial within {WINDOW_HOURS} working hours
 (10:00–20:00 IST, every day) of the lead's assignment to the caller; a dial by a team member before LeadSquared shows the assignment counts
 as on time. <b>wh</b> = working hours. Leads whose 12 hours have not run out yet are left out of the percentage. <b>Tries / days</b>: dials so
-far / different days with a dial. <b>Call-backs kept</b>: call-backs promised to the lead (in transcripts and saved follow-ups) / kept near the
+far / different days with a dial; below it, the date of the last real talk. <b>Call-backs kept</b>: call-backs promised to the lead (in transcripts and saved follow-ups) / kept near the
 promised time. <b>Payment intent</b>: the mode and date the lead gave. <b>Hot</b>: a real talk (answered, 2 min+) and a buying step — payment
 date or mode agreed, link asked for, loan documents shared, or the lead called us back. <b>Warm</b>: a real talk, interested, with an open
-objection or no date. <b>Cold</b>: "not now" or a deferral with no date, or unanswered since the last talk. A lead we failed to dial (dialer
-failures) keeps its grade; the failure shows in the act box. <b>DNP/No real conversation</b>: no real conversation (answered, 2 min+) so far — the lead did not pick up, or every call was under 2 minutes. <b>Enrolled</b>: LeadSquared stage
+objection or no date. <b>Cold</b>: "not now" or a deferral with no date, or unanswered since the last talk; also any hot or warm lead that
+did not pick up for 7 days despite 2+ dials a day (unless it asked us to wait for a date, such as an exam result). A lead we failed to dial
+(dialer failures) keeps its grade; the failure shows in the act box. <b>At risk of dropping</b>: asked to cancel or for a refund, said it
+won't continue, deferred to a later batch with no date, or has no payment route left. <b>DNP/No real conversation</b>: no real conversation (answered, 2 min+) so far — the lead did not pick up, or every call was under 2 minutes. <b>Enrolled</b>: LeadSquared stage
 Course Enrolled or Collections done, or Loan pending saved as "loan done" / "loan process done". <b>Enrolled value (est.)</b>: course price from the pool sheet minus the booking fee, for each enrolled
 lead — an estimate; LeadSquared holds no paid amount for these leads, so actual money is the pool sheet MIS total. Hot / warm / cold and the
 reasons were read from each lead's LeadSquared notes and Salesa call transcripts; transcripts have no speaker labels, so check the call

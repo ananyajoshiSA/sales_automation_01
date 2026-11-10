@@ -119,6 +119,24 @@ def cycle_leads(leads: list[dict], hist: dict[str, list], meta: dict, bootcamp_d
     return out
 
 
+SILENT_DAYS, SILENT_DIALS_A_DAY, SILENT_MIN_DAYS = 7, 2, 6
+
+
+def silent_since(lead: dict, cut: datetime) -> datetime | None:
+    """Start of the week the lead did not pick up despite continuous calling (the user's rule, 10 Nov 2026): no answered
+    call either way in the 7 days before ``cut``, and 2+ team dials a day on at least 6 of those days; None otherwise."""
+    since = cut - timedelta(days=SILENT_DAYS)
+    week = [c for c in lead["calls"] if since < c["t"] <= cut]
+    if any(c["answered"] for c in week):
+        return None
+    per_day = {}
+    for c in week:
+        if c["out"] and c.get("team"):
+            day = c["t"].astimezone(IST).date()
+            per_day[day] = per_day.get(day, 0) + 1
+    return since if sum(n >= SILENT_DIALS_A_DAY for n in per_day.values()) >= SILENT_MIN_DAYS else None
+
+
 def state(lead: dict, cut: datetime) -> dict:
     """What was true of the lead at ``cut``: calls, talks, first-dial timing, enrolment or drop."""
     calls = [c for c in lead["calls"] if c["t"] <= cut]

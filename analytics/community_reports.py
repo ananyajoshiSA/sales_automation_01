@@ -261,10 +261,12 @@ months (its date), matched to LeadSquared, credited to the last collection calle
 number from the sheet's "Course paid for"; "from" is the batch start date. <b>Within 12 h</b>: first dial within {WINDOW_HOURS} working hours
 (10:00–20:00 IST, every day) of the lead's assignment to the caller after booking (the first owner change to a team member, or the booking
 stage); a dial by a team member before LeadSquared shows the assignment counts as on time. <b>Tries / days</b>: dials so far / different days
-with a dial. <b>Call-backs kept</b>: call-backs promised to the lead (in transcripts and saved follow-ups) / kept near the promised time.
+with a dial; below it, the date of the last real talk. <b>Call-backs kept</b>: call-backs promised to the lead (in transcripts and saved follow-ups) / kept near the promised time.
 <b>Payment intent</b>: the mode and date the lead gave. <b>Hot</b>: a real talk (answered, 2 min+) and a buying step — payment date or mode
 agreed, link asked for, loan documents shared, or the lead called us back. <b>Warm</b>: a real talk, interested, with an open objection or no
-date. <b>Cold</b>: "not now" or a deferral with no date, or unanswered since the last talk. <b>DNP/No real conversation</b>: no answered call of
+date. <b>Cold</b>: "not now" or a deferral with no date, or unanswered since the last talk; also any hot or warm lead that did not pick up for
+7 days despite 2+ dials a day (unless it asked us to wait for a date, such as an exam result). <b>At risk of dropping</b>: asked to cancel or
+for a refund, said it won't continue, deferred to a later batch with no date, or has no payment route left. <b>DNP/No real conversation</b>: no answered call of
 2 min or more so far. <b>Enrolled</b>: LeadSquared stage Course Enrolled or Collections done, or Loan pending saved as "loan done" / "loan
 process done"; LeadSquared decides the counts and the sheet's differences are listed on the last page. <b>Collected (sheet)</b>: amount paid per
 the community sheet (after loan subvention) on leads it marks paid. <b>Balance</b>: the sheet's pending amount on leads still open. Hot / warm /

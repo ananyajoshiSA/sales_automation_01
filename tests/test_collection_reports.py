@@ -110,3 +110,33 @@ def test_friday_shows_a_follow_up_not_due_yet(tmp_path):
     j["b"]["2026-10-30"]["wed_hot_followup"] = "not due yet"
     (tmp_path / "w1" / "j.json").write_text(json.dumps(j))
     assert ">Not due yet<" in Report(cfg, "fri", T("2026-10-30 12:00")).html()
+
+
+def _lead(calls):
+    return {"phone": "+91-0000000009", "caller": "Vedahi Rana", "calls": calls, "assigned": T("2026-10-27 11:00"),
+            "due": T("2026-10-28 13:00"), "enrolled_at": None, "lost_at": None, "stages": [], "bootcamp": "Technology Law 24 Oct", "day": 1}
+
+
+def _dial(t, answered=False, dur=0):
+    return {"t": T(t), "out": True, "answered": answered, "dur": dur, "status": "Answered" if answered else "NotAnswered",
+            "by": "Vedahi Rana", "team": True}
+
+
+def test_hot_lead_silent_a_week_despite_two_dials_a_day_is_cold_unless_we_agreed_to_wait():
+    talk = [_dial("2026-11-01 12:00", True, 300)]
+    week = [_dial(f"2026-11-{d:02d} {h}:00") for d in range(3, 10) for h in (11, 16)]
+    cut, hot = T("2026-11-10 20:00"), {"status": "hot", "why": "1 Nov call: Bajaj loan agreed", "next": "Collect PAN"}
+    s = row(_lead(talk + week), cut, hot, {"bootcamps": {}}, 0)
+    assert s["status"] == "cold" and s["why"].startswith("Silent 7 days despite 2+ dials a day") and "Bajaj loan agreed" in s["why"]
+    assert row(_lead(talk + week), cut, {**hot, "waiting_until": "2026-11-20"}, {"bootcamps": {}}, 0)["status"] == "hot"
+    assert row(_lead(talk + week[::2]), cut, hot, {"bootcamps": {}}, 0)["status"] == "hot"          # one dial a day is not continuous calling
+    picked = talk + week + [_dial("2026-11-08 18:00", True, 10)]                                        # a short pick-up breaks the silence
+    assert row(_lead(picked), cut, hot, {"bootcamps": {}}, 0)["status"] == "hot"
+
+
+def test_only_the_four_drop_reasons_put_a_lead_at_risk():
+    lead, cut = _lead([_dial("2026-11-01 12:00", True, 300)]), T("2026-11-02 20:00")
+    warm = {"status": "warm", "why": "Wants time", "next": "Call Tue"}
+    assert row(lead, cut, {**warm, "risk": "Unanswered since 30 Oct"}, {"bootcamps": {}}, 0)["risk"] == ""
+    s = row(lead, cut, {**warm, "risk_kind": "cancel or refund", "risk": "Asked for a refund on 1 Nov"}, {"bootcamps": {}}, 0)
+    assert s["risk"] == "cancel or refund — Asked for a refund on 1 Nov"

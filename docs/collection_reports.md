@@ -67,13 +67,18 @@ Removed at the user's request (Nov 2026):
 - **Enrolled:** LSQ stage Course Enrolled or Collections done, or **Loan pending saved as "loan done" /
   "loan process done"** (the user's rule, 2 Nov 2026). Dropped: Not Interested, Invalid…, May buy later.
   LSQ decides the counts; gaps with the sheet are listed, not merged.
-- **Grades** (read from notes and transcripts by Claude; checked against the call log):
+- **Grades** (read from notes and transcripts by Claude; checked against the call log; the readers' brief is
+  [collection_grading.md](collection_grading.md)):
   - **Hot:** a buying step — payment mode or date given, link asked for, loan documents shared, or the
     lead called back.
   - **Warm:** interested, with an open objection or no date.
   - **Cold:** "not now", wants to cancel or a refund, or stopped answering.
   - **DNP/No real conversation:** no answered call of 2 min or more.
-  - Grade the lead, not our calling: our missed or failed dials do not lower a grade.
+  - Grade the lead, not our calling: our missed or failed dials do not lower a grade. The lead's own silence does:
+    a hot or warm lead that did not pick up for 7 days despite 2+ dials a day is cold, unless it asked us to wait for
+    a date (exam result, salary date) (user, 10 Nov 2026; applied in code).
+  - At risk of dropping: only cancel or refund, won't continue, later batch with no date, or no payment route left.
+    Silence and DNP stay on the lead's row (user, 10 Nov 2026).
   - Transcripts have no speaker labels; never attribute words to the caller or the lead.
 - **Money:** collected = pool MIS figure (label its date). LSQ holds no paid amounts for these leads.
   Per caller / lead: enrolled value (est.) = pool price for the day − ₹3,000; still open = the same for
