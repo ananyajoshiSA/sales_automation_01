@@ -10,7 +10,9 @@ Fibe, paper finance) or instalments. You read each lead's timeline and grade **t
 
 The timeline header gives the number, bootcamp or batch, caller (TL, AD), assignment, LSQ status at the cut (OPEN,
 ENROLLED or DROPPED), the call facts including `real talks (answered 120s+)` and, for a review, the earlier check's grade.
-A marked line shows the earlier check's cut-off where there is one.
+A marked line shows the earlier check's cut-off where there is one. Read the lead's **Notes** too (lines "NOTE (Notes
+tab)", fetched with `scripts/fetch_lead_notes.py`): callers record unreachable or invalid numbers, WhatsApp attempts and
+what the lead said there, and that effort counts as much as the dials.
 
 ## 1. OPEN leads — `status`, exactly one of
 - `notreached` — **if and only if** the header says `real talks (answered 120s+) 0`.
@@ -45,6 +47,11 @@ forms), and:
 `wed_hot_followup`: "yes" (dialled within 2 h of the call-back time promised by then), "no", "none agreed" or
 "not due yet" (the time is after this cut-off); `wed_hot_outcome` (≤ 18 words: what happened since). A lead now
 ENROLLED gets `status` "enrolled" and these two fields.
+
+## Comments that cannot be traced
+When a comment or Note records what the lead said or decided but no answered call is near it and it does not say how it
+was learned (WhatsApp, email, a call on a date), say so in `why` ("26 Oct note: no funds — no call that day, channel not
+stated"). Callers should write the date and the channel in such comments.
 
 ## Transcripts and wording
 Transcripts have no speaker labels: never write "the lead said" or "the caller said"; write what the call was about.
