@@ -315,3 +315,16 @@ def test_a_window_bigger_than_a_page_is_cut_up_not_paged(client):
     assert [(w["FromDate"], w["ToDate"]) for w in windows[1:]] == [("2026-10-05 04:30:00", "2026-10-05 06:30:00"),
                                                                   ("2026-10-05 06:30:00", "2026-10-05 08:30:00")]
     assert all(json.loads(c.request.body)["Paging"]["PageIndex"] == 1 for c in responses.calls)
+
+
+@responses.activate
+def test_notes_page_back_to_a_date_and_drop_repeats(client):
+    def note(i, t):
+        return {"ProspectNoteId": f"n{i}", "RelatedProspectId": "lead", "Note": f"note {i}", "CreatedOn": t}
+    url = HOST + "LeadManagement.svc/RetrieveNote"
+    responses.add(responses.POST, url, json={"List": [note(1, "2026-10-06 10:00:00"), note(2, "2026-10-05 12:00:00")]})
+    # a note added meanwhile pushes n2 onto page 2 as well; it is kept once
+    responses.add(responses.POST, url, json={"List": [note(2, "2026-10-05 12:00:00"), note(3, "2026-10-04 23:00:00")]})
+    got = list(client.iter_notes_since(datetime(2026, 10, 5, tzinfo=timezone.utc), page_size=2))
+    assert [n["ProspectNoteId"] for n in got] == ["n1", "n2"]
+    assert [json.loads(c.request.body)["Paging"]["PageIndex"] for c in responses.calls] == [1, 2]

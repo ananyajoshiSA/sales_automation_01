@@ -89,7 +89,9 @@ Removed at the user's request (Nov 2026):
 ```bash
 # 1. Fetch the cycle (both teams; read-only, through the admission gate)
 PYTHONPATH=. .venv/bin/python scripts/fetch_bootcamp_collections.py 2026-10 2026-10 data/<dir> 2026-10-24
-# 2. Transcripts + one timeline file per lead that needs a grade (≤ 80 numbers per run; wait 60 s, run again for the rest)
+# 1b. Lead Notes (the Notes tab): callers record unreachable numbers, WhatsApp attempts etc. there, not as activities
+PYTHONPATH=. .venv/bin/python scripts/fetch_lead_notes.py <first bootcamp day − 3> data/<dir>/notes.jsonl data/<dir>/ids.json
+# 2. Transcripts + one timeline file per lead (include the Notes) that needs a grade (≤ 80 numbers per run; wait 60 s, run again for the rest)
 # 3. Grade each lead for the Wednesday cut-off and the report cut-off (readers of ~15 leads each),
 #    merge into data/<dir>/judgements_<team>.json keyed by lead id and dated by cut-off, and check the
 #    grades against the call facts (enrolled / dropped / DNP must match)

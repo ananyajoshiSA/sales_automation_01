@@ -423,6 +423,29 @@ class LeadSquaredClient:
                 return
             page += 1
 
+    def iter_notes_since(self, since: datetime, page_size: int = 1000) -> Iterator[dict]:
+        """Every lead Note (the Notes tab, not an activity) created at or after ``since``, newest first, each once.
+
+        ``LeadManagement.svc/RetrieveNote`` ignores lead and date filters (checked 11 Nov 2026: LeadId,
+        RelatedProspectId, FromDate/ToDate all return the whole account), so it pages from the newest note back and
+        stops at the first one older than ``since``. A note added while paging pushes older ones a row down, so a
+        note can come twice, never not at all; repeats are dropped. About 1,000 notes cover two days.
+        """
+        since, seen, page = since.astimezone(timezone.utc), set(), 1
+        while True:
+            batch = (self.request("POST", "LeadManagement.svc/RetrieveNote",
+                                  json={"Parameter": {}, "Paging": {"PageIndex": page, "PageSize": page_size}}) or {}).get("List") or []
+            for n in batch:
+                t = utc(n.get("CreatedOn"))
+                if t and t < since:
+                    return
+                if n.get("ProspectNoteId") not in seen:
+                    seen.add(n.get("ProspectNoteId"))
+                    yield n
+            if len(batch) < page_size:
+                return
+            page += 1
+
     def iter_activities_started(
         self,
         activity_event: int,
