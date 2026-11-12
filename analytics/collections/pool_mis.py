@@ -96,6 +96,24 @@ def same_course(family: str, course: str) -> bool:
     return all(w in words for w in re.findall(r"[a-z0-9&]+", family.lower()))
 
 
+def load_students(path: str, month: str, side: str) -> dict[str, dict]:
+    """The pool sheet's students of ``month`` ("November 2026") on ``side``, by the last 10 digits of their phone.
+
+    The MIS "Recovered amount (Total)" is every rupee received on the month's students, booking fees of pending and
+    dropped leads included (checked 12 Nov 2026: the Mastersheet's "Money received" adds up to it), so per-lead money
+    comes from here, not from an estimate.
+    """
+    from analytics.collections.sheets import read_bootcamp
+    key = datetime.strptime(month, "%B %Y").strftime("%Y-%m")
+    rows, _ = read_bootcamp(path)
+    out = {}
+    for r in rows:
+        if r["month"] == key and r["phone"] and (r.get("vertical") or "").lower() and (r["vertical"] or "").lower() in side.lower():
+            out[r["phone"]] = {"name": r["name"], "status": r["status"], "outcome": r["outcome"], "received": r["received"] or 0.0,
+                               "balance": r["balance"] or 0.0, "price": r["price"] or 0.0}
+    return out
+
+
 def refresh_pool(pool: dict, mis: list[dict], as_of: str, side: str) -> list[str]:
     """Update ``pool`` in place from the MIS rows of ``side`` ("Mayur", "Puja / Anmol"); returns notes for people."""
     mine = [r for r in mis if r["side"].lower() in side.lower()]

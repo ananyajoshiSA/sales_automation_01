@@ -140,3 +140,26 @@ def test_only_the_four_drop_reasons_put_a_lead_at_risk():
     assert row(lead, cut, {**warm, "risk": "Unanswered since 30 Oct"}, {"bootcamps": {}}, 0)["risk"] == ""
     s = row(lead, cut, {**warm, "risk_kind": "cancel or refund", "risk": "Asked for a refund on 1 Nov"}, {"bootcamps": {}}, 0)
     assert s["risk"] == "cancel or refund — Asked for a refund on 1 Nov"
+
+
+def test_pool_sheet_students_give_real_money_and_the_sheet_status_of_every_gap(tmp_path):
+    cfg = cycle(tmp_path)
+    j = json.loads((tmp_path / "w1" / "j.json").read_text())
+    j["c"] = {d: {"status": "notreached", "why": "Not called", "next": "Call now"} for d in ("2026-10-28", "2026-10-30")}
+    (tmp_path / "w1" / "j.json").write_text(json.dumps(j))
+    cfg["pool"]["students"] = {
+        "0000000001": {"name": "Lead a", "status": "Moved and paid for a different course", "outcome": "Other", "received": 3000, "balance": 0, "price": 59600},
+        "0000000002": {"name": "Lead b", "status": "Disbursed", "outcome": "Collected", "received": 52000, "balance": 0, "price": 59600},
+        "0000000003": {"name": "Lead c", "status": "Booking fees received", "outcome": "Pending", "received": 3000, "balance": 56600, "price": 59600}}
+    rep = Report(cfg, "fri", T("2026-10-30 12:00"))
+    st = {l["lead_id"]: s for l, s in rep.rows}
+    assert st["a"]["status"] == "enrolled" and st["a"]["value"] == 3000 and st["c"]["value"] == 56600
+    assert rep.collected(rep.rows) == 58000            # every rupee the sheet records, booking fees included, as the MIS counts it
+    # a student listed under a wrong number is still found by a name only one student has
+    cfg["pool"]["students"]["9999999999"] = cfg["pool"]["students"].pop("0000000002")
+    assert Report(cfg, "fri", T("2026-10-30 12:00")).collected(rep.rows) == 58000
+    sheet_only, lsq_only, _, _ = rep.gaps
+    assert [l["lead_id"] for l, _ in sheet_only] == ["b"] and [l["lead_id"] for l, _ in lsq_only] == ["a"]
+    doc = rep.html()
+    assert "Moved and paid for a different course" in doc and "missing from the pool sheet" not in doc
+    assert "Received (pool sheet)" in doc and "(est.)" not in doc and "balance due on each open lead" in doc

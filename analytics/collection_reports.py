@@ -26,7 +26,7 @@ from datetime import datetime
 
 from analytics.collection_cycle import SILENT_DAYS, WINDOW_HOURS, cycle_leads, silent_since, state
 from analytics.collection_scorecard import load
-from analytics.collections.pool_mis import load_mis, refresh_pool
+from analytics.collections.pool_mis import load_mis, load_students, refresh_pool
 from integrations.gsheets import download_xlsx, sheet_id
 from integrations.timeutil import IST, now_utc, utc
 
@@ -37,6 +37,7 @@ INK = {"enrolled": "#fff", "hot": "#fff", "warm": "#1d1d1b", "cold": "#1d1d1b", 
 LABEL = {"enrolled": "Enrolled", "hot": "Hot", "warm": "Warm", "cold": "Cold", "notreached": "DNP/No real conversation", "dropped": "Dropped"}
 ORDER = ["enrolled", "hot", "warm", "cold", "notreached", "dropped"]
 GRADED = {"hot", "warm", "cold", "notreached"}
+RECOVERED = ("Collected", "Instalments")  # the pool sheet's own status groups that count as recovered
 DIALER_SHARE = 0.5  # CLAUDE.md: 50%+ of dials ending in CallFailure is a dialer issue
 # a lead is listed as at risk of dropping only for one of these reasons (the user's rule, 10 Nov 2026); silence and
 # DNP stay on the lead's row
@@ -62,6 +63,10 @@ def row(lead: dict, cut: datetime, judged: dict | None, pool: dict, fee: int) ->
     p = price(pool, lead)
     r = {**s, "called": bool(s["first_dial"]), "cb": (0, 0), "intent": "—", "nxt": "—", "risk": "", "followup": "", "outcome": "",
          "value": (p - fee) if p else 0}
+    if "students" in pool:  # the sheet's own money for this student: received so far, and the balance still due
+        stu = student_of(pool["students"], lead)
+        r |= {"sheet": stu, "received": stu["received"] if stu else 0.0,
+              "value": (stu["received"] if s["enrolled"] else stu["balance"]) if stu else r["value"]}
     if s["enrolled"]:
         j = judged or {}
         return {**r, "status": "enrolled", "why": f"Enrolled {when(s['enrolled_at'], '%a %d %b')}",
@@ -134,6 +139,8 @@ def sheet_gaps(rows, pool: dict, cut: datetime) -> tuple[list, list, list, list[
     Returns (sheet enrolled but open in LSQ, enrolled in LSQ but not in the sheet, sheet entries matched by name only
     (number differs), bootcamps checked). A list newer than the cut-off is not used: its later enrolments would look
     like gaps."""
+    if "students" in pool:
+        return student_gaps(rows, pool)
     as_of = pool.get("lists_as_of")
     if not as_of or cut.date().isoformat() < as_of:
         return [], [], [], []
@@ -158,6 +165,40 @@ def sheet_gaps(rows, pool: dict, cut: datetime) -> tuple[list, list, list, list[
                 sheet_only.append(hit)
         lsq_only += [(l, s) for l, s in team if s["status"] == "enrolled" and l["lead_id"] not in seen]
     return sheet_only, lsq_only, by_name, checked
+
+
+def student_of(students: dict, lead: dict) -> dict | None:
+    """The lead's pool-sheet row: by phone, else by a name only one student has (the sheet sometimes has a wrong number)."""
+    stu = students.get(digits10(lead["phone"]))
+    if stu:
+        return stu
+    name = (lead.get("name") or "").strip().lower()
+    hits = [v for v in students.values() if name and (v["name"] or "").strip().lower() == name]
+    return hits[0] if len(hits) == 1 else None
+
+
+def student_gaps(rows, pool: dict) -> tuple[list, list, list, list[str]]:
+    """The same four lists, from every student row of the pool sheet: each lead's sheet status is shown on the gaps page,
+    so a lead the sheet lists under another status ("Moved and paid for a different course") is not called missing."""
+    students = pool["students"]
+    by_name = {}
+    for ph, v in students.items():
+        by_name.setdefault((v["name"] or "").strip().lower(), []).append(ph)
+    sheet_only, lsq_only, name_only = [], [], []
+    for l, s in rows:
+        stu = students.get(digits10(l["phone"]))
+        if not stu:
+            hits = by_name.get((l["name"] or "").strip().lower()) or []
+            if len(hits) == 1:
+                stu = students[hits[0]]
+                name_only.append((l, s, hits[0]))
+        recovered = bool(stu and stu["outcome"] in RECOVERED)
+        s["sheet_status"] = stu["status"] if stu else "not in the pool sheet"
+        if recovered and s["status"] != "enrolled":
+            sheet_only.append((l, s))
+        elif s["status"] == "enrolled" and not recovered:
+            lsq_only.append((l, s))
+    return sheet_only, lsq_only, name_only, sorted(pool["bootcamps"])
 
 
 def counts(rows) -> dict:
@@ -299,7 +340,10 @@ class Report:
     BAR_ROW, BAR_LABEL = 18, 190
 
     def collected(self, x) -> float:
-        """Money column of the callers table: the estimated value of enrolled leads."""
+        """Money column of the callers table: what the pool sheet records as received from these leads (booking fees
+        included, as the MIS counts it), or, without the sheet's students, the estimated value of enrolled leads."""
+        if "students" in self.cfg["pool"]:
+            return sum(s.get("received", 0) for _, s in x)
         return sum(s["value"] for _, s in x if s["status"] == "enrolled")
 
     def __init__(self, cfg: dict, kind: str, cut: datetime):
@@ -310,6 +354,8 @@ class Report:
         self.latest = max(l["wk"] for l, _ in self.rows)
         self.org = org(self.rows)
         self.wk_label = {l["wk"]: l["wk_label"] for l, _ in self.rows}
+        if "students" in cfg["pool"]:
+            self.VALUE_HEAD = "Received (pool sheet)"
         self.gaps = sheet_gaps(self.rows, cfg["pool"], cut)
         self.data_to = min([cut] + [read_at(w["data_dir"]) for w in cfg["weekends"]])
         for _, s in self.gaps[0]:
@@ -339,7 +385,9 @@ class Report:
              ("Not called yet", len(not_called), f"{over} past the 12-hour window"),
              ("Hot leads", c["hot"], f'{c["warm"]} warm · {c["cold"]} cold · {c["notreached"]} DNP/No real conversation'),
              ("Enrolled", f'{c["enrolled"]} ({pct(c["enrolled"], n)}%)', f'{c["dropped"]} dropped · target {self.cfg["target"]}%+'),
-             ("Collected (pool MIS)", lakh(mis), f'{mis_n} leads, MIS {pool["as_of"]} · {lakh(sum(s["value"] for _, s in open_))} still open')]
+             ("Collected (pool MIS)", lakh(mis), f'{mis_n} leads recovered, MIS {pool["as_of"]}'
+              + (f' · incl. {lakh(sum(v["received"] for v in pool["students"].values() if v["outcome"] not in RECOVERED))} booking fees on '
+                 'pending and dropped leads' if "students" in pool else "") + f' · {lakh(sum(s["value"] for _, s in open_))} still open')]
         alert = {"Not called yet": bool(not_called), "Enrolled": c["enrolled"] < self.cfg["target"] / 100 * n}
         return '<div class="tiles">' + "".join(
             f'<div class="tile{" alert" if alert.get(k) else ""}"><span>{e(k)}</span><b>{e(v)}</b><span>{e(sub)}</span></div>' for k, v, sub in t) + "</div>"
@@ -527,8 +575,9 @@ class Report:
                     f'<td class="n">{lakh(mis)}</td>'
                     f'<td class="n">{lakh(sum(s["value"] for _, s in self.rows if s["status"] not in ("enrolled", "dropped")))}</td></tr>')
         mis_n = sum(b["recovered"] for b in pool["bootcamps"].values())
-        note = f'<p class="muted">{self.reconcile(short=True)} Still open = course price (pool sheet, by day) minus the ₹{self.cfg["fee"]:,} booking fee for each ' \
-               'open lead.</p>'
+        note = f'<p class="muted">{self.reconcile(short=True)} ' + (
+            "Still open = the pool sheet’s balance due on each open lead.</p>" if "students" in pool else
+            f'Still open = course price (pool sheet, by day) minus the ₹{self.cfg["fee"]:,} booking fee for each open lead.</p>')
         # Wednesday's hot leads
         H = ['<table><tr><th style="width:3%">#</th><th style="width:10.5%">Number</th><th style="width:9%">Lead</th><th style="width:9%">Caller</th>'
              '<th style="width:12%">Bootcamp · day</th><th style="width:18%">Wednesday: hot because</th><th style="width:8%">Called at promised time?</th>'
@@ -591,7 +640,10 @@ class Report:
         sheet_only, lsq_only, by_name, checked = self.gaps
         out = ['<div class="brk">' + self.header("pool sheet vs LeadSquared — gaps to fix"),
                f'<p>{self.reconcile()}</p>']
-        if not checked:
+        if "students" in self.cfg["pool"]:
+            out.append(f'<p class="muted">Checked lead by lead against every student row of the pool sheet (Mastersheet, downloaded '
+                       f'{e(self.cfg["pool"].get("read_at_ist", ""))} IST), matched by phone, then name.</p>')
+        elif not checked:
             out.append('<p class="muted">Lead by lead check not done: no enrolled list from the pool sheet dated on or after this report. '
                        'Share the list (name and number per bootcamp) to see which leads differ.</p>')
         else:
@@ -599,20 +651,23 @@ class Report:
             out.append(f'<p class="muted">Checked lead by lead against the pool sheet’s enrolled list of {e(self.cfg["pool"]["lists_as_of"])} for: '
                        f'{e(", ".join(checked))}.' + (f' No list for: {e(", ".join(unchecked))}.' if unchecked else "") + "</p>")
 
+        if checked or "students" in self.cfg["pool"]:
             def table(title, x, fix):
                 if not x:
                     return f"<h2>{title} (0)</h2><p>None.</p>"
                 H = [f"<h2>{title} ({len(x)})</h2><table><tr><th style=\"width:3%\">#</th><th style=\"width:11%\">Number</th><th style=\"width:12%\">Lead</th>"
-                     '<th style="width:16%">Caller (TL)</th><th style="width:15%">Bootcamp · day</th><th style="width:15%">LSQ stage now</th><th>Fix</th></tr>']
+                     '<th style="width:15%">Caller (TL)</th><th style="width:14%">Bootcamp · day</th><th style="width:12%">LSQ stage now</th>'
+                     '<th style="width:13%">Pool sheet status</th><th>Fix</th></tr>']
                 for i, (l, s) in enumerate(sorted(x, key=lambda t: (t[0]["tl"], t[0]["caller"])), 1):
                     H.append(f'<tr><td>{i}</td><td class="ph">{e(l["phone"])}</td><td>{e(l["name"])}</td><td>{e(l["caller"])} ({e(l["tl"])})</td>'
-                             f'<td>{e(bootcamp_label(l))}</td><td>{e(s["stage"] or l["stage_now"])}</td><td>{fix}</td></tr>')
+                             f'<td>{e(bootcamp_label(l))}</td><td>{e(s["stage"] or l["stage_now"])}</td><td>{e(s.get("sheet_status", "—"))}</td><td>{fix}</td></tr>')
                 return "".join(H) + "</table>"
             out.append(table("Enrolled in the pool sheet, still open in LeadSquared", sheet_only,
                              "Confirm the payment; caller to move the LSQ stage to Collections done / Course Enrolled. "
                              "Until then this report counts the lead as open."))
-            out.append(table("Enrolled in LeadSquared, missing from the pool sheet", lsq_only,
-                             "Check the payment; add the lead to the pool sheet, or correct the LSQ stage."))
+            out.append(table("Enrolled in LeadSquared, not recovered in the pool sheet", lsq_only,
+                             "Check the payment against the sheet’s status (add the lead to the sheet if it is not there), then correct "
+                             "the sheet or the LSQ stage."))
             if by_name:
                 out.append("<h2>Matched by name only — number differs in the sheet</h2><ul>" + "".join(
                     f'<li>{e(l["name"])}: LSQ <span class="ph">{e(l["phone"])}</span>, sheet <span class="ph">{e(ph)}</span> — correct the sheet.</li>'
@@ -630,10 +685,17 @@ objection or no date. <b>Cold</b>: "not now" or a deferral with no date, or unan
 did not pick up for 7 days despite 2+ dials a day (unless it asked us to wait for a date, such as an exam result). A lead we failed to dial
 (dialer failures) keeps its grade; the failure shows in the act box. <b>At risk of dropping</b>: asked to cancel or for a refund, said it
 won't continue, deferred to a later batch with no date, or has no payment route left. <b>DNP/No real conversation</b>: no real conversation (answered, 2 min+) so far — the lead did not pick up, or every call was under 2 minutes. <b>Enrolled</b>: LeadSquared stage
-Course Enrolled or Collections done, or Loan pending saved as "loan done" / "loan process done". <b>Enrolled value (est.)</b>: course price from the pool sheet minus the booking fee, for each enrolled
-lead — an estimate; LeadSquared holds no paid amount for these leads, so actual money is the pool sheet MIS total. Hot / warm / cold and the
+Course Enrolled or Collections done, or Loan pending saved as "loan done" / "loan process done". {self.money_def()} Hot / warm / cold and the
 reasons were read from each lead's LeadSquared notes and Salesa call transcripts; transcripts have no speaker labels, so check the call
 recording before quoting a lead.</div>"""
+
+    def money_def(self) -> str:
+        if "students" in self.cfg["pool"]:
+            return ("<b>Received (pool sheet)</b>: the money the pool sheet records as received from the caller’s leads, booking fees "
+                    "included — the same basis as the MIS “Recovered amount”, which counts the ₹3,000 booking fees of pending and dropped "
+                    "leads too. <b>Still open</b>: the sheet’s balance due on leads still open in LeadSquared.")
+        return ("<b>Enrolled value (est.)</b>: course price from the pool sheet minus the booking fee, for each enrolled lead — an estimate; "
+                "LeadSquared holds no paid amount for these leads, so actual money is the pool sheet MIS total.")
 
     def pages(self) -> list[str]:
         if self.kind == "wed":
@@ -662,6 +724,12 @@ def refresh_from_sheet(cfg: dict, folder: str) -> list[str]:
     tab, as_of, mis = load_mis(path, cfg["month"])
     notes = refresh_pool(cfg["pool"], mis, as_of, cfg["side"])
     cfg["pool"]["read_at_ist"] = read_at
+    try:
+        cfg["pool"]["students"] = load_students(path, cfg["month"], cfg["side"])
+        notes.append(f'{len(cfg["pool"]["students"])} students of {cfg["month"]} on this side in the Mastersheet')
+    except ValueError as exc:  # no usable Mastersheet: money falls back to the estimate, and the PDF says so
+        cfg["pool"].pop("students", None)
+        notes.append(f"Mastersheet not read ({exc}); per-lead money is estimated")
     return [f"Pool sheet downloaded {read_at} IST; MIS tab '{tab}' of {as_of or 'no date'}"] + notes
 
 
