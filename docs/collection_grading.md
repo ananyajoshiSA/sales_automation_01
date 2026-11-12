@@ -4,6 +4,12 @@ Give this brief to each reader who grades leads for `analytics/collection_report
 or `analytics/community_reports.py`. Readers are Claude itself reading each lead's timeline: no model API, no keyword
 rules. Rules agreed with the user up to 10 Nov 2026.
 
+**What each timeline must carry (the user's rule, 12 Nov 2026):** every LeadSquared Note (the Notes tab, fetched with
+`scripts/fetch_lead_notes.py`) and every LeadSquared comment — stage-change comments, disposition notes with their
+call-back times, Zipteams / Salesa / Converse notes and the lead's comment fields (Last Remark, Follow-up comments) —
+next to every call and its transcript. Do not add the Bootcamp Pool sheet's comment columns (L1, L2, audit): the
+sheet is used for money and enrolled lists only.
+
 Each lead paid a booking fee (₹3,000 for a bootcamp, ₹999–₹3,000 for a community programme). The collection team is
 collecting the balance: one shot, card EMI, a loan through a finance partner (Bajaj, Eduvanz, Shopse, Credence, Propelld,
 Fibe, paper finance) or instalments. You read each lead's timeline and grade **the lead** as of the cut-off.
