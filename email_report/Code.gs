@@ -582,6 +582,196 @@ function whatsappAfterEmail_(files, listName) {
   }
 }
 
+// ------------------------------------------------------------------ team chat saves (Drive)
+
+/*
+ * A chat's working files (its scripts, lead snapshots and readings) live on a cloud machine that is replaced when the
+ * chat sits idle, and everything on it is lost. scripts/state_sync.py saves them here at the end of every run and
+ * loads them back at the start of the next (docs/state_sync.md). Saves never send email and never count toward
+ * MAX_SENDS_PER_DAY.
+ *
+ * Off until the Script Property STATE_SAVES is on. Each team has a folder inside one PRIVATE Drive folder,
+ * "Team chat saves (private)", never shared with anyone. A save is a bundle sent in parts; it can be loaded only once
+ * every part has arrived and checked out (its manifest is written last). The newest STATE_KEEP saves (default 7) are
+ * kept per team; older ones, and parts of a save that never finished, go to the Drive bin.
+ *   STATE_SAVES  off (default) | on
+ *   STATE_KEEP   optional, 1 to 30, default 7
+ */
+
+var STATE_ROOT = 'Team chat saves (private)';
+var STATE_TEAM = /^[a-z0-9_]{1,40}$/;
+var STATE_VERSION = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+var STATE_MAX_PART = 10 * 1024 * 1024;
+var STATE_MAX_PARTS = 100;
+var STATE_STALE_MS = 24 * 3600 * 1000;
+
+/** {keep} when saves are on; throws a plain reason when they are off or a setting is wrong. */
+function stateConfig_() {
+  var p = PropertiesService.getScriptProperties().getProperties();
+  var on = String(p.STATE_SAVES || 'off').trim().toLowerCase();
+  if (on !== 'on') throw new Error('team chat saves are off: set the Script Property STATE_SAVES to on');
+  var keep = p.STATE_KEEP ? Number(p.STATE_KEEP) : 7;
+  if (!(keep >= 1 && keep <= 30 && keep % 1 === 0)) throw new Error('STATE_KEEP must be a whole number from 1 to 30');
+  return {keep: keep};
+}
+
+/** The private root folder, made on first use and never shared. */
+function stateRoot_() {
+  var store = PropertiesService.getUserProperties();
+  var id = store.getProperty('state:root'), root = null;
+  if (id) {
+    try { root = DriveApp.getFolderById(id); } catch (e) { root = null; }
+    if (root && root.isTrashed()) root = null;
+  }
+  if (!root) {
+    root = DriveApp.createFolder(STATE_ROOT);
+    store.setProperty('state:root', root.getId());
+  }
+  try { root.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE); } catch (e) { /* new folders are private already */ }
+  return root;
+}
+
+function stateTeam_(team) {
+  var root = stateRoot_();
+  var it = root.getFoldersByName(team);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) return f;
+  }
+  return root.createFolder(team);
+}
+
+/** A folder's files, leaving out any in the Drive bin (DriveApp still lists those as children). */
+function stateFiles_(folder) {
+  var out = [], it = folder.getFiles();
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) out.push(f);
+  }
+  return out;
+}
+
+/** Every file of that name in the folder, outside the bin. */
+function stateNamed_(folder, name) {
+  var out = [], it = folder.getFilesByName(name);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) out.push(f);
+  }
+  return out;
+}
+
+function partName_(version, i) {
+  return version + '.part' + ('00' + i).slice(-3);
+}
+
+/** Every finished save of a team, newest first: the manifests. */
+function stateManifests_(folder) {
+  return stateFiles_(folder).filter(function (f) { return /\.manifest\.json$/.test(f.getName()); })
+    .map(function (f) { return JSON.parse(f.getBlob().getDataAsString()); })
+    .sort(function (a, b) { return a.version < b.version ? 1 : a.version > b.version ? -1 : 0; });
+}
+
+/** Keeps the newest `keep` finished saves; bins older ones and parts of saves that never finished within a day. */
+function statePrune_(folder, keep) {
+  var kept = {};
+  stateManifests_(folder).slice(0, keep).forEach(function (m) { kept[m.version] = true; });
+  var now = new Date().getTime(), binned = 0;
+  stateFiles_(folder).forEach(function (f) {
+    var version = f.getName().split('.')[0];
+    if (kept[version]) return;
+    var finished = /\.manifest\.json$/.test(f.getName());
+    if (!finished && now - f.getDateCreated().getTime() < STATE_STALE_MS && !stateHasManifest_(folder, version)) return;  // a save still arriving
+    f.setTrashed(true);
+    binned++;
+  });
+  return binned;
+}
+
+function stateHasManifest_(folder, version) {
+  return stateNamed_(folder, version + '.manifest.json').length > 0;
+}
+
+/** state_put: one part of a save. state_commit: every part arrived, so write the manifest. state_list: finished saves.
+ * state_get: a finished save's manifest (no part) or one part's bytes. Returns the reply object. */
+function stateAction_(req) {
+  var cfg = stateConfig_();
+  var team = String(req.team || '');
+  if (!STATE_TEAM.test(team)) return {ok: false, status: 'bad_request', detail: 'team must use only lower-case letters, digits and _'};
+  var version = req.version === undefined || req.version === null || req.version === '' ? '' : String(req.version);
+  if (version && !STATE_VERSION.test(version)) return {ok: false, status: 'bad_request', detail: 'version is not a save name'};
+  var folder = stateTeam_(team);
+
+  if (req.action === 'state_list') {
+    return {ok: true, status: 'listed', saves: stateManifests_(folder)};
+  }
+
+  if (req.action === 'state_get') {
+    var all = stateManifests_(folder);
+    var m = version ? all.filter(function (x) { return x.version === version; })[0] : all[0];
+    if (!m) return {ok: false, status: 'not_found', detail: version ? 'no finished save ' + version + ' for ' + team : 'no finished save for ' + team};
+    if (req.part === undefined || req.part === null) return {ok: true, status: 'found', manifest: m};
+    var i = Number(req.part);
+    if (!(i >= 0 && i < m.parts && i % 1 === 0)) return {ok: false, status: 'bad_request', detail: 'part must be 0 to ' + (m.parts - 1)};
+    var stored = stateNamed_(folder, partName_(m.version, i))[0];
+    if (!stored) return {ok: false, status: 'not_found', detail: 'part ' + i + ' of ' + m.version + ' is missing from Drive'};
+    var bytes = stored.getBlob().getBytes();
+    return {ok: true, status: 'found', version: m.version, part: i, sha256: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)),
+            content_b64: Utilities.base64Encode(bytes)};
+  }
+
+  if (!version) return {ok: false, status: 'bad_request', detail: 'version is required'};
+  var parts = Number(req.parts);
+  if (!(parts >= 1 && parts <= STATE_MAX_PARTS && parts % 1 === 0)) {
+    return {ok: false, status: 'bad_request', detail: 'parts must be a whole number from 1 to ' + STATE_MAX_PARTS};
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (stateHasManifest_(folder, version)) return {ok: false, status: 'bad_request', detail: 'save ' + version + ' is already finished'};
+
+    if (req.action === 'state_put') {
+      var n = Number(req.part);
+      if (!(n >= 0 && n < parts && n % 1 === 0)) return {ok: false, status: 'bad_request', detail: 'part must be 0 to ' + (parts - 1)};
+      var data = Utilities.base64Decode(String(req.content_b64 || ''));
+      if (!data.length) return {ok: false, status: 'rejected', detail: 'part ' + n + ' is empty'};
+      if (data.length > STATE_MAX_PART) return {ok: false, status: 'rejected', detail: 'part ' + n + ' is over 10 MB'};
+      var sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, data));
+      if (String(req.sha256 || '').toLowerCase() !== sha) {
+        return {ok: false, status: 'rejected', detail: 'part ' + n + ': checksum mismatch, the upload arrived incomplete'};
+      }
+      var name = partName_(version, n);
+      stateNamed_(folder, name).forEach(function (f) { f.setTrashed(true); });  // a retried part replaces the earlier copy
+      folder.createFile(Utilities.newBlob(data, 'application/octet-stream', name)).setDescription(sha);
+      return {ok: true, status: 'stored', part: n};
+    }
+
+    if (req.action === 'state_commit') {
+      var shas = Array.isArray(req.part_sha256) ? req.part_sha256.map(String) : [];
+      if (shas.length !== parts) return {ok: false, status: 'bad_request', detail: 'part_sha256 must list ' + parts + ' checksums'};
+      var size = 0;
+      for (var k = 0; k < parts; k++) {
+        var file = stateNamed_(folder, partName_(version, k))[0];
+        if (!file) return {ok: false, status: 'incomplete', detail: 'part ' + k + ' of ' + parts + ' never arrived'};
+        if (file.getDescription() !== shas[k].toLowerCase()) {
+          return {ok: false, status: 'incomplete', detail: 'part ' + k + ' in Drive does not match what was sent'};
+        }
+        size += file.getSize();
+      }
+      var manifest = {version: version, team: team, parts: parts, size: size, sha256: String(req.sha256 || '').toLowerCase(),
+                      part_sha256: shas.map(function (x) { return x.toLowerCase(); }), saved_at: nowIst_('yyyy-MM-dd HH:mm') + ' IST',
+                      label: String(req.label || '').slice(0, 200), files: Number(req.files) || 0};
+      folder.createFile(Utilities.newBlob(JSON.stringify(manifest), 'application/json', version + '.manifest.json'));
+      var binned = statePrune_(folder, cfg.keep);
+      console.log('state save ' + team + ' ' + version + ': ' + parts + ' part(s), ' + size + ' bytes; binned ' + binned + ' old file(s)');
+      return {ok: true, status: 'saved', manifest: manifest, kept: Math.min(cfg.keep, stateManifests_(folder).length)};
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  return {ok: false, status: 'bad_request', detail: 'unknown save action'};
+}
+
 // ------------------------------------------------------------------ web app
 
 function reply_(obj) {
@@ -589,7 +779,8 @@ function reply_(obj) {
 }
 
 /** action "check": what would happen, sends nothing. action "send": email one file (file_name, content_b64,
- * sha256) or several in one email (files: a list of those three). Either may name a recipient list (list). */
+ * sha256) or several in one email (files: a list of those three). Either may name a recipient list (list).
+ * Actions state_put, state_commit, state_list and state_get save and load a team chat's files (stateAction_). */
 function doPost(e) {
   var req;
   try {
@@ -613,7 +804,8 @@ function doPost(e) {
       if (w.mode !== 'off') out.whatsapp = {mode: w.mode, numbers: name && w.lists[name] ? w.lists[name].length : 0, problem: w.problem};
       return reply_(out);
     }
-    if (req.action !== 'send') return reply_({ok: false, status: 'bad_request', detail: 'action must be check or send'});
+    if (/^state_(put|commit|list|get)$/.test(String(req.action))) return reply_(stateAction_(req));
+    if (req.action !== 'send') return reply_({ok: false, status: 'bad_request', detail: 'action must be check, send or a state_ action'});
     var list = Array.isArray(req.files) ? req.files : [req];
     var uploads = list.map(function (f) {
       f = f && typeof f === 'object' ? f : {};
@@ -738,6 +930,29 @@ function sendWhatsAppDemo(list) {
             sha: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes))};
   });
   console.log('WhatsApp demo: ' + whatsappSend_(w, files, w.lists[name], name));
+}
+
+/** Says whether team chat saves are on, shows that their folder is private, and lists each team's saves. Changes nothing. */
+function checkStateSaves() {
+  var lines = [];
+  try {
+    var cfg = stateConfig_();
+    var root = stateRoot_();
+    var sharing = '';
+    try { sharing = String(root.getSharingAccess()); } catch (e) { sharing = 'unknown'; }
+    lines.push('Team chat saves: ON, keeping the newest ' + cfg.keep + ' per team', 'Folder: ' + STATE_ROOT + ' (sharing: ' + sharing + ')');
+    var it = root.getFolders();
+    while (it.hasNext()) {
+      var f = it.next();
+      if (f.isTrashed()) continue;
+      var saves = stateManifests_(f);
+      lines.push(f.getName() + ': ' + (saves.length ? saves.length + ' save(s), newest ' + saves[0].saved_at + ', ' +
+                 Math.round(saves[0].size / 1024 / 1024 * 10) / 10 + ' MB' : 'no finished save'));
+    }
+  } catch (e) {
+    lines.push(String(e && e.message || e));
+  }
+  console.log(lines.join('\n'));
 }
 
 /** Lists every file this script has emailed, newest first. */
