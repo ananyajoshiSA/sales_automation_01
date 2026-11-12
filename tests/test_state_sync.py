@@ -3,6 +3,7 @@ import hashlib
 import io
 import json
 import os
+import re
 import shutil
 import tarfile
 
@@ -77,6 +78,7 @@ def mailer(monkeypatch, tmp_path):
     monkeypatch.setenv("REPORT_EMAIL_URL", URL)
     monkeypatch.setenv("REPORT_EMAIL_TOKEN", TOKEN)
     monkeypatch.setattr(ss, "WAITS", (0, 0, 0))
+    monkeypatch.setattr(ss, "MARKERS", str(tmp_path / "home" / ".cache" / "state_sync"))
     monkeypatch.chdir(tmp_path)
     fake = FakeMailer()
     with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
@@ -109,6 +111,7 @@ def test_save_then_test_load_brings_back_every_working_file_and_no_secrets(maile
     paths, files, never = work(tmp_path)
     r = ss.save("deepanshi", paths, label="12 Nov run")
     assert (r["files"], r["parts"], r["kept"]) == (4, 1, 1)
+    assert re.fullmatch(r"\d{8}T\d{6}Z-[0-9a-f]{8}", r["version"])  # the mailer's own rule for save names
     assert mailer.calls == ["state_put", "state_commit", "state_list"]
     out = ss.load("deepanshi", into=str(tmp_path / "spare"))
     assert out["version"] == r["version"] and out["files"] == 4
@@ -119,29 +122,66 @@ def test_save_then_test_load_brings_back_every_working_file_and_no_secrets(maile
     assert not (tmp_path / "spare" / rel(tmp_path / "scratchpad" / "link")).exists()
 
 
+def wipe(tmp_path, paths):
+    """The machine is replaced: the scratchpad comes back empty, data/ and this machine's notes not at all."""
+    for p in paths:
+        shutil.rmtree(p)
+    os.makedirs(paths[0])
+    shutil.rmtree(tmp_path / "home", ignore_errors=True)
+
+
 def test_after_a_reset_load_puts_files_back_where_they_were(mailer, tmp_path):
     paths, files, _ = work(tmp_path)
     ss.save("sana", paths)
-    for p in paths:  # the machine is replaced: the scratchpad comes back empty, data/ not at all
-        shutil.rmtree(p)
-    os.makedirs(paths[0])
+    wipe(tmp_path, paths)
     out = ss.load("sana")
-    assert out["paths"] == paths
+    assert out["paths"] == paths and out["kept_as_is"] == []
     for p, b in files.items():
         assert p.read_bytes() == b
 
 
-def test_load_never_mixes_into_a_folder_with_files_unless_told(mailer, tmp_path):
+def test_with_no_wipe_the_daily_load_leaves_everything_as_it_is(mailer, tmp_path, capsys):
     paths, files, _ = work(tmp_path)
     ss.save("darshan", paths)
     build = next(p for p in files if p.name == "build.py")
     build.write_bytes(b"newer\n")
     (build.parent / "extra.py").write_bytes(b"made after the save")
-    with pytest.raises(ss.SyncError, match="already has files"):
-        ss.load("darshan")
+    before = len(mailer.calls)
+    assert ss.main(["load", "darshan"]) == 0
+    assert "already here, left as is (no wipe)" in capsys.readouterr().out
+    assert mailer.calls[before:] == []  # nothing even downloaded
+    assert build.read_bytes() == b"newer\n" and (build.parent / "extra.py").exists()
+
+
+def test_only_missing_folders_come_back_and_nothing_here_is_overwritten(mailer, tmp_path):
+    paths, files, _ = work(tmp_path)
+    ss.save("inayat", paths)
+    shutil.rmtree(paths[1])  # data/ gone, the scratchpad still here with a newer file
+    build = next(p for p in files if p.name == "build.py")
+    build.write_bytes(b"newer\n")
+    out = ss.load("inayat")
+    assert out["paths"] == [paths[1]] and out["kept_as_is"] == [paths[0]]
     assert build.read_bytes() == b"newer\n"
-    ss.load("darshan", replace=True)
+    snap = next(p for p in files if p.name == "snap_merged_1112.json")
+    assert snap.read_bytes() == files[snap]
+
+
+def test_replace_writes_saved_files_over_same_names_and_deletes_nothing(mailer, tmp_path):
+    paths, files, _ = work(tmp_path)
+    ss.save("women_ai", paths)
+    build = next(p for p in files if p.name == "build.py")
+    build.write_bytes(b"newer\n")
+    (build.parent / "extra.py").write_bytes(b"made after the save")
+    ss.load("women_ai", replace=True)
     assert build.read_bytes() == files[build] and (build.parent / "extra.py").exists()
+
+
+def test_a_test_load_needs_an_empty_spare_folder(mailer, tmp_path):
+    paths, _, _ = work(tmp_path)
+    ss.save("sana", paths)
+    ss.load("sana", into=str(tmp_path / "spare"))
+    with pytest.raises(ss.SyncError, match="empty spare folder"):
+        ss.load("sana", into=str(tmp_path / "spare"))
 
 
 def test_big_saves_go_in_parts_and_a_damaged_part_loads_nothing(mailer, tmp_path, monkeypatch):

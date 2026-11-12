@@ -8,8 +8,10 @@ folder "Team chat saves (private)". Saves never email anyone.
 
 Each folder is saved under its full path and comes back to the same path, which is the same on a new machine
 (the session keeps its scratchpad path). .git, virtual environments, caches and .env files are never saved.
-Loading refuses to write into a folder that already has files unless told --replace (which writes over files of
-the same name and leaves the rest alone), so a load can never quietly mix two days' work.
+A load never deletes or overwrites anything: a saved folder that is still here with its files (no wipe) is left
+exactly as it is, and only folders that are missing or empty are brought back. So the same load command is safe to
+run at the start of every run, wiped or not. --replace writes saved files over files of the same name (other files
+are left alone); --into DIR loads everything under a spare folder, for a test.
 
 Standalone on purpose (standard library plus requests, nothing from this repo), so a chat on any branch can run
 main's copy without switching or merging:
@@ -54,6 +56,7 @@ MAX_PARTS = 100
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".mypy_cache"}
 SKIP_FILE = re.compile(r"^\.env(\..+)?$|\.py[co]$")  # secrets never leave the machine
 INDEX = ".state_sync.json"  # inside each bundle: which paths it holds
+MARKERS = os.path.join(os.path.expanduser("~"), ".cache", "state_sync")  # which paths this machine saved or loaded; gone after a wipe
 WAITS = (5, 15, 45)  # seconds between tries when Google is slow or answers with an error page
 NO_SAVE = 2
 
@@ -172,7 +175,9 @@ def save(team: str, paths: list[str], label: str = "", session: requests.Session
             raise SyncError(f"{p} is too broad: name the working folders")
     url, token = settings()
     start = time.time()
-    version = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%SZ") + "-" + secrets.token_hex(4)
+    now = datetime.now(timezone.utc)
+    # name sorts by time, down to the microsecond, so the newest save is always the one loaded
+    version = now.strftime("%Y%m%dT%H%M%SZ") + f"-{now.microsecond:05x}" + secrets.token_hex(2)[:3]
     with tempfile.TemporaryFile() as tmp:
         files = bundle(paths, tmp)
         size = tmp.tell()
@@ -197,11 +202,26 @@ def save(team: str, paths: list[str], label: str = "", session: requests.Session
             need(answer, "finishing the save", ("saved",))
     listed = need(call(url, {"token": token, "action": "state_list", "team": team}, "checking the save", session),
                   "checking the save", ("listed",))
-    newest = (listed.get("saves") or [{}])[0]
-    if newest.get("version") != version or newest.get("sha256") != whole.hexdigest():
-        raise SyncError("the save did not show up as the newest in Drive; run save again")
+    newest = next((x for x in listed.get("saves", []) if x.get("version") == version), {})
+    if newest.get("sha256") != whole.hexdigest():
+        raise SyncError("the save did not show up in Drive; run save again")
+    _remember(team, paths)
     return {"version": version, "files": files, "size": size, "parts": parts, "seconds": round(time.time() - start),
             "saved_at": newest.get("saved_at", ""), "kept": len(listed["saves"])}
+
+
+def _remember(team: str, paths: list[str]) -> None:
+    """Notes on this machine which folders the team's save holds, so a later load can tell nothing was wiped."""
+    os.makedirs(MARKERS, exist_ok=True)
+    with open(os.path.join(MARKERS, f"{team}.json"), "w", encoding="utf-8") as f:
+        json.dump({"paths": paths}, f)
+
+
+def _remembered(team: str) -> list[str]:
+    try:
+        return json.load(open(os.path.join(MARKERS, f"{team}.json"), encoding="utf-8"))["paths"]
+    except (OSError, ValueError, KeyError):
+        return []
 
 
 # ------------------------------------------------------------------ load
@@ -227,6 +247,9 @@ def load(team: str, version: str = "", into: str = "", replace: bool = False, se
     session = session or requests.Session()
     url, token = settings()
     start = time.time()
+    known = _remembered(team)
+    if known and not (into or replace or version) and all(_has_files(p) for p in known):
+        return {"version": "", "saved_at": "", "size": 0, "files": 0, "paths": [], "kept_as_is": known, "seconds": 0}
     got = call(url, {"token": token, "action": "state_get", "team": team, **({"version": version} if version else {})},
                "finding the save", session)
     if got.get("status") == "not_found":
@@ -250,16 +273,22 @@ def load(team: str, version: str = "", into: str = "", replace: bool = False, se
             members = _safe_members(tar)
             index = json.loads(tar.extractfile(INDEX).read()) if INDEX in tar.getnames() else {"paths": []}
             dest = os.path.abspath(into) if into else "/"
-            targets = [os.path.join(dest, p.lstrip("/")) for p in index["paths"]]
-            busy = [t for t in targets if _has_files(t)]
-            if busy and not replace:
-                raise SyncError(f"{busy[0]} already has files; load into a spare folder with --into DIR, or overwrite with --replace")
+            targets = {p: os.path.join(dest, p.lstrip("/")) for p in index["paths"]}
+            busy = [t for t in targets.values() if _has_files(t)]
+            if into and busy and not replace:
+                raise SyncError(f"{busy[0]} already has files; pick an empty spare folder for a test load")
+            # A folder still here with its files was not wiped: leave it exactly as it is unless told --replace.
+            wanted = [p for p, t in targets.items() if replace or not _has_files(t)]
+            under = lambda name: any(name == w.lstrip("/") or name.startswith(w.lstrip("/").rstrip("/") + "/") for w in wanted)
+            keep = [m for m in members if m.name != INDEX and under(m.name)]
             os.makedirs(dest, exist_ok=True)
-            keep = [m for m in members if m.name != INDEX]
             kwargs = {"filter": "data"} if hasattr(tarfile, "data_filter") else {}
             tar.extractall(dest, members=keep, **kwargs)
+    if not into:
+        _remember(team, index["paths"])
     return {"version": manifest["version"], "saved_at": manifest.get("saved_at", ""), "size": manifest["size"],
-            "files": sum(1 for m in keep if m.isfile()), "paths": targets, "seconds": round(time.time() - start)}
+            "files": sum(1 for m in keep if m.isfile()), "paths": [targets[p] for p in wanted],
+            "kept_as_is": [t for p, t in targets.items() if p not in wanted], "seconds": round(time.time() - start)}
 
 
 def saves(team: str, session: requests.Session | None = None) -> list[dict]:
@@ -278,11 +307,11 @@ def main(argv: list[str]) -> int:
     s.add_argument("team")
     s.add_argument("paths", nargs="+")
     s.add_argument("--label", default="")
-    lo = sub.add_parser("load", help="bring the newest save back to where it came from")
+    lo = sub.add_parser("load", help="bring back saved folders that are missing or empty; folders still here are left as they are")
     lo.add_argument("team")
     lo.add_argument("--version", default="")
     lo.add_argument("--into", default="", help="load under this folder instead, e.g. for a test load")
-    lo.add_argument("--replace", action="store_true", help="write over files of the same name; other files are left alone")
+    lo.add_argument("--replace", action="store_true", help="also write saved files over files of the same name that are still here; nothing is deleted")
     li = sub.add_parser("list", help="the team's saves, newest first")
     li.add_argument("team")
     a = ap.parse_args(argv)
@@ -296,8 +325,11 @@ def main(argv: list[str]) -> int:
                   f"save {r['version']} at {r['saved_at']}; {r['kept']} save(s) kept")
         elif a.cmd == "load":
             r = load(a.team, a.version, a.into, a.replace)
-            print(f"loaded {a.team}: save {r['version']} from {r['saved_at']}, {r['files']:,} files, {mb(r['size'])}, "
-                  f"{r['seconds']} s, into {', '.join(r['paths']) or '(no paths)'}")
+            if r["paths"]:
+                print(f"loaded {a.team}: save {r['version']} from {r['saved_at']}, {r['files']:,} files, {mb(r['size'])}, "
+                      f"{r['seconds']} s, into {', '.join(r['paths'])}")
+            if r["kept_as_is"]:
+                print(f"{a.team}: already here, left as is (no wipe): {', '.join(r['kept_as_is'])}")
         else:
             rows = saves(a.team)
             print("\n".join(f"{x['saved_at']}  {x['version']}  {mb(x['size'])}  {x.get('files', 0):,} files  {x.get('label', '')}"
