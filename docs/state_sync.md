@@ -24,7 +24,8 @@ state_sync.py load deepanshi           ◄── state_get (manifest, then parts
   unlike the `Sales reports` archive (which the whole company domain can view).
 - **Whole or nothing:** a save can be loaded only once every part has arrived and matched its checksum. A load
   checks every part and the whole bundle before it writes a single file.
-- **Kept:** the newest 7 saves per team (`STATE_KEEP`); older ones go to the Drive bin.
+- **Kept:** the newest 7 saves per team (`STATE_KEEP`, up to 30); older ones go to the Drive bin, where Google keeps
+  them 30 more days. Each save is a full copy, so the newest one holds every file the chat still has.
 - **Never saved:** `.git`, virtual environments, caches and `.env` files. Lead data goes only to the private
   folder; nothing goes to GitHub.
 - **Never emails:** saves don't send anything and don't count toward `MAX_SENDS_PER_DAY`.
@@ -57,8 +58,11 @@ Team names are lower case with `_`: `deepanshi`, `sana`, `darshan`, `inayat`, `w
 | 2 | `STOP:` no finished save for this team | stop and tell the person; never build from nothing |
 | 1 | `FAILED:` with the reason (mailer down, saves off, a damaged part, a folder already has files) | stop and tell the person |
 
-A load refuses to write into a folder that already has files (so two days' work never mix). On a fresh machine the
-folders are empty. `--replace` writes over files of the same name and leaves other files alone.
+**Nothing is ever deleted or overwritten.** Saving only reads the folders. Loading brings back only saved folders
+that are missing or empty (a wipe); a folder that is still here with its files is left exactly as it is, and when the
+machine wasn't wiped at all the load downloads nothing. So the same load command is safe at the start of every run.
+`--replace` also writes saved files over files of the same name (other files stay); `--into DIR` is for a test load
+into an empty spare folder.
 
 ## Setup (once)
 
