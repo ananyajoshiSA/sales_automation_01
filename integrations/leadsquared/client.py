@@ -423,7 +423,8 @@ class LeadSquaredClient:
                 return
             page += 1
 
-    def iter_notes_since(self, since: datetime, page_size: int = 1000) -> Iterator[dict]:
+    def iter_notes_since(self, since: datetime, page_size: int = 1000, timeout_retries: int = 4,
+                         retry_wait: float = 10) -> Iterator[dict]:
         """Every lead Note (the Notes tab, not an activity) created at or after ``since``, newest first, each once.
 
         ``LeadManagement.svc/RetrieveNote`` ignores lead and date filters (checked 11 Nov 2026: LeadId,
@@ -433,8 +434,15 @@ class LeadSquaredClient:
         """
         since, seen, page = since.astimezone(timezone.utc), set(), 1
         while True:
-            batch = (self.request("POST", "LeadManagement.svc/RetrieveNote",
-                                  json={"Parameter": {}, "Paging": {"PageIndex": page, "PageSize": page_size}}) or {}).get("List") or []
+            for attempt in range(timeout_retries + 1):
+                try:
+                    batch = (self.request("POST", "LeadManagement.svc/RetrieveNote",
+                                          json={"Parameter": {}, "Paging": {"PageIndex": page, "PageSize": page_size}}) or {}).get("List") or []
+                    break
+                except LeadSquaredError as exc:  # deep pages sometimes outrun the 30 s timeout when the account is busy
+                    if "timed out" not in str(exc) or attempt == timeout_retries:
+                        raise
+                    time.sleep(retry_wait * (attempt + 1))
             for n in batch:
                 t = utc(n.get("CreatedOn"))
                 if t and t < since:

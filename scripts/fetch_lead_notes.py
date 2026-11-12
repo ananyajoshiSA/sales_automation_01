@@ -35,7 +35,8 @@ def main(since: str, out_path: str, *id_files: str) -> int:
     start = datetime.strptime(since, "%Y-%m-%d").replace(tzinfo=IST)
     found, read = defaultdict(list), 0
     try:
-        for n in LeadSquaredClient().iter_notes_since(start):
+        # 1,000-note pages can take LeadSquared longer than the client's 30 s timeout (12 Nov 2026); 300 do not
+        for n in LeadSquaredClient().iter_notes_since(start, page_size=300):
             read += 1
             if n.get("RelatedProspectId") in wanted:
                 found[n["RelatedProspectId"]].append({"t": n.get("CreatedOn"), "by": n.get("CreatedByName") or "", "text": clean(n.get("Note"))})
