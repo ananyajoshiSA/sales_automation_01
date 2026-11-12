@@ -227,6 +227,8 @@ deployed, single files to `RECIPIENTS` still go out, and a set or a send to a li
 
 Team chat saves (12 Nov 2026) also need the new `Code.gs`, plus the Script Property `STATE_SAVES` = `on`; run
 `checkStateSaves` to confirm (docs/state_sync.md). Until then `state_sync.py` stops with "action must be check or send".
+Since the change of 12 Nov 2026 (evening) every save is kept forever and saves hold only new or changed files: `state_sync.py` from main stops
+with "the mailer is out of date" until the `Code.gs` from that change is deployed. `STATE_KEEP` is no longer read.
 
 ## When something goes wrong
 
