@@ -749,8 +749,8 @@ test('a retried part replaces the earlier copy', () => {
   assert.equal(Buffer.from(r.content_b64, 'base64').toString(), 'new');
 });
 
-test('the newest STATE_KEEP saves are kept; older ones and stale unfinished parts go to the bin', () => {
-  const run = load({ ...SAVES, STATE_KEEP: '3' });
+test('every finished save is kept forever; only stale unfinished parts go to the bin', () => {
+  const run = load({ ...SAVES, STATE_KEEP: '3' });  // no longer read
   const one = [Buffer.from('x')];
   putParts(run, 'inayat', version(90), one);  // unfinished and recent: still arriving, so kept
   putParts(run, 'inayat', version(91), one);  // unfinished and two days old: binned
@@ -759,11 +759,33 @@ test('the newest STATE_KEEP saves are kept; older ones and stale unfinished part
     putParts(run, 'inayat', version(n), one);
     assert.equal(commit(run, 'inayat', version(n), one).status, 'saved');
   }
-  const saves = run.post({ token: TOKEN, action: 'state_list', team: 'inayat' }).saves;
-  assert.deepEqual(saves.map((s) => s.version), [version(5), version(4), version(3)]);
-  assert.deepEqual(liveFiles(run).filter((n) => n.startsWith(version(1)) || n.startsWith(version(91))), []);
+  Object.values(run.drive).filter((x) => x.name.startsWith(version(1))).forEach((x) => { x.created = Date.now() - 9 * 86400000; });
+  putParts(run, 'inayat', version(6), one);
+  assert.equal(commit(run, 'inayat', version(6), one).kept, 6);
+  const listed = run.post({ token: TOKEN, action: 'state_list', team: 'inayat' });
+  assert.deepEqual(listed.saves.map((s) => s.version), [6, 5, 4, 3, 2, 1].map(version));
+  assert.equal(listed.total, 6);
+  assert.deepEqual(liveFiles(run).filter((n) => n.startsWith(version(1))), [`${version(1)}.manifest.json`, `${version(1)}.part000`]);
+  assert.deepEqual(liveFiles(run).filter((n) => n.startsWith(version(91))), []);
   assert.deepEqual(liveFiles(run).filter((n) => n.startsWith(version(90))), [`${version(90)}.part000`]);
-  assert.equal(load({ ...SAVES, STATE_KEEP: '40' }).post({ token: TOKEN, action: 'state_list', team: 'x' }).status, 'error');
+  const two = run.post({ token: TOKEN, action: 'state_list', team: 'inayat', limit: 2 });
+  assert.deepEqual([two.saves.length, two.total, two.versions], [2, 6, [6, 5, 4, 3, 2, 1].map(version)]);
+  assert.equal(run.post({ token: TOKEN, action: 'state_get', team: 'inayat', version: version(2) }).manifest.version, version(2));
+});
+
+test('a save of only new or changed files records its index size and change count', () => {
+  const run = load(SAVES);
+  const chunks = [Buffer.from('index+bundle')];
+  putParts(run, 'darshan', version(7), chunks);
+  const bad = commit(run, 'darshan', version(7), chunks, { format: 2, index_bytes: 99, changed: 1 });
+  assert.deepEqual([bad.status, /index_bytes/.test(bad.detail)], ['bad_request', true]);
+  const ok = commit(run, 'darshan', version(7), chunks, { format: 2, index_bytes: 5, changed: 1, full: true, files: 40 });
+  assert.equal(ok.status, 'saved');
+  assert.deepEqual([ok.manifest.format, ok.manifest.index_bytes, ok.manifest.changed, ok.manifest.full, ok.manifest.files], [2, 5, 1, true, 40]);
+  const old = [Buffer.from('old style')];
+  putParts(run, 'darshan', version(8), old);
+  const m = commit(run, 'darshan', version(8), old).manifest;
+  assert.equal(m.format, undefined);  // an old-style save is still accepted
 });
 
 test('editor helper: the saves check lists teams and changes nothing', () => {
@@ -773,7 +795,7 @@ test('editor helper: the saves check lists teams and changes nothing', () => {
   const before = liveFiles(run);
   run.gs.checkStateSaves();
   const log = run.logs.at(-1);
-  assert.match(log, /Team chat saves: ON, keeping the newest 7 per team/);
+  assert.match(log, /Team chat saves: ON, every save kept forever/);
   assert.match(log, /sharing: private/);
   assert.match(log, /sana: 1 save\(s\), newest \d{4}-\d\d-\d\d \d\d:\d\d IST/);
   assert.deepEqual(liveFiles(run), before);

@@ -592,10 +592,12 @@ function whatsappAfterEmail_(files, listName) {
  *
  * Off until the Script Property STATE_SAVES is on. Each team has a folder inside one PRIVATE Drive folder,
  * "Team chat saves (private)", never shared with anyone. A save is a bundle sent in parts; it can be loaded only once
- * every part has arrived and checked out (its manifest is written last). The newest STATE_KEEP saves (default 7) are
- * kept per team; older ones, and parts of a save that never finished, go to the Drive bin.
+ * every part has arrived and checked out (its manifest is written last). Since 12 Nov 2026 every finished save is kept
+ * forever (the owner's rule: Drive holds every file a chat ever made); a save holds only the files that are new or
+ * changed since the one before, plus the list of every file the chat had, so keeping them all stays affordable. Only
+ * parts of a save that never finished (left over a day) go to the Drive bin; they hold no file that a finished save
+ * needs. STATE_KEEP is no longer read.
  *   STATE_SAVES  off (default) | on
- *   STATE_KEEP   optional, 1 to 30, default 7
  */
 
 var STATE_ROOT = 'Team chat saves (private)';
@@ -605,14 +607,12 @@ var STATE_MAX_PART = 10 * 1024 * 1024;
 var STATE_MAX_PARTS = 100;
 var STATE_STALE_MS = 24 * 3600 * 1000;
 
-/** {keep} when saves are on; throws a plain reason when they are off or a setting is wrong. */
+/** Throws a plain reason when saves are off. */
 function stateConfig_() {
   var p = PropertiesService.getScriptProperties().getProperties();
   var on = String(p.STATE_SAVES || 'off').trim().toLowerCase();
   if (on !== 'on') throw new Error('team chat saves are off: set the Script Property STATE_SAVES to on');
-  var keep = p.STATE_KEEP ? Number(p.STATE_KEEP) : 7;
-  if (!(keep >= 1 && keep <= 30 && keep % 1 === 0)) throw new Error('STATE_KEEP must be a whole number from 1 to 30');
-  return {keep: keep};
+  return {};
 }
 
 /** The private root folder, made on first use and never shared. */
@@ -665,23 +665,31 @@ function partName_(version, i) {
   return version + '.part' + ('00' + i).slice(-3);
 }
 
-/** Every finished save of a team, newest first: the manifests. */
-function stateManifests_(folder) {
+/** The manifest files of a team's finished saves, newest first (a save's name starts with its UTC time). */
+function stateManifestFiles_(folder) {
   return stateFiles_(folder).filter(function (f) { return /\.manifest\.json$/.test(f.getName()); })
-    .map(function (f) { return JSON.parse(f.getBlob().getDataAsString()); })
-    .sort(function (a, b) { return a.version < b.version ? 1 : a.version > b.version ? -1 : 0; });
+    .sort(function (a, b) { return a.getName() < b.getName() ? 1 : a.getName() > b.getName() ? -1 : 0; });
 }
 
-/** Keeps the newest `keep` finished saves; bins older ones and parts of saves that never finished within a day. */
-function statePrune_(folder, keep) {
-  var kept = {};
-  stateManifests_(folder).slice(0, keep).forEach(function (m) { kept[m.version] = true; });
-  var now = new Date().getTime(), binned = 0;
-  stateFiles_(folder).forEach(function (f) {
+function readManifest_(f) {
+  return JSON.parse(f.getBlob().getDataAsString());
+}
+
+/** Finished saves, newest first; reads only the newest `limit` of them (all when no limit). */
+function stateManifests_(folder, limit) {
+  var files = stateManifestFiles_(folder);
+  return (limit ? files.slice(0, limit) : files).map(readManifest_);
+}
+
+/** Bins parts of saves that never finished within a day. A finished save is never touched: every one is kept. */
+function stateTidy_(folder) {
+  var now = new Date().getTime(), binned = 0, files = stateFiles_(folder), finished = {};
+  files.forEach(function (f) {
+    if (/\.manifest\.json$/.test(f.getName())) finished[f.getName().replace(/\.manifest\.json$/, '')] = true;
+  });
+  files.forEach(function (f) {
     var version = f.getName().split('.')[0];
-    if (kept[version]) return;
-    var finished = /\.manifest\.json$/.test(f.getName());
-    if (!finished && now - f.getDateCreated().getTime() < STATE_STALE_MS && !stateHasManifest_(folder, version)) return;  // a save still arriving
+    if (finished[version] || now - f.getDateCreated().getTime() < STATE_STALE_MS) return;
     f.setTrashed(true);
     binned++;
   });
@@ -695,7 +703,7 @@ function stateHasManifest_(folder, version) {
 /** state_put: one part of a save. state_commit: every part arrived, so write the manifest. state_list: finished saves.
  * state_get: a finished save's manifest (no part) or one part's bytes. Returns the reply object. */
 function stateAction_(req) {
-  var cfg = stateConfig_();
+  stateConfig_();
   var team = String(req.team || '');
   if (!STATE_TEAM.test(team)) return {ok: false, status: 'bad_request', detail: 'team must use only lower-case letters, digits and _'};
   var version = req.version === undefined || req.version === null || req.version === '' ? '' : String(req.version);
@@ -703,12 +711,15 @@ function stateAction_(req) {
   var folder = stateTeam_(team);
 
   if (req.action === 'state_list') {
-    return {ok: true, status: 'listed', saves: stateManifests_(folder)};
+    var names = stateManifestFiles_(folder);
+    var limit = Number(req.limit) >= 1 ? Math.min(Math.floor(Number(req.limit)), 1000) : 30;
+    return {ok: true, status: 'listed', total: names.length, saves: names.slice(0, limit).map(readManifest_),
+            versions: names.map(function (f) { return f.getName().replace(/\.manifest\.json$/, ''); })};
   }
 
   if (req.action === 'state_get') {
-    var all = stateManifests_(folder);
-    var m = version ? all.filter(function (x) { return x.version === version; })[0] : all[0];
+    var mf = version ? stateNamed_(folder, version + '.manifest.json')[0] : stateManifestFiles_(folder)[0];
+    var m = mf ? readManifest_(mf) : null;
     if (!m) return {ok: false, status: 'not_found', detail: version ? 'no finished save ' + version + ' for ' + team : 'no finished save for ' + team};
     if (req.part === undefined || req.part === null) return {ok: true, status: 'found', manifest: m};
     var i = Number(req.part);
@@ -761,10 +772,22 @@ function stateAction_(req) {
       var manifest = {version: version, team: team, parts: parts, size: size, sha256: String(req.sha256 || '').toLowerCase(),
                       part_sha256: shas.map(function (x) { return x.toLowerCase(); }), saved_at: nowIst_('yyyy-MM-dd HH:mm') + ' IST',
                       label: String(req.label || '').slice(0, 200), files: Number(req.files) || 0};
+      if (req.format !== undefined && req.format !== null) {  // a save that holds only new or changed files (format 2)
+        var ib = Number(req.index_bytes), changed = Number(req.changed);
+        if (Number(req.format) !== 2 || !(ib >= 1 && ib <= size && ib % 1 === 0) || !(changed >= 0 && changed % 1 === 0)) {
+          return {ok: false, status: 'bad_request', detail: 'format 2 needs index_bytes (1 to the save size) and changed'};
+        }
+        manifest.format = 2;
+        manifest.index_bytes = ib;
+        manifest.changed = changed;
+        manifest.full = req.full === true;
+      }
       folder.createFile(Utilities.newBlob(JSON.stringify(manifest), 'application/json', version + '.manifest.json'));
-      var binned = statePrune_(folder, cfg.keep);
-      console.log('state save ' + team + ' ' + version + ': ' + parts + ' part(s), ' + size + ' bytes; binned ' + binned + ' old file(s)');
-      return {ok: true, status: 'saved', manifest: manifest, kept: Math.min(cfg.keep, stateManifests_(folder).length)};
+      var binned = stateTidy_(folder);
+      var total = stateManifestFiles_(folder).length;
+      console.log('state save ' + team + ' ' + version + ': ' + parts + ' part(s), ' + size + ' bytes; ' + total +
+                  ' save(s) kept; binned ' + binned + ' unfinished part(s)');
+      return {ok: true, status: 'saved', manifest: manifest, kept: total};
     }
   } finally {
     lock.releaseLock();
@@ -936,18 +959,19 @@ function sendWhatsAppDemo(list) {
 function checkStateSaves() {
   var lines = [];
   try {
-    var cfg = stateConfig_();
+    stateConfig_();
     var root = stateRoot_();
     var sharing = '';
     try { sharing = String(root.getSharingAccess()); } catch (e) { sharing = 'unknown'; }
-    lines.push('Team chat saves: ON, keeping the newest ' + cfg.keep + ' per team', 'Folder: ' + STATE_ROOT + ' (sharing: ' + sharing + ')');
+    lines.push('Team chat saves: ON, every save kept forever', 'Folder: ' + STATE_ROOT + ' (sharing: ' + sharing + ')');
     var it = root.getFolders();
     while (it.hasNext()) {
       var f = it.next();
       if (f.isTrashed()) continue;
-      var saves = stateManifests_(f);
-      lines.push(f.getName() + ': ' + (saves.length ? saves.length + ' save(s), newest ' + saves[0].saved_at + ', ' +
-                 Math.round(saves[0].size / 1024 / 1024 * 10) / 10 + ' MB' : 'no finished save'));
+      var files = stateManifestFiles_(f);
+      var newest = files.length ? readManifest_(files[0]) : null;
+      lines.push(f.getName() + ': ' + (newest ? files.length + ' save(s), newest ' + newest.saved_at + ', ' +
+                 Math.round(newest.size / 1024 / 1024 * 10) / 10 + ' MB' : 'no finished save'));
     }
   } catch (e) {
     lines.push(String(e && e.message || e));
