@@ -1,0 +1,230 @@
+import base64
+import hashlib
+import io
+import json
+import os
+import shutil
+import tarfile
+
+import pytest
+import responses
+
+from scripts import state_sync as ss
+
+URL = "https://script.google.com/macros/s/AKfy-abc_123/exec"
+TOKEN = "t" * 40
+
+
+class FakeMailer:
+    """The mailer's save actions (email_report/Code.gs) kept in memory: parts, then a manifest once all arrived."""
+
+    def __init__(self, on=True):
+        self.on, self.parts, self.manifests, self.calls = on, {}, {}, []
+        self.fail_next = []  # tries answered with an HTML error page instead, in order
+        self.lose = ""  # an action whose work is done but whose answer never arrives, once
+
+    def __call__(self, request):
+        body = json.loads(request.body)
+        self.calls.append(body["action"])
+        if self.fail_next:
+            self.fail_next.pop(0)
+            return 404, {}, "<html>Sorry, unable to open the file at this time.</html>"
+        answer = self.handle(body)
+        if body["action"] == self.lose:
+            self.lose = ""
+            return 500, {}, "<html>error</html>"
+        return 200, {}, json.dumps(answer)
+
+    def handle(self, b):
+        if b["token"] != TOKEN:
+            return {"ok": False, "status": "unauthorized"}
+        if not self.on:
+            return {"ok": False, "status": "error", "detail": "team chat saves are off: set the Script Property STATE_SAVES to on"}
+        team, version, act = b["team"], b.get("version", ""), b["action"]
+        mine = sorted((m for m in self.manifests.values() if m["team"] == team), key=lambda m: m["version"], reverse=True)
+        if act == "state_list":
+            return {"ok": True, "status": "listed", "saves": mine}
+        if act == "state_get":
+            m = next((x for x in mine if x["version"] == version), None) if version else (mine[0] if mine else None)
+            if not m:
+                return {"ok": False, "status": "not_found", "detail": "no finished save"}
+            if "part" not in b:
+                return {"ok": True, "status": "found", "manifest": m}
+            data = self.parts[(team, m["version"], b["part"])]
+            return {"ok": True, "status": "found", "sha256": hashlib.sha256(data).hexdigest(),
+                    "content_b64": base64.b64encode(data).decode()}
+        if act == "state_put":
+            data = base64.b64decode(b["content_b64"])
+            assert hashlib.sha256(data).hexdigest() == b["sha256"]
+            self.parts[(team, version, b["part"])] = data
+            return {"ok": True, "status": "stored", "part": b["part"]}
+        if act == "state_commit":
+            if (team, version) in {(m["team"], m["version"]) for m in self.manifests.values()}:
+                return {"ok": False, "status": "bad_request", "detail": f"save {version} is already finished"}
+            for i in range(b["parts"]):
+                if (team, version, i) not in self.parts:
+                    return {"ok": False, "status": "incomplete", "detail": f"part {i} never arrived"}
+            m = {"version": version, "team": team, "parts": b["parts"], "sha256": b["sha256"], "part_sha256": b["part_sha256"],
+                 "size": sum(len(self.parts[(team, version, i)]) for i in range(b["parts"])), "saved_at": "2026-11-12 14:05 IST",
+                 "label": b.get("label", ""), "files": b.get("files", 0)}
+            self.manifests[(team, version)] = m
+            return {"ok": True, "status": "saved", "manifest": m}
+        return {"ok": False, "status": "bad_request"}
+
+
+@pytest.fixture
+def mailer(monkeypatch, tmp_path):
+    monkeypatch.setenv("REPORT_EMAIL_URL", URL)
+    monkeypatch.setenv("REPORT_EMAIL_TOKEN", TOKEN)
+    monkeypatch.setattr(ss, "WAITS", (0, 0, 0))
+    monkeypatch.chdir(tmp_path)
+    fake = FakeMailer()
+    with responses.RequestsMock(assert_all_requests_are_fired=False) as rsps:
+        rsps.add_callback(responses.POST, URL, callback=fake)
+        yield fake
+
+
+def work(tmp_path):
+    """A chat's scratchpad and the repo's data/ folder, with things that must never be saved."""
+    scratch, data = tmp_path / "scratchpad", tmp_path / "repo" / "data"
+    files = {scratch / "plan" / "data" / "build.py": b"print('build')\n",
+             scratch / "plan" / "data" / "not_on_team.json": b'["Someone"]',
+             scratch / "plan" / "exports" / "top50.xlsx": b"PK\x03\x04 workbook",
+             data / "snap_merged_1112.json": json.dumps({"leads": list(range(2000))}).encode()}
+    never = [scratch / "plan" / ".env", scratch / "plan" / ".git" / "config", scratch / ".venv" / "lib" / "x.py",
+             scratch / "plan" / "__pycache__" / "build.cpython-313.pyc", scratch / "pv" / "pyvenv.cfg", scratch / "pv" / "lib" / "fitz.py",
+             data / ".env.local"]
+    for p, b in list(files.items()) + [(n, b"SECRET=1") for n in never]:
+        p.parent.mkdir(parents=True, exist_ok=True)
+        p.write_bytes(b)
+    (scratch / "link").symlink_to("/etc/hostname")
+    return [str(scratch), str(data)], files, never
+
+
+def rel(p):
+    return str(p).lstrip("/")
+
+
+def test_save_then_test_load_brings_back_every_working_file_and_no_secrets(mailer, tmp_path):
+    paths, files, never = work(tmp_path)
+    r = ss.save("deepanshi", paths, label="12 Nov run")
+    assert (r["files"], r["parts"], r["kept"]) == (4, 1, 1)
+    assert mailer.calls == ["state_put", "state_commit", "state_list"]
+    out = ss.load("deepanshi", into=str(tmp_path / "spare"))
+    assert out["version"] == r["version"] and out["files"] == 4
+    for p, b in files.items():
+        assert (tmp_path / "spare" / rel(p)).read_bytes() == b
+    for p in never:
+        assert not (tmp_path / "spare" / rel(p)).exists()
+    assert not (tmp_path / "spare" / rel(tmp_path / "scratchpad" / "link")).exists()
+
+
+def test_after_a_reset_load_puts_files_back_where_they_were(mailer, tmp_path):
+    paths, files, _ = work(tmp_path)
+    ss.save("sana", paths)
+    for p in paths:  # the machine is replaced: the scratchpad comes back empty, data/ not at all
+        shutil.rmtree(p)
+    os.makedirs(paths[0])
+    out = ss.load("sana")
+    assert out["paths"] == paths
+    for p, b in files.items():
+        assert p.read_bytes() == b
+
+
+def test_load_never_mixes_into_a_folder_with_files_unless_told(mailer, tmp_path):
+    paths, files, _ = work(tmp_path)
+    ss.save("darshan", paths)
+    build = next(p for p in files if p.name == "build.py")
+    build.write_bytes(b"newer\n")
+    (build.parent / "extra.py").write_bytes(b"made after the save")
+    with pytest.raises(ss.SyncError, match="already has files"):
+        ss.load("darshan")
+    assert build.read_bytes() == b"newer\n"
+    ss.load("darshan", replace=True)
+    assert build.read_bytes() == files[build] and (build.parent / "extra.py").exists()
+
+
+def test_big_saves_go_in_parts_and_a_damaged_part_loads_nothing(mailer, tmp_path, monkeypatch):
+    monkeypatch.setattr(ss, "PART_BYTES", 1024)
+    paths, files, _ = work(tmp_path)
+    big = tmp_path / "repo" / "data" / "noise.bin"
+    big.write_bytes(os.urandom(5000))
+    r = ss.save("inayat", paths)
+    assert r["parts"] >= 5 and mailer.calls.count("state_put") == r["parts"]
+    out = ss.load("inayat", into=str(tmp_path / "a"))
+    assert (tmp_path / "a" / rel(big)).read_bytes() == big.read_bytes() and out["files"] == 5
+    key = next(k for k in mailer.parts if k[2] == 1)
+    mailer.parts[key] = b"damaged" + mailer.parts[key][7:]
+    with pytest.raises(ss.SyncError, match="part 2 of .* arrived damaged"):
+        ss.load("inayat", into=str(tmp_path / "b"))
+    assert not (tmp_path / "b").exists()
+
+
+def test_no_save_yet_stops_the_run_with_its_own_exit_status(mailer, capsys):
+    assert ss.main(["load", "women_ai"]) == ss.NO_SAVE
+    assert "STOP: no finished save for women_ai" in capsys.readouterr().err
+    assert ss.main(["list", "women_ai"]) == 0
+    assert "no finished save" in capsys.readouterr().out
+
+
+def test_saves_switched_off_or_bad_input_fail_plainly(mailer, tmp_path, capsys):
+    mailer.on = False
+    paths, _, _ = work(tmp_path)
+    assert ss.main(["save", "sana", *paths]) == 1
+    assert "STATE_SAVES to on" in capsys.readouterr().err
+    assert ss.main(["save", "Sana", *paths]) == 1
+    assert ss.main(["save", "sana", str(tmp_path / "missing")]) == 1
+    assert "does not exist" in capsys.readouterr().err
+    with pytest.raises(ss.SyncError, match="too broad"):
+        ss.save("sana", ["/"])
+
+
+def test_google_error_pages_are_retried_and_a_lost_commit_answer_is_recovered(mailer, tmp_path, capsys):
+    paths, _, _ = work(tmp_path)
+    mailer.fail_next = ["page", "page"]  # the first part's first two tries
+    assert ss.main(["save", "sana", *paths, "--label", "evening"]) == 0
+    assert "saved sana: 4 files" in capsys.readouterr().out
+    mailer.lose = "state_commit"  # the save finishes in Drive but its answer is lost; the retry hears "already finished"
+    r = ss.save("sana", paths)
+    assert ss.saves("sana")[0]["version"] == r["version"] and len(ss.saves("sana")) == 2
+
+
+def test_the_mailer_never_answering_is_an_error_not_a_hang(mailer, tmp_path):
+    paths, _, _ = work(tmp_path)
+    mailer.fail_next = ["page"] * 4
+    with pytest.raises(ss.SyncError, match="did not answer after 4 tries"):
+        ss.save("sana", paths)
+
+
+def test_unsafe_entries_in_a_save_are_refused():
+    buf = io.BytesIO()
+    with tarfile.open(fileobj=buf, mode="w:gz") as tar:
+        info = tarfile.TarInfo("../outside.txt")
+        info.size = 1
+        tar.addfile(info, io.BytesIO(b"x"))
+    buf.seek(0)
+    with tarfile.open(fileobj=buf, mode="r:gz") as tar, pytest.raises(ss.SyncError, match="unsafe entry"):
+        ss._safe_members(tar)
+
+
+def test_settings_come_from_the_environment_or_a_dotenv_above(monkeypatch, tmp_path):
+    monkeypatch.delenv("REPORT_EMAIL_URL", raising=False)
+    monkeypatch.delenv("REPORT_EMAIL_TOKEN", raising=False)
+    (tmp_path / ".env").write_text(f"REPORT_EMAIL_URL={URL}\nexport REPORT_EMAIL_TOKEN='{TOKEN}'\n")
+    deep = tmp_path / "a" / "b"
+    deep.mkdir(parents=True)
+    monkeypatch.chdir(deep)
+    assert ss.settings() == (URL, TOKEN)
+    (tmp_path / ".env").write_text("REPORT_EMAIL_URL=https://example.com/exec\n")
+    with pytest.raises(ss.SyncError, match="REPORT_EMAIL_URL"):
+        ss.settings()
+
+
+def test_runs_standalone_from_main_with_nothing_from_this_repo():
+    """A chat on any branch runs main's copy through stdin, so the script may import nothing from the repo."""
+    import ast
+
+    tree = ast.parse(open(ss.__file__, encoding="utf-8").read())
+    imported = {a.name.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.Import) for a in n.names}
+    imported |= {n.module.split(".")[0] for n in ast.walk(tree) if isinstance(n, ast.ImportFrom) and n.module}
+    assert not imported & {"integrations", "analytics", "scripts"}
