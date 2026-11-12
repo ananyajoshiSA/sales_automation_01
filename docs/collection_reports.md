@@ -149,6 +149,10 @@ lsq_read_at, sheet_read_at.
   in LSQ, and one sheet number is wrong (11 digits). Both now show on the gaps page.
 - **Mayur, Wednesday check 4 Nov 2026 (both November weekends, 128 leads):** built from the live pool sheet;
   63 open leads graded.
+- **Wednesday checks for 11 Nov 2026, run Thu 12 Nov (LeadSquared read 12:39 IST, so the cut-off is that time):**
+  data in `data/wed11/`; graded with lead Notes and the 10 Nov rules (silent week, narrow drop risk). The Friday review
+  compares against this cut-off (`wed_cut` in `data/wed11/cfg_*.json`). No bootcamp after 31 Oct had a collection tag
+  in LeadSquared or rows in the pool sheet's November tab yet.
 - **Friday reviews 6 Nov 2026 (both teams, both November weekends):** LeadSquared read again into new folders
   (`data/fri_w1`, `data/fri_w2`) so Wednesday's copy stays; Wednesday's judgements copied in and Friday's added under
   the Friday date (open leads graded, dropped leads' reasons, Wednesday-hot follow-up). The transcript service refused
