@@ -32,9 +32,10 @@ state_sync.py load deepanshi           ◄── state_get (manifest, then parts
 - **Kept forever:** no save is ever deleted. Only parts of a save that never finished (left over a day) go to the
   Drive bin. `STATE_KEEP` is no longer read.
 - **What a load restores:** every file the chat had at its last save (files the chat deleted before that save stay in
-  Drive but don't come back). When a restore would read more than 30 earlier saves, the next save uploads everything
-  again, which keeps a restore quick. The first save after an old-style save (one bundle, the first format) also uploads
-  everything once.
+  Drive but don't come back). A restore reads every earlier save that holds a file it needs, so files already in
+  Drive are never uploaded again (no monthly full copies): the data a run paid to fetch comes back from Drive, never
+  from the APIs. Only a team's first save, and the first save after an old-style save (one bundle, the first format),
+  upload everything.
 - **Never saved:** `.git`, virtual environments, caches and `.env` files. Lead data goes only to the private
   folder; nothing goes to GitHub.
 - **Never emails:** saves don't send anything and don't count toward `MAX_SENDS_PER_DAY`.
@@ -101,8 +102,11 @@ Replace `<team>` with `deepanshi`, `sana`, `darshan`, `inayat` or `women_ai`:
 - Work done after the last save is lost; a reset in the middle of a run restarts that run from the last save.
 - If Google Drive or Apps Script is down, a daily Google quota is reached, or the mailer's Drive is full, the run
   stops and says so. Nothing already saved is lost.
-- One save is at most 100 parts of 8 MB (about 800 MB compressed). A full save (the first one, or after 30 saves)
-  must fit; raw LeadSquared pulls a run can fetch again can be left out if a team grows near that.
+- One save is at most 100 parts of 8 MB (about 800 MB compressed). Only a team's first save holds everything; later
+  saves hold one run's new or changed files (tens of MB).
+- A restore after a wipe reads one more save for every day that added files, so it slows slowly over months (an
+  estimated 15 to 30 minutes after a year). If one saved part is ever damaged, the load stops before writing anything
+  and says which save.
 - Drive grows by every new or changed file. The mailer's Google account needs room for it: check
   drive.google.com/settings/storage.
 - Tests: `.venv/bin/python -m pytest tests/test_state_sync.py` and `node --test email_report/code.test.mjs`

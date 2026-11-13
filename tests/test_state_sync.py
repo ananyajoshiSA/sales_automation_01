@@ -340,19 +340,22 @@ def test_the_file_list_is_kept_on_the_machine_and_read_from_drive_after_a_wipe(m
     assert mailer.calls[before:].count("state_get") >= 2 and r["changed"] == 0  # list read from Drive; nothing new to send
 
 
-def test_a_long_chain_of_saves_starts_over_with_everything(mailer, tmp_path, monkeypatch):
-    monkeypatch.setattr(ss, "MAX_CHAIN", 2)
+def test_later_saves_never_upload_files_already_in_drive_however_many_saves(mailer, tmp_path):
     paths, files, _ = work(tmp_path)
     build = next(p for p in files if p.name == "build.py")
     assert ss.save("women_ai", paths)["full"]
-    build.write_bytes(b"v2\n")
-    assert not ss.save("women_ai", paths)["full"]
-    team = next(p for p in files if p.name == "not_on_team.json")
-    team.write_bytes(b"[]")
-    r = ss.save("women_ai", paths)  # a restore would now read three saves
-    assert r["full"] and r["changed"] == 4
+    for i in range(40):  # more saves than the old 30-save limit that forced a full copy
+        build.write_bytes(f"v{i}\n".encode())
+        os.utime(build, ns=(10**18 + i, 10**18 + i))  # a new time even on a coarse clock
+        r = ss.save("women_ai", paths)
+        assert not r["full"] and r["changed"] == 1
+    extra = tmp_path / "repo" / "data" / "day41.json"
+    extra.write_bytes(b"{}")
+    assert ss.save("women_ai", paths)["changed"] == 1
     wipe(tmp_path, paths)
-    assert ss.load("women_ai")["saves_read"] == 1 and build.read_bytes() == b"v2\n" and team.read_bytes() == b"[]"
+    out = ss.load("women_ai")
+    assert out["saves_read"] == 3 and out["files"] == 5  # first save, the last build.py save, the day41 save
+    assert build.read_bytes() == b"v39\n" and extra.read_bytes() == b"{}"
 
 
 def test_a_save_after_an_old_style_bundle_sends_everything_and_old_bundles_still_load(mailer, tmp_path):

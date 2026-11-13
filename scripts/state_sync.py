@@ -8,9 +8,10 @@ kept forever. Saves never email anyone.
 
 A save uploads only the files that are new or changed since the team's last save, plus an index of every file the
 chat has (path, size, time, checksum, and which save holds its bytes). So Drive keeps every version of every file
-ever saved, and a load can rebuild the folders exactly as they were at any save. When restoring would need more
-than MAX_CHAIN earlier saves, the next save uploads everything again, which keeps a restore quick. A save after an
-old-style save (one bundle of everything, the first format) also uploads everything once.
+ever saved, and a load can rebuild the folders exactly as they were at any save. Files already in Drive are never
+uploaded again: a restore reads each earlier save that holds a file it needs, so data a run paid to fetch is fetched
+from Drive, not from the APIs, after a wipe. Only the first save, and a save after an old-style save (one bundle of
+everything, the first format), upload everything.
 
 Each folder is saved under its full path and comes back to the same path, which is the same on a new machine
 (the session keeps its scratchpad path). .git, virtual environments, caches and .env files are never saved.
@@ -64,7 +65,6 @@ MAX_PARTS = 100
 SKIP_DIRS = {".git", ".venv", "venv", "__pycache__", "node_modules", ".pytest_cache", ".mypy_cache"}
 SKIP_FILE = re.compile(r"^\.env(\..+)?$|\.py[co]$")  # secrets never leave the machine
 INDEX = ".state_sync.json"  # inside an old-style bundle: which paths it holds
-MAX_CHAIN = 30  # a restore may read at most this many saves; past that the next save uploads everything again
 # --as-of dates are IST days. This script can't import integrations/timeutil.py (it runs alone from main on any
 # branch), so it keeps its own copy of the offset under another name; it is used only for --as-of.
 AS_OF_ZONE = timezone(timedelta(hours=5, minutes=30))
@@ -253,9 +253,8 @@ def save(team: str, paths: list[str], label: str = "", session: requests.Session
             continue
         files[full] = [size, mtime, sha, version]
         changed.append(full)
-    chain = {f[3] for f in files.values()} | {version}
-    full_save = prev is None or len(chain) > MAX_CHAIN
-    if full_save:  # first save, a save after an old-style bundle, or a restore that would read too many saves
+    full_save = prev is None
+    if full_save:  # the first save, or a save after an old-style bundle
         for f in files.values():
             f[3] = version
         changed = list(files)
