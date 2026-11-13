@@ -149,6 +149,8 @@ lsq_read_at, sheet_read_at.
   in LSQ, and one sheet number is wrong (11 digits). Both now show on the gaps page.
 - **Mayur, Wednesday check 4 Nov 2026 (both November weekends, 128 leads):** built from the live pool sheet;
   63 open leads graded.
+- **Community checks 13 Nov 2026 (October and November bookings; LeadSquared read 19:11 IST):** data in
+  `data/comm13/`; graded with every LSQ Note and comment and the lead comment fields. Mayur 251 leads, Anmol 160.
 - **Friday reviews 13 Nov 2026 (LeadSquared read 18:14 IST):** data in `data/fri13/`, compared with the Wednesday
   check of Thu 12 Nov 12:39; graded with every LSQ Note and comment and the lead comment fields; money and gaps from
   every pool sheet student row.
