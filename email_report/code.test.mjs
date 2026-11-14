@@ -51,7 +51,9 @@ function drive({ domainFails = false, createFails = false, linkFails = false, cl
   const access = { ANYONE_WITH_LINK: 'anyone', DOMAIN: 'domain', PRIVATE: 'private' };
   const item = (props) => {
     const id = `id${++n}`;
-    const it = { id, sharing: 'private', ...props, getId: () => id,
+    const it = { id, sharing: 'private', trashed: false, created: Date.now(), ...props, getId: () => id,
+      isTrashed: () => it.trashed, setTrashed(v) { it.trashed = v; return it; }, getName: () => it.name,
+      getSharingAccess: () => it.sharing, getDateCreated: () => new Date(it.created),
       setSharing(a) {
         if (a === 'domain' && domainFails) throw new Error('Invalid argument: domain');
         if (a === 'anyone' && linkFails) throw new Error('Access denied: DriveApp.');
@@ -68,7 +70,22 @@ function drive({ domainFails = false, createFails = false, linkFails = false, cl
       const found = Object.values(items).filter((x) => x.kind === 'folder' && x.parent === f && x.name === child);
       return { hasNext: () => found.length > 0, next: () => found.shift() };
     };
-    f.createFile = (blob) => { if (createFails) throw new Error('Drive is full'); return item({ name: blob.name, parent: f, kind: 'file', blob }); };
+    const children = (kind) => Object.values(items).filter((x) => x.kind === kind && x.parent === f);
+    const iter = (list) => ({ hasNext: () => list.length > 0, next: () => list.shift() });
+    f.getFiles = () => iter(children('file'));
+    f.getFilesByName = (child) => iter(children('file').filter((x) => x.name === child));
+    f.getFolders = () => iter(children('folder'));
+    f.createFile = (blob) => {
+      if (createFails) throw new Error('Drive is full');
+      const file = item({ name: blob.name, parent: f, kind: 'file', blob, description: '' });
+      Object.assign(file, {
+        getBlob: () => ({ getBytes: () => signed(blob.bytes), getDataAsString: () => blob.bytes.toString('utf8') }),
+        getSize: () => blob.bytes.length,
+        getDescription: () => file.description,
+        setDescription(d) { file.description = d; return file; },
+      });
+      return file;
+    };
     f.path = () => (parent ? `${parent.path()}/${name}` : name);
     return f;
   };
@@ -125,8 +142,10 @@ function load(settings = {}, { mailFails = 0, driveOpts = {}, watiOpts = {} } = 
       formatDate, getUuid: randomUUID, DigestAlgorithm: { SHA_256: 'sha256' },
       computeDigest: (_, bytes) => signed(createHash('sha256').update(unsigned(bytes)).digest()),
       base64Decode: (s) => signed(Buffer.from(s, 'base64')),
+      base64Encode: (bytes) => unsigned(bytes).toString('base64'),
       newBlob: (bytes, mime, name) => (typeof bytes === 'string'
-        ? { getAs: () => ({ getBytes: () => signed(Buffer.from(`%PDF-1.4\n${bytes}`)) }), getBytes: () => signed(Buffer.from(bytes)) }
+        ? { getAs: () => ({ getBytes: () => signed(Buffer.from(`%PDF-1.4\n${bytes}`)) }), getBytes: () => signed(Buffer.from(bytes)),
+            bytes: Buffer.from(bytes), mime, name }
         : { bytes: unsigned(bytes), mime, name }),
     },
     DriveApp: dr.api,
@@ -641,4 +660,146 @@ test('the demo sends two sample PDFs on WhatsApp only, to the list numbers, and 
   assert.match(run.logs.at(-1), /WhatsApp demo: 4 of 4 messages sent \(2 file\(s\) to 2 number\(s\)\)/);
   assert.equal(run.sent.length, 0);
   assert.throws(() => load(WA).gs.sendWhatsAppDemo('sana'), /WA_LIST_SANA is empty/);
+});
+
+// ------------------------------------------------------------------ team chat saves
+
+const SAVES = { ...LIVE, STATE_SAVES: 'on' };
+const version = (n) => `20261112T0${String(n).padStart(5, '0')}Z-${'abcdef01'}`;
+
+function putParts(run, team, ver, chunks, extra = {}) {
+  return chunks.map((c, i) => run.post({ token: TOKEN, action: 'state_put', team, version: ver, part: i, parts: chunks.length,
+                                          content_b64: c.toString('base64'), sha256: sha(c), ...extra }));
+}
+function commit(run, team, ver, chunks, extra = {}) {
+  return run.post({ token: TOKEN, action: 'state_commit', team, version: ver, parts: chunks.length,
+                    part_sha256: chunks.map(sha), sha256: sha(Buffer.concat(chunks)), label: 'test', files: 3, ...extra });
+}
+const saveFolder = (run) => Object.values(run.drive).find((x) => x.kind === 'folder' && x.name === 'Team chat saves (private)');
+const liveFiles = (run) => Object.values(run.drive).filter((x) => x.kind === 'file' && !x.trashed).map((x) => x.name).sort();
+
+test('team chat saves are off until STATE_SAVES is on, and need the token', () => {
+  const run = load(LIVE);
+  const r = run.post({ token: TOKEN, action: 'state_list', team: 'deepanshi' });
+  assert.deepEqual([r.ok, r.status], [false, 'error']);
+  assert.match(r.detail, /STATE_SAVES to on/);
+  assert.equal(Object.keys(run.drive).length, 0);
+  assert.deepEqual(load(SAVES).post({ token: 'wrong', action: 'state_list', team: 'deepanshi' }), { ok: false, status: 'unauthorized' });
+});
+
+test('a save goes up in parts, is loadable only once finished, comes back byte for byte, and emails nobody', () => {
+  const run = load(SAVES);
+  const chunks = [Buffer.from('first part \u0000\u00ff bytes'), Buffer.from('second part')];
+  const v = version(1);
+  assert.deepEqual(putParts(run, 'deepanshi', v, chunks).map((r) => r.status), ['stored', 'stored']);
+  assert.equal(run.post({ token: TOKEN, action: 'state_get', team: 'deepanshi' }).status, 'not_found');  // not finished yet
+  const done = commit(run, 'deepanshi', v, chunks);
+  assert.deepEqual([done.ok, done.status, done.manifest.parts, done.manifest.size, done.kept], [true, 'saved', 2, chunks[0].length + chunks[1].length, 1]);
+  assert.match(done.manifest.saved_at, /^\d{4}-\d\d-\d\d \d\d:\d\d IST$/);
+  const m = run.post({ token: TOKEN, action: 'state_get', team: 'deepanshi' });
+  assert.equal(m.manifest.version, v);
+  const back = [0, 1].map((i) => run.post({ token: TOKEN, action: 'state_get', team: 'deepanshi', part: i }));
+  back.forEach((r, i) => {
+    assert.equal(r.sha256, sha(chunks[i]));
+    assert.deepEqual(Buffer.from(r.content_b64, 'base64'), chunks[i]);
+  });
+  assert.equal(run.post({ token: TOKEN, action: 'state_list', team: 'deepanshi' }).saves.length, 1);
+  assert.equal(run.post({ token: TOKEN, action: 'state_list', team: 'sana' }).saves.length, 0);  // each team its own folder
+  assert.equal(saveFolder(run).sharing, 'private');
+  assert.deepEqual([run.sent.length, run.wati.length, Object.keys(run.user.data).filter((k) => k.startsWith('count:'))], [0, 0, []]);
+});
+
+test('a save with a part missing, changed or tampered is never finished', () => {
+  const run = load(SAVES);
+  const chunks = [Buffer.from('aaa'), Buffer.from('bbb')];
+  putParts(run, 'sana', version(2), chunks.slice(0, 1).concat([]), { parts: 2 });
+  const missing = commit(run, 'sana', version(2), chunks);
+  assert.deepEqual([missing.ok, missing.status], [false, 'incomplete']);
+  assert.match(missing.detail, /part 1 of 2 never arrived/);
+  putParts(run, 'sana', version(3), chunks);
+  const changed = commit(run, 'sana', version(3), [chunks[0], Buffer.from('ccc')]);
+  assert.match(changed.detail, /part 1 in Drive does not match/);
+  const bad = run.post({ token: TOKEN, action: 'state_put', team: 'sana', version: version(4), part: 0, parts: 1,
+                         content_b64: Buffer.from('xyz').toString('base64'), sha256: sha(Buffer.from('xy')) });
+  assert.deepEqual([bad.status, /checksum mismatch/.test(bad.detail)], ['rejected', true]);
+  assert.equal(run.post({ token: TOKEN, action: 'state_list', team: 'sana' }).saves.length, 0);
+  const finished = commit(run, 'sana', version(3), chunks);
+  assert.equal(finished.status, 'saved');
+  assert.equal(putParts(run, 'sana', version(3), chunks)[0].status, 'bad_request');  // a finished save can't be changed
+});
+
+test('team names, save names and part numbers are checked', () => {
+  const run = load(SAVES);
+  for (const fields of [{ team: '../elite' }, { team: 'Deepanshi' }, { team: 'sana', version: 'latest' },
+                        { team: 'sana', version: version(1), part: 2, parts: 2 }, { team: 'sana', version: version(1), part: 0, parts: 101 }]) {
+    const r = run.post({ token: TOKEN, action: 'state_put', content_b64: 'YQ==', sha256: sha(Buffer.from('a')), part: 0, parts: 1, ...fields });
+    assert.equal(r.status, 'bad_request', JSON.stringify(fields));
+  }
+  assert.equal(run.post({ token: TOKEN, action: 'state_get', team: 'sana', version: version(9) }).status, 'not_found');
+});
+
+test('a retried part replaces the earlier copy', () => {
+  const run = load(SAVES);
+  const v = version(5);
+  putParts(run, 'darshan', v, [Buffer.from('old')]);
+  putParts(run, 'darshan', v, [Buffer.from('new')]);
+  assert.equal(commit(run, 'darshan', v, [Buffer.from('new')]).status, 'saved');
+  assert.equal(liveFiles(run).filter((n) => n.startsWith(v)).length, 2);  // one part and the manifest
+  const r = run.post({ token: TOKEN, action: 'state_get', team: 'darshan', part: 0 });
+  assert.equal(Buffer.from(r.content_b64, 'base64').toString(), 'new');
+});
+
+test('every finished save is kept forever; only stale unfinished parts go to the bin', () => {
+  const run = load({ ...SAVES, STATE_KEEP: '3' });  // no longer read
+  const one = [Buffer.from('x')];
+  putParts(run, 'inayat', version(90), one);  // unfinished and recent: still arriving, so kept
+  putParts(run, 'inayat', version(91), one);  // unfinished and two days old: binned
+  Object.values(run.drive).find((x) => x.name === `${version(91)}.part000`).created = Date.now() - 2 * 86400000;
+  for (let n = 1; n <= 5; n++) {
+    putParts(run, 'inayat', version(n), one);
+    assert.equal(commit(run, 'inayat', version(n), one).status, 'saved');
+  }
+  Object.values(run.drive).filter((x) => x.name.startsWith(version(1))).forEach((x) => { x.created = Date.now() - 9 * 86400000; });
+  putParts(run, 'inayat', version(6), one);
+  assert.equal(commit(run, 'inayat', version(6), one).kept, 6);
+  const listed = run.post({ token: TOKEN, action: 'state_list', team: 'inayat' });
+  assert.deepEqual(listed.saves.map((s) => s.version), [6, 5, 4, 3, 2, 1].map(version));
+  assert.equal(listed.total, 6);
+  assert.deepEqual(liveFiles(run).filter((n) => n.startsWith(version(1))), [`${version(1)}.manifest.json`, `${version(1)}.part000`]);
+  assert.deepEqual(liveFiles(run).filter((n) => n.startsWith(version(91))), []);
+  assert.deepEqual(liveFiles(run).filter((n) => n.startsWith(version(90))), [`${version(90)}.part000`]);
+  const two = run.post({ token: TOKEN, action: 'state_list', team: 'inayat', limit: 2 });
+  assert.deepEqual([two.saves.length, two.total, two.versions], [2, 6, [6, 5, 4, 3, 2, 1].map(version)]);
+  assert.equal(run.post({ token: TOKEN, action: 'state_get', team: 'inayat', version: version(2) }).manifest.version, version(2));
+});
+
+test('a save of only new or changed files records its index size and change count', () => {
+  const run = load(SAVES);
+  const chunks = [Buffer.from('index+bundle')];
+  putParts(run, 'darshan', version(7), chunks);
+  const bad = commit(run, 'darshan', version(7), chunks, { format: 2, index_bytes: 99, changed: 1 });
+  assert.deepEqual([bad.status, /index_bytes/.test(bad.detail)], ['bad_request', true]);
+  const ok = commit(run, 'darshan', version(7), chunks, { format: 2, index_bytes: 5, changed: 1, full: true, files: 40 });
+  assert.equal(ok.status, 'saved');
+  assert.deepEqual([ok.manifest.format, ok.manifest.index_bytes, ok.manifest.changed, ok.manifest.full, ok.manifest.files], [2, 5, 1, true, 40]);
+  const old = [Buffer.from('old style')];
+  putParts(run, 'darshan', version(8), old);
+  const m = commit(run, 'darshan', version(8), old).manifest;
+  assert.equal(m.format, undefined);  // an old-style save is still accepted
+});
+
+test('editor helper: the saves check lists teams and changes nothing', () => {
+  const run = load(SAVES);
+  putParts(run, 'sana', version(1), [Buffer.from('abc')]);
+  commit(run, 'sana', version(1), [Buffer.from('abc')]);
+  const before = liveFiles(run);
+  run.gs.checkStateSaves();
+  const log = run.logs.at(-1);
+  assert.match(log, /Team chat saves: ON, every save kept forever/);
+  assert.match(log, /sharing: private/);
+  assert.match(log, /sana: 1 save\(s\), newest \d{4}-\d\d-\d\d \d\d:\d\d IST/);
+  assert.deepEqual(liveFiles(run), before);
+  const off = load(LIVE);
+  off.gs.checkStateSaves();
+  assert.match(off.logs.at(-1), /saves are off/);
 });

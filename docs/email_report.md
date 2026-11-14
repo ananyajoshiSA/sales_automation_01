@@ -225,6 +225,11 @@ deployed, single files to `RECIPIENTS` still go out, and a set or a send to a li
    the same, so nothing changes in the Claude Code environment settings.
 3. Run `checkSetup` once: it should still list your mode and recipients.
 
+Team chat saves (12 Nov 2026) also need the new `Code.gs`, plus the Script Property `STATE_SAVES` = `on`; run
+`checkStateSaves` to confirm (docs/state_sync.md). Until then `state_sync.py` stops with "action must be check or send".
+Since the change of 12 Nov 2026 (evening) every save is kept forever and saves hold only new or changed files: `state_sync.py` from main stops
+with "the mailer is out of date" until the `Code.gs` from that change is deployed. `STATE_KEEP` is no longer read.
+
 ## When something goes wrong
 
 | Claude says | Meaning and fix |
@@ -254,5 +259,7 @@ Free limits: Google Workspace scripts can email about 1,500 recipients a day, at
   `requests` only). It remembers this machine's last email in `data/email_report/last_sent.json`.
 - `email_report/Code.gs`, `email_report/appsscript.json`: the mailer. Its one permission is
   `script.send_mail`.
+- Team chat saves (`state_put`, `state_commit`, `state_list`, `state_get`, off until `STATE_SAVES` is `on`): a
+  chat's working files kept in a private Drive folder across machine resets. Guide: [state_sync.md](state_sync.md).
 - Tests: `.venv/bin/python -m pytest tests/test_email_report.py` and `node --test email_report/code.test.mjs`
   (fake Google services, nothing is emailed).
