@@ -7,8 +7,10 @@ LeadSquared has no company-wide list of stage changes (the bulk stage-change rea
 2. leads now in Discovery Call Done or a later pipeline stage and edited since D (lead search);
 3. the stage history of the leads in both lists, keeping those changed to Discovery Call Done on D (IST).
 
-The calls audited are every call to that lead on D. A lead whose stage was set on D after a call on D-1 only
-(the caller set it the next morning) is audited on its D-1 calls, and the row says so.
+The calls audited are the lead's calls on D up to the moment the stage changed (a call in progress at that moment
+counts). Calls after the change are follow-ups and are never read. The discovery call and the stage change happen on
+the same day, so a lead with no conversation before the change that day is not scored: it is listed as "moved
+without a call", with its last real call before the change (D or D-1) and its first one after it.
 """
 
 from __future__ import annotations
@@ -81,21 +83,26 @@ def calls_for(lead_id: str, calls: list[dict], day: str) -> list[dict]:
     return sorted(out, key=lambda c: c["start_utc"])
 
 
+def _brief(c: dict | None) -> dict | None:
+    return c and {k: c.get(k) for k in ("start_utc", "caller", "duration", "status")}
+
+
 def pick(lead: dict, history: list[dict], calls: list[dict], day: str) -> dict | None:
     """The audit entry for a lead changed to Discovery Call Done on ``day``, or None if it wasn't."""
     t = changed_on(history, day)
     if not t:
         return None
     lid = lead["ProspectID"]
-    own = calls_for(lid, calls, day)
-    calls_day, note = day, ""
+    today = calls_for(lid, calls, day)
+    own = [c for c in today if utc(c["start_utc"]) < t]
+    entry = {"lead": lead, "stage_changed_utc": t.strftime("%Y-%m-%d %H:%M:%S"), "calls_day": day, "calls": own, "note": ""}
     if not any(is_conversation(c) for c in own):
-        before = calls_for(lid, calls, prev_day(day))
-        if any(is_conversation(c) for c in before):
-            own, calls_day = before, prev_day(day)
-            note = f"Stage set on {day} with no conversation that day; audited the calls of {calls_day}."
-    return {"lead": lead, "stage_changed_utc": t.strftime("%Y-%m-%d %H:%M:%S"), "calls_day": calls_day,
-            "calls": own, "note": note}
+        earlier = [c for c in calls_for(lid, calls, prev_day(day)) + own if is_conversation(c)]
+        later = [c for c in today if utc(c["start_utc"]) >= t and is_conversation(c)]
+        hint = next((c.get("caller") for c in (earlier[-1:] + later[:1] + today) if c.get("caller")), None)
+        entry.update(moved_without_call=True, last_call_before=_brief(earlier[-1] if earlier else None),
+                     first_call_after=_brief(later[0] if later else None), caller_hint=hint)
+    return entry
 
 
 # ------------------------------------------------------------------ LeadSquared reads (read-only)

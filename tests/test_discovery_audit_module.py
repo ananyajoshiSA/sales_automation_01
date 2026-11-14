@@ -28,23 +28,31 @@ def test_changed_on_uses_the_ist_day_of_the_move_into_the_stage():
     assert find.changed_on([stage("2026-11-13 09:00:00", "Roadmap Done")], DAY) is None
 
 
-def test_pick_takes_every_call_of_the_day_before_and_after_the_change():
+def test_pick_takes_the_calls_of_the_day_up_to_the_change_only():
     hist = [stage("2026-11-13 09:43:00", "Discovery Call Done")]          # 15:13 IST
-    calls = [call(LEAD["ProspectID"], "2026-11-13 08:30:52", secs=48),      # 14:00 IST, short attempt
-             call(LEAD["ProspectID"], "2026-11-13 12:48:19", secs=789),     # 18:18 IST, after the change
+    calls = [call(LEAD["ProspectID"], "2026-11-13 05:30:00", secs=300),     # 11:00 IST, dropped
+             call(LEAD["ProspectID"], "2026-11-13 09:35:00", secs=600),     # 15:05 IST, still going at the change
+             call(LEAD["ProspectID"], "2026-11-13 12:48:19", secs=789),     # 18:18 IST, follow-up after the change
              call(LEAD["ProspectID"], "2026-11-12 10:00:00"),               # previous day: not used
              call("someone-else", "2026-11-13 09:00:00")]
     e = find.pick(LEAD, hist, calls, DAY)
-    assert [c["duration"] for c in e["calls"]] == [48, 789]
-    assert e["calls_day"] == DAY and e["note"] == ""
+    assert [c["duration"] for c in e["calls"]] == [300, 600]
+    assert e["calls_day"] == DAY and not e.get("moved_without_call")
     assert find.pick(LEAD, [], calls, DAY) is None
 
 
-def test_pick_falls_back_to_the_previous_day_when_the_stage_was_set_without_a_conversation():
-    hist = [stage("2026-11-13 04:00:00", "Discovery Call Done")]
-    calls = [call(LEAD["ProspectID"], "2026-11-12 11:00:00", secs=700), call(LEAD["ProspectID"], "2026-11-13 03:00:00", secs=4)]
+def test_a_lead_moved_without_a_call_that_day_is_flagged_not_scored(tmp_path):
+    hist = [stage("2026-11-13 04:00:00", "Discovery Call Done")]                  # 09:30 IST
+    calls = [call(LEAD["ProspectID"], "2026-11-12 11:00:00", secs=700),            # day before
+             call(LEAD["ProspectID"], "2026-11-13 03:00:00", secs=4),              # 08:30 IST, too short
+             call(LEAD["ProspectID"], "2026-11-13 10:00:00", secs=500, caller="Caller Two")]  # after the move
     e = find.pick(LEAD, hist, calls, DAY)
-    assert e["calls_day"] == "2026-11-12" and len(e["calls"]) == 1 and "2026-11-12" in e["note"]
+    assert e["calls_day"] == DAY and e["moved_without_call"] and len(e["calls"]) == 1
+    assert e["last_call_before"]["duration"] == 700 and e["first_call_after"]["duration"] == 500
+    assert report.status(e, str(tmp_path))[0] == "MOVED_WITHOUT_CALL"
+    assert "a day after" in report.moved_without_call(e)[0]
+    e2 = find.pick(LEAD, hist, calls[1:], DAY)
+    assert "before the call" in report.moved_without_call(e2)[0] and report.callers(e2) == "Caller Two"
 
 
 def test_flatten_lead_call_reads_the_fields_under_activity_fields():
@@ -90,9 +98,10 @@ def test_a_complete_result_passes_and_is_marked_ok(tmp_path):
     p = tmp_path / "k.json"
     p.write_text(json.dumps(good_result()))
     assert reading.check(str(p), TRANSCRIPT) == []
-    assert reading.finished(str(p))
+    assert reading.finished(str(p), TRANSCRIPT)
+    assert not reading.finished(str(p), TRANSCRIPT + " a later call")   # different calls: read again
     p.write_text(json.dumps({**good_result(), "quality_note": "edited"}))
-    assert not reading.finished(str(p))
+    assert not reading.finished(str(p), TRANSCRIPT)
 
 
 def test_checker_rejects_invented_quotes_inconsistency_and_bad_values():
@@ -127,7 +136,7 @@ def test_callers_come_from_the_call_records_never_the_stage_change():
 
 def test_status_and_mobile(tmp_path):
     e = {"lead": LEAD, "calls_day": DAY, "calls": [call(LEAD["ProspectID"], "2026-11-13 08:00:00", secs=12)]}
-    assert report.status(e, str(tmp_path))[0] == "NOT_AUDITABLE"
+    assert report.status(e, str(tmp_path))[0] == "MOVED_WITHOUT_CALL"
     e["calls"] = [call(LEAD["ProspectID"], "2026-11-13 08:00:00", transcript=None)]
     assert report.status(e, str(tmp_path))[0] == "TRANSCRIPT_NOT_FOUND"
     e["calls"][0]["transcript"] = "text"
@@ -170,6 +179,13 @@ def test_review_splits_into_parts_numbers_on_and_applies_each_verdict_once(tmp_p
     assert r["compliance_flags"] == "NONE" and r["review"]["before"].startswith("CRITICAL")
     assert review.apply(entries, str(folder)) == {"kept": 0, "changed": 0, "failed": []}
     assert review.prepare(entries, str(folder)) == []
+    # The lead is read again on different calls: the earlier verdict must not land on the new reading.
+    entries[0]["calls"][0]["transcript"] = TRANSCRIPT + " Talk tomorrow."
+    p0 = folder / "results" / f"{keys[0]}.json"
+    p0.write_text(json.dumps({**good_result(), "lead_key": keys[0]}))
+    assert reading.check(str(p0), reading.day_text(entries[0])) == []
+    assert review.apply(entries, str(folder)) == {"kept": 0, "changed": 0, "failed": []}
+    assert [x.rsplit("/", 1)[1] for x in review.prepare(entries, str(folder))] == ["in_03.json"]
 
 
 def test_missing_transcripts_are_retried_twice_then_marked_final(tmp_path, monkeypatch):

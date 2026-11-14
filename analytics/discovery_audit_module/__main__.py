@@ -81,7 +81,7 @@ def cmd_status(day: str) -> None:
     entries = load(day)
     st = Counter(report.status(e, f"{folder(day)}/reading")[0] for e in entries)
     reviewed = sum(1 for e in entries if (p := f"{folder(day)}/reading/results/{reading.lead_key(e)}.json")
-                   and reading.finished(p) and "review" in json.load(open(p)))
+                   and reading.finished(p, reading.day_text(e)) and "review" in json.load(open(p)))
     print(json.dumps({"leads": len(entries), **st, "compliance_rechecked": reviewed}, indent=1))
 
 

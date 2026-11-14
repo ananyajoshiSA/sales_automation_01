@@ -35,7 +35,7 @@ def prepare(entries: list[dict], folder: str) -> list[str]:
     items = []
     for e in entries:
         p = f"{folder}/results/{reading.lead_key(e)}.json"
-        if reading.finished(p):
+        if reading.finished(p, reading.day_text(e)):
             r = json.load(open(p))
             if "review" not in r:
                 items.append({"lead_key": r["lead_key"], "compliance_flags": r["compliance_flags"],
@@ -51,25 +51,33 @@ def prepare(entries: list[dict], folder: str) -> list[str]:
 
 
 def apply(entries: list[dict], folder: str) -> dict:
-    """Writes each verdict into its result. Returns {"kept", "changed", "failed": [(lead_key, problems)]}."""
-    out = [v for f in sorted(Path(f"{folder}/review").glob("out_*.json")) for v in json.load(open(f))]
+    """Writes each verdict into its result. Returns {"kept", "changed", "failed": [(lead_key, problems)]}.
+
+    A verdict counts only for the reading it re-checked: same flags and same calls as in its in_NN.json item, so a
+    verdict from an earlier round never lands on a lead that was read again since. Newest round first."""
     by_key = {reading.lead_key(e): e for e in entries}
     done = {"kept": 0, "changed": 0, "failed": []}
-    for v in out:
-        p = f"{folder}/results/{v['lead_key']}.json"
-        r = json.load(open(p))
-        if "review" in r:
-            continue
-        old = r["compliance_flags"]
-        if v["verdict"] == "change":
-            flags = v["compliance_flags"].strip()
-            r["compliance_flags"] = "NONE" if flags.upper() in ("NONE", "") else flags
-            r["sheet"]["Pitch Discipline"] = v["pitch_discipline"]
-        r["review"] = {"verdict": v["verdict"], "reason": v.get("reason", ""), "before": old}
-        json.dump(r, open(p, "w"), indent=1, ensure_ascii=False)
-        bad = reading.check(p, reading.day_text(by_key[v["lead_key"]]))
-        if bad:
-            done["failed"].append((v["lead_key"], bad))
-        else:
-            done["changed" if v["verdict"] == "change" else "kept"] += 1
+    for f in sorted(Path(f"{folder}/review").glob("out_*.json"), reverse=True):
+        src = Path(f"{folder}/review/in_{f.stem[4:]}.json")
+        asked = {x["lead_key"]: x for x in json.load(open(src))} if src.exists() else {}
+        for v in json.load(open(f)):
+            p = f"{folder}/results/{v['lead_key']}.json"
+            ent, item = by_key.get(v["lead_key"]), asked.get(v["lead_key"])
+            if not ent or not item or not os.path.exists(p):
+                continue
+            r = json.load(open(p))
+            if "review" in r or item["compliance_flags"] != r["compliance_flags"] or item["transcript"] != reading.day_text(ent):
+                continue
+            old = r["compliance_flags"]
+            if v["verdict"] == "change":
+                flags = v["compliance_flags"].strip()
+                r["compliance_flags"] = "NONE" if flags.upper() in ("NONE", "") else flags
+                r["sheet"]["Pitch Discipline"] = v["pitch_discipline"]
+            r["review"] = {"verdict": v["verdict"], "reason": v.get("reason", ""), "before": old}
+            json.dump(r, open(p, "w"), indent=1, ensure_ascii=False)
+            bad = reading.check(p, reading.day_text(ent))
+            if bad:
+                done["failed"].append((v["lead_key"], bad))
+            else:
+                done["changed" if v["verdict"] == "change" else "kept"] += 1
     return done

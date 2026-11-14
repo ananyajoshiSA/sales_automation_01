@@ -4,11 +4,12 @@ Reference name: **discovery-audit-module**. Code: `analytics/discovery_audit_mod
 `python -m analytics.discovery_audit_module`. Use this name when asking for changes to this audit.
 
 Every morning, for the day before: every lead (all teams) whose LeadSquared stage changed to
-"Discovery Call Done", with **all** of that day's calls read together by Claude against
+"Discovery Call Done", with that day's calls **up to the moment of the stage change** read together by Claude against
 `analytics/discovery_audit_module/prompts/final_prompt_oct_2026.txt` (relaxed conversion score, IIT check, red flags).
 One reading gives both the 16-column sheet row and a 7-section feedback PDF, so they never disagree.
 
-Lever: conversation quality and calling the right leads first (closer briefing on each High lead the next morning).
+Lever: conversation quality. Readers are team leaders: coach callers on compliance and discovery gaps, and follow up on
+leads moved without a call.
 
 ## Run
 
@@ -27,8 +28,11 @@ python -m analytics.discovery_audit_module build 2026-11-13      # workbook, PDF
 LeadSquared has no company-wide stage-change list (the bulk read of event 3002 returns no rows) and about 5,000
 leads sit in the stage, so the job reads the day's calls and the day before (bulk, both directions), lists leads now
 in Discovery Call Done or a later pipeline stage edited since the day, and reads the stage history of leads in both.
-A lead counts when it moved into the stage during the IST day. All its calls that day are audited; if it had no
-conversation that day, the previous day's calls are audited and the row says so.
+A lead counts when it moved into the stage during the IST day. Its calls that day up to the moment of the move are
+audited (a call in progress at that moment counts); calls after the move are follow-ups and are never read. The
+discovery call and the move happen on the same day (user rule, 14 Nov 2026), so a lead with no answered call of 30+ s
+before the move that day is not scored: it goes on the "Moved without a call" tab with its last real call before the
+move (that day or the day before) and its first one after it.
 
 ## Rules
 
@@ -41,7 +45,10 @@ conversation that day, the previous day's calls are audited and the row says so.
   a strict column and the PDF's score out of 10 use the strict objections rule (H/HOT from 7.0).
 - Every quote must match the transcripts word for word (`check`); every compliance decision gets a second reading.
 - Statuses: ANALYZED, PENDING_ANALYSIS, ANALYSIS_FAILED, TRANSCRIPT_NOT_FOUND (carried into the next two runs, then marked final: 3 tries in all),
-  NOT_AUDITABLE (voicemail, screening or calls under 30 s only). Every lead appears in the workbook, audited or not.
+  MOVED_WITHOUT_CALL. Every lead appears in the workbook: the audit tab, "Moved without a call", or "Needs a Check"
+  (plain "What happened" and "What to do" columns).
+- A result's `.ok` mark covers the result and the calls it was read from, so a lead whose calls change is read again.
+- No closer-facing content beyond the prompt's own Closer Briefing column.
 - Lead details stay in `data/discovery_audit/` (git-ignored); the per-caller trend history is
   `data/discovery_audit/history.jsonl`.
 - The PDF layout follows the original chat's 7-section report; its exact PDF prompt is not in the repo yet, so the

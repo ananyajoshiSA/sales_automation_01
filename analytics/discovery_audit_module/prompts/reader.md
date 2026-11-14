@@ -1,15 +1,15 @@
-# Discovery call audit: how to read one lead's day
+# Discovery call audit: how to read one lead's discovery calls
 
 You are auditing leads whose LeadSquared stage changed to "Discovery Call Done". Each pack item is ONE lead and
-holds ALL of that lead's calls on one day (IST), in time order, separated by `=== CALL at HH:MM IST ... ===`
-lines. Read every call of the day in full, together, as one conversation: a call that dropped and the redial are
-the same discovery. Calls not answered or without a transcript are listed so you know they happened; say nothing
+holds that lead's calls on one day (IST) up to the moment the stage changed (calls after the change are follow-ups
+and are not included), in time order, separated by `=== CALL at HH:MM IST ... ===` lines. Read every call in full,
+together, as one conversation: a call that dropped and the redial are the same discovery. Calls not answered or without a transcript are listed so you know they happened; say nothing
 about their content.
 
 Apply THE AUDIT PROMPT below exactly (relaxed conversion score, IIT check, red flags, compliance bar, column
-rules), with these changes for a whole day:
+rules), with these changes for several calls:
 
-- Base every finding on the day's calls together. Name the call time (e.g. "in the 18:18 call") when it helps.
+- Base every finding on these calls together. Name the call time (e.g. "in the 18:18 call") when it helps.
 - You do NOT fill Call Date, Duration, Mobile Number or Conversion Potential: the code fills them from LeadSquared
   and from your subscores.
 - Use only the transcripts. The CRM name, course and caller names in the pack are for reference only; the
@@ -43,10 +43,10 @@ Write one JSON file per lead: `results/<lead_key>.json` (next to the pack), exac
     "immediate_goal": "", "current_plan": "including any backup plan", "current_income": "as stated, else Not discussed",
     "burning_problem_note": "why IDENTIFIED or NOT IDENTIFIED, with the lead's words",
     "score_reason": "2-3 sentences on why the score is what it is",
-    "call_summary": "one paragraph: what happened across the day's calls",
+    "call_summary": "one paragraph: what happened across these calls",
     "highlight_strongest": "the counsellor's strongest moment, with a quote",
     "highlight_miss": "the biggest miss, with a quote",
-    "highlight_end": "how the day ended: next step, any ask",
+    "highlight_end": "how the discovery ended: next step, any ask",
     "what_went_wrong": ["1-5 short gaps, each tied to a moment"],
     "improvements": ["1-5 specific actions for the next call; example lines the caller could say are fine"]
   },

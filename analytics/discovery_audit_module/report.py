@@ -43,10 +43,14 @@ def mobile(entry: dict) -> str:
 
 def callers(entry: dict) -> str:
     """Who made the answered calls, from the call records (never the stage-change name, often "System")."""
+    if entry.get("moved_without_call") and entry.get("caller_hint"):
+        return entry["caller_hint"]   # the caller of the real call nearest the move
     names = list(dict.fromkeys((c.get("caller") or "").strip() for c in entry["calls"] if c.get("status") == "Answered"))
     named = [n for n in names if n]
     if named:
         return ", ".join(named)
+    if entry.get("caller_hint"):
+        return entry["caller_hint"]
     ids = {c.get("user_id") for c in entry["calls"] if c.get("status") == "Answered" and c.get("user_id")}
     return f"Unverified (user id {', '.join(sorted(ids))})" if ids else "Unverified"
 
@@ -54,11 +58,33 @@ def callers(entry: dict) -> str:
 MAX_TRIES = 3  # the run for the day itself plus the next two mornings
 
 
+def when(c: dict | None) -> str:
+    if not c:
+        return "None"
+    return f"{utc(c['start_utc']).astimezone(IST).strftime('%d %b, %I:%M %p').replace(' 0', ' ')} ({mmss(c.get('duration') or 0)}, {c.get('caller') or 'no caller logged'})"
+
+
+def moved_without_call(entry: dict) -> tuple[str, str]:
+    """(what happened, what to do) for a lead moved to the stage with no conversation before the move that day."""
+    before, after = entry.get("last_call_before"), entry.get("first_call_after")
+    short = any(c.get("status") == "Answered" for c in entry["calls"])
+    if before:  # a conversation before the move that day would have been audited, so this one is from an earlier day
+        return (f"Moved a day after the last real call ({when(before)})",
+                "Ask the caller why the stage was moved a day late; the discovery call and the move should be the same day")
+    if after:
+        return (f"Moved before the call: the first real call that day came after the move ({when(after)})",
+                "Ask the caller why the stage was moved before the discovery call")
+    if short:
+        return ("Only short or unanswered calls before the move",
+                f"Check if the discovery really happened (no answered call of {MIN_CONVERSATION_SECS}+ seconds before the move)")
+    return ("No real call found that day or the day before", "Check if a discovery call ever happened")
+
+
 def status(entry: dict, folder: str) -> tuple[str, str]:
     """(status, reason) for one lead."""
+    if entry.get("moved_without_call") or not any(is_conversation(c) for c in entry["calls"]):
+        return "MOVED_WITHOUT_CALL", moved_without_call(entry)[0]
     conv = [c for c in entry["calls"] if is_conversation(c)]
-    if not conv:
-        return "NOT_AUDITABLE", f"No answered call of {MIN_CONVERSATION_SECS}+ seconds that day (voicemail, screening or very short calls only)"
     if not any(c.get("transcript") for c in conv):
         if entry.get("tries", 1) >= MAX_TRIES:
             return "TRANSCRIPT_NOT_FOUND", (f"No transcript after {MAX_TRIES} daily tries; not retried again. Team leader: check the "
@@ -66,11 +92,21 @@ def status(entry: dict, folder: str) -> tuple[str, str]:
         return "TRANSCRIPT_NOT_FOUND", (f"Answered call(s) found, but Salesa holds no transcript yet (try {entry.get('tries', 1)} of "
                                         f"{MAX_TRIES}); retried in the next run")
     p = f"{folder}/results/{reading.lead_key(entry)}.json"
-    if reading.finished(p):
+    if reading.finished(p, reading.day_text(entry)):
         return "ANALYZED", ""
     if os.path.exists(p):
         return "ANALYSIS_FAILED", "Result did not pass the checks"
     return "PENDING_ANALYSIS", "Not read yet"
+
+
+def needs_check(entry: dict, st: str, why: str) -> tuple[str, str]:
+    """(what happened, what to do) in plain words for a lead that has no score yet."""
+    if st == "TRANSCRIPT_NOT_FOUND":
+        if entry.get("tries", 1) >= MAX_TRIES:
+            return (f"Call recording still missing after {MAX_TRIES} tries",
+                    "Check the call in the dialer and Salesa, or listen to it by hand")
+        return (f"Call recording not ready yet (try {entry.get('tries', 1)} of {MAX_TRIES})", "Nothing; it is checked again tomorrow")
+    return ("Not read yet" if st == "PENDING_ANALYSIS" else "Reading did not pass the checks", "Read again in the next run")
 
 
 def row(entry: dict, result: dict) -> dict:
@@ -138,13 +174,13 @@ def lead_pdf_html(r: dict, history: dict, fresh: str) -> str:
     li = lambda xs: "".join(f"<li>{e(x)}</li>" for x in xs)
     return f"""<!doctype html><html><head><meta charset=utf-8><style>{CSS}</style></head><body>
 <h1>CALL FEEDBACK REPORT — LawSikho / SkillArbitrage</h1>
-<div class=mut>Counsellor: {e(sh['Caller Name'])} (LeadSquared: {e(callers(ent))}) · Date: {e(sh['Call Date'])} · all of that day's calls read together</div>
+<div class=mut>Counsellor: {e(sh['Caller Name'])} (LeadSquared: {e(callers(ent))}) · Date: {e(sh['Call Date'])} · calls up to the move to Discovery Call Done, read together</div>
 {flag}
 <h2>SECTION 1 — CALL INFORMATION</h2><table>
 <tr><th>Date of call</th><td>{e(sh['Call Date'])}</td><th>Lead name</th><td>{e(sh['Lead Name'])} <span class=mut>(LeadSquared: {e(' '.join(x for x in (ent['lead'].get('FirstName'), ent['lead'].get('LastName')) if x))})</span></td></tr>
-<tr><th>Mobile number</th><td>{e(sh['Mobile Number'])}</td><th>Talk time (day)</th><td>{e(sh['Duration'])}</td></tr>
+<tr><th>Mobile number</th><td>{e(sh['Mobile Number'])}</td><th>Talk time (before the move)</th><td>{e(sh['Duration'])}</td></tr>
 <tr><th>Stage of call</th><td>{e(p['stage_of_call'])}</td><th>Moved to Discovery Call Done</th><td>{e(utc(ent['stage_changed_utc']).astimezone(IST).strftime('%d-%m-%Y %H:%M'))} IST</td></tr>
-<tr><th>Calls that day</th><td colspan=3><ul>{calls}</ul>{('<div class=mut>' + e(ent['note']) + '</div>') if ent.get('note') else ''}</td></tr></table>
+<tr><th>Calls before the move</th><td colspan=3><ul>{calls}</ul>{('<div class=mut>' + e(ent['note']) + '</div>') if ent.get('note') else ''}</td></tr></table>
 <h2>SECTION 2 — LEAD PROFILE</h2><table>
 <tr><th>Education and work</th><td>{e(p['education'])}</td></tr><tr><th>Immediate goal</th><td>{e(p['immediate_goal'])}</td></tr>
 <tr><th>Current plan</th><td>{e(p['current_plan'])}</td></tr><tr><th>Current income</th><td>{e(p['current_income'])}</td></tr>
@@ -155,11 +191,10 @@ def lead_pdf_html(r: dict, history: dict, fresh: str) -> str:
 <h2>SECTION 4 — CALL SUMMARY</h2><div>{e(p['call_summary'])}</div>
 <div class=hl><b>Strongest moment —</b> {e(p['highlight_strongest'])}</div>
 <div class=hl><b>Biggest miss —</b> {e(p['highlight_miss'])}</div>
-<div class=hl><b>End of day —</b> {e(p['highlight_end'])}</div>
+<div class=hl><b>Where it ended —</b> {e(p['highlight_end'])}</div>
 <h2>SECTION 5 — WHAT WENT WRONG</h2><ul>{li(p['what_went_wrong'])}</ul>
 <h2>SECTION 6 — IMPROVEMENT FOR NEXT CALL</h2><ul>{li(p['improvements'])}</ul>
 <h2>SECTION 7 — TREND</h2><ul>{li(trend_lines(callers(ent), history, res))}</ul>
-<h2>CLOSER BRIEFING</h2><div>{e(sh['Closer Briefing'])}</div>
 <div class=foot>Data read {e(fresh)} IST. Audit by Claude against Final_Prompt_Oct_2026; every quote checked word for word; compliance re-checked by a second reading.
 Score out of 10 uses the strict objections rule; the sheet's H/M/L uses the prompt's relaxed rule. {e(res.get('quality_note') or '')}</div>
 </body></html>"""
@@ -178,7 +213,7 @@ def safe(s: str) -> str:
 # ------------------------------------------------------------------ workbook
 
 EXTRA = ["Strict Conversion Potential (H,M,L)", "Score /10 (PDF, strict)", "Compliance Flags", "Burning Problem",
-         "Subscores (interest/pain/signals/objections/commitment)", "Calls that day", "Compliance re-check", "Note"]
+         "Subscores (interest/pain/signals/objections/commitment)", "Calls before the move", "Compliance re-check", "Note"]
 FRONT = ["#", "Lead Name (LeadSquared)", "Current Stage (LeadSquared)", "Lead Owner (LeadSquared)", "Caller in LeadSquared",
          "Moved to Discovery Call Done (IST)", "Audit Status"]
 
@@ -203,11 +238,13 @@ def front(i: int, ent: dict, st: str) -> list:
 
 def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path: str) -> dict:
     fresh = now_ist().strftime("%d %b %Y %H:%M")
-    rows, missing = [], []
+    rows, missing, moved = [], [], []
     for ent in entries:
         st, why = status(ent, folder)
         if st == "ANALYZED":
             rows.append(row(ent, json.load(open(f"{folder}/results/{reading.lead_key(ent)}.json"))))
+        elif st == "MOVED_WITHOUT_CALL":
+            moved.append(ent)
         else:
             missing.append((ent, st, why))
     rows.sort(key=lambda r: (-r["relaxed"], -r["strict"], callers(r["entry"])))
@@ -233,7 +270,8 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
     n_found = len(entries)
     rel, stc = Counter(r["sheet"]["Conversion Potential (H,M,L)"] for r in rows), Counter(r["strict_label"] for r in rows)
     lines = [[f"Discovery Call Audit — {ddmmyyyy(day)} (all teams). Data read {fresh} IST."],
-             [f"Leads moved to Discovery Call Done: {n_found}. Audited: {len(rows)}. Not audited: {len(missing)} (reasons on the Not Audited tab)."],
+             [f"Leads moved to Discovery Call Done: {n_found}. Audited: {len(rows)}. Moved without a call: {len(moved)}. "
+              f"Need a check: {len(missing)} (see those tabs)."],
              [], ["Conversion potential (next 48 h)", "Relaxed (the prompt's)", "Strict"]]
     lines += [[k, rel.get(x, 0), stc.get(x, 0)] for k, x in (("High", "H"), ("Medium", "M"), ("Low", "L"))]
     lines += [[], ["IIT Compliance", "Calls"]] + [[k, sum(r['sheet']['IIT Compliance'] == k for r in rows)] for k in sorted(reading.IIT)]
@@ -251,11 +289,19 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
         sm.append(ln)
     sm.column_dimensions["A"].width = 60
 
-    na = wb.create_sheet("Not Audited")
-    na.append(FRONT + ["Calls that day", "Reason"])
+    mv = wb.create_sheet("Moved without a call")
+    mv.append(FRONT[:-1] + ["Last real call before the move", "First real call after the move", "What happened", "What to do"])
+    for i, ent in enumerate(moved, 1):
+        what, todo = moved_without_call(ent)
+        mv.append(front(i, ent, "")[:-1] + [when(ent.get("last_call_before")), when(ent.get("first_call_after")), what, todo])
+    _style(mv, [4, 20, 18, 18, 18, 18, 30, 30, 45, 55])
+
+    na = wb.create_sheet("Needs a Check")
+    na.append(FRONT[:-1] + ["What happened", "What to do"])
     for i, (ent, st, why) in enumerate(missing, 1):
-        na.append(front(i, ent, st) + [len(ent["calls"]), why])
-    _style(na, [4, 20, 18, 18, 18, 18, 22, 10, 70])
+        what, todo = needs_check(ent, st, why)
+        na.append(front(i, ent, "")[:-1] + [what, todo])
+    _style(na, [4, 20, 18, 18, 18, 18, 45, 50])
 
     cl = wb.create_sheet("Calls")
     cl.append(["Lead (LeadSquared)", "Call start (IST)", "Direction", "Status", "Talk time", "Caller (LeadSquared)", "Transcript"])
@@ -281,7 +327,7 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
         print_pdf(lead_pdf_html(r, history, fresh), f"{pdf_dir}/{name}.html", f"{pdf_dir}/{name}")
         pdfs.append(f"{pdf_dir}/{name}")
     summary_pdf = f"{pdf_dir}/00_Summary_{tag}.pdf"
-    print_pdf(summary_html(day, rows, missing, fresh, n_found), f"{summary_pdf}.html", summary_pdf)
+    print_pdf(summary_html(day, rows, missing, moved, fresh, n_found), f"{summary_pdf}.html", summary_pdf)
     csv_path = f"{pdf_dir}/Batch_Summary.csv"
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
@@ -293,11 +339,11 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
     with zipfile.ZipFile(zpath, "w", zipfile.ZIP_DEFLATED) as z:
         for p in [summary_pdf, csv_path] + pdfs:
             z.write(p, os.path.basename(p))
-    return {"found": n_found, "audited": len(rows), "not_audited": Counter(st for _, st, _ in missing),
+    return {"found": n_found, "audited": len(rows), "moved_without_call": len(moved), "needs_check": Counter(st for _, st, _ in missing),
             "xlsx": xlsx, "zip": zpath, "summary_pdf": summary_pdf, "relaxed": dict(rel)}
 
 
-def summary_html(day: str, rows: list[dict], missing: list, fresh: str, n_found: int) -> str:
+def summary_html(day: str, rows: list[dict], missing: list, moved: list, fresh: str, n_found: int) -> str:
     pot = {"H": "High", "M": "Medium", "L": "Low"}
     def name(r: dict) -> str:
         n = r["sheet"]["Lead Name"]
@@ -306,17 +352,22 @@ def summary_html(day: str, rows: list[dict], missing: list, fresh: str, n_found:
     trs = "".join(f"<tr><td>{e(name(r))}</td><td>{e(callers(r['entry']))}</td><td><b>{pot[r['sheet']['Conversion Potential (H,M,L)']]}</b></td>"
                   f"<td>{r['strict']:g}/10 {r['band']}</td><td>{'CRITICAL' if r['result']['compliance_flags'] != 'NONE' else '—'}</td>"
                   f"<td>{e(r['result']['pdf']['highlight_end'])}</td></tr>" for r in rows)
-    nas = "".join(f"<tr><td>{e(' '.join(x for x in (m[0]['lead'].get('FirstName'), m[0]['lead'].get('LastName')) if x))}</td><td>{e(callers(m[0]))}</td><td>{e(m[1])}</td><td>{e(m[2])}</td></tr>" for m in missing)
+    nm = lambda ent: " ".join(x for x in (ent["lead"].get("FirstName"), ent["lead"].get("LastName")) if x)
+    nas = "".join(f"<tr><td>{e(nm(m[0]))}</td><td>{e(callers(m[0]))}</td><td>{e(needs_check(*m)[0])}</td><td>{e(needs_check(*m)[1])}</td></tr>" for m in missing)
+    mvs = "".join(f"<tr><td>{e(nm(x))}</td><td>{e(callers(x))}</td><td>{e(utc(x['stage_changed_utc']).astimezone(IST).strftime('%I:%M %p').lstrip('0'))}</td>"
+                  f"<td>{e(moved_without_call(x)[0])}</td><td>{e(moved_without_call(x)[1])}</td></tr>" for x in moved)
     crit = [r for r in rows if r["result"]["compliance_flags"] != "NONE"]
-    hi = [r for r in rows if r["sheet"]["Conversion Potential (H,M,L)"] == "H"]
+    by_mover = Counter(callers(x) for x in moved)
     return f"""<!doctype html><html><head><meta charset=utf-8><style>{CSS}</style></head><body>
-<h1>Discovery Call Audit — {ddmmyyyy(day)}</h1><div class=mut>All teams · leads moved to "Discovery Call Done" that day · every call of that day read together · data read {e(fresh)} IST</div>
-<div class=hl><b>Do first:</b> closers, call the {len(hi)} High lead{'s' if len(hi) != 1 else ''} at the time each agreed (see each PDF's closer briefing).
-{f"Team leaders: {len(crit)} lead{'s' if len(crit) != 1 else ''} heard a prohibited claim; coach those callers today ({e(', '.join(sorted({callers(r['entry']) for r in crit})))})." if crit else "No prohibited claims heard."}</div>
-<p>Leads moved: <b>{n_found}</b> · audited: <b>{len(rows)}</b> · not audited: <b>{len(missing)}</b> (listed below with the reason).</p>
+<h1>Discovery Call Audit — {ddmmyyyy(day)}</h1><div class=mut>All teams · leads moved to "Discovery Call Done" that day · their calls up to the move read together (later follow-ups left out) · data read {e(fresh)} IST</div>
+<div class=hl><b>For team leaders:</b> {f"{len(crit)} lead{'s' if len(crit) != 1 else ''} heard a prohibited claim; coach those callers today ({e(', '.join(sorted({callers(r['entry']) for r in crit})))})." if crit else "No prohibited claims heard."}
+{f"{len(moved)} lead{'s were' if len(moved) != 1 else ' was'} moved without a call first ({e(', '.join(f'{c} {k}' for c, k in by_mover.most_common()))}): ask the caller why." if moved else ""}
+{f"{len(missing)} lead{'s need' if len(missing) != 1 else ' needs'} a check (listed at the end)." if missing else ""}</div>
+<p>Leads moved: <b>{n_found}</b> · audited: <b>{len(rows)}</b> · moved without a call: <b>{len(moved)}</b> · need a check: <b>{len(missing)}</b></p>
 <h2>AUDITED LEADS (highest potential first)</h2><table class=list><colgroup><col style="width:13%"><col style="width:15%"><col style="width:8%"><col style="width:11%"><col style="width:10%"><col></colgroup>
-<tr><th>Lead</th><th>Caller</th><th>Sheet</th><th>Score /10</th><th>Compliance</th><th>Next step</th></tr>{trs}</table>
-{f'<h2>NOT AUDITED</h2><table class=list><tr><th>Lead</th><th>Caller</th><th>Status</th><th>Reason</th></tr>{nas}</table>' if missing else ''}
+<tr><th>Lead</th><th>Caller</th><th>Sheet</th><th>Score /10</th><th>Compliance</th><th>Where it ended</th></tr>{trs}</table>
+{f'<h2>MOVED WITHOUT A CALL</h2><table class=list><tr><th>Lead</th><th>Caller</th><th>Moved</th><th>What happened</th><th>What to do</th></tr>{mvs}</table>' if moved else ''}
+{f'<h2>NEEDS A CHECK</h2><table class=list><tr><th>Lead</th><th>Caller</th><th>What happened</th><th>What to do</th></tr>{nas}</table>' if missing else ''}
 <div class=foot>Sheet = the prompt's relaxed H/M/L. Score = strict total out of 10 (HOT 7+, WARM 4–6.9, COLD below 4).</div></body></html>"""
 
 
@@ -325,8 +376,11 @@ HOW = [
     "Leads: every lead whose LeadSquared stage changed to \"Discovery Call Done\" on the day (IST), all teams. LeadSquared has no "
     "company-wide list of stage changes, so the day's calls (and the day before) were read, and the stage history of each called lead "
     "now in Discovery Call Done or a later stage was checked. LeadSquared was only read, never written to.",
-    "Calls: every call to the lead that day, 00:00-23:59 IST, before and after the stage change, read together as one conversation "
-    "(one row per lead). If the stage was set with no conversation that day, the previous day's calls are audited and the Note says so.",
+    "Calls: every call to the lead that day from 00:00 IST up to the moment the stage changed (a call in progress at that moment "
+    "counts), read together as one conversation (one row per lead). Calls after the change are follow-ups and are not read.",
+    f"Moved without a call: the discovery call and the stage change happen on the same day, so a lead with no answered call of "
+    f"{MIN_CONVERSATION_SECS}+ seconds before the move that day is not scored. It is listed on that tab with its last real call before "
+    "the move and its first one after it, so the team leader can ask the caller why.",
     "Transcripts: Salesa, searched by the number on each call plus the lead's phone fields, matched to each LeadSquared call by start "
     "time and length (Salesa clocks can be 5 h 30 min off; the call's time is LeadSquared's).",
     "Caller in LeadSquared: the caller on the call records. The stage change is often recorded as \"System\", so it is never used to credit "
@@ -337,7 +391,7 @@ HOW = [
     "no objection but something left open = 0.75; H 7.0+. The PDF score out of 10 is the strict total (HOT 7+, WARM 4-6.9, COLD below 4).",
     "Checks: every quoted phrase was matched word for word against the transcripts (a row that fails is redone), and every compliance "
     "decision was re-checked by a second Claude reading against the prompt's fixed bar.",
-    "Not audited: leads with only voicemail, screening or very short calls, or with no transcript yet. A missing transcript is tried "
-    "again on the next two mornings (the lead then appears in that day's report); after the third try it is marked final for a team leader to check by hand.",
+    "Needs a check: a lead whose call recording is not in Salesa yet. It is tried again on the next two mornings (the lead then appears "
+    "in that day's report); after the third try it is marked final for a team leader to check by hand.",
     "The workbook holds lead phone numbers: share it only inside the sales team.",
 ]

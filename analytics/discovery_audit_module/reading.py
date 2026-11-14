@@ -76,7 +76,7 @@ def lead_key(entry: dict) -> str:
 
 
 def day_text(entry: dict) -> str:
-    """Every call of the day in time order, as the reader sees it."""
+    """The lead's calls that day up to the stage change, in time order, as the reader sees it."""
     from analytics.discovery_audit_module.find import ist_hm
     parts = []
     for c in entry["calls"]:
@@ -105,7 +105,7 @@ def prepare(entries: list[dict], folder: str, per_pack: int = PER_PACK) -> list[
     """Writes INSTRUCTIONS.md and the packs for every lead still to read. Returns the pack paths."""
     os.makedirs(f"{folder}/results", exist_ok=True)
     Path(f"{folder}/INSTRUCTIONS.md").write_text(instructions())
-    todo = [e for e in entries if not finished(f"{folder}/results/{lead_key(e)}.json")]
+    todo = [e for e in entries if not finished(f"{folder}/results/{lead_key(e)}.json", day_text(e))]
     paths = []
     for i in range(0, len(todo), per_pack):
         p = f"{folder}/pack_{i // per_pack + 1:02d}.json"
@@ -121,9 +121,14 @@ def _sha(path: str) -> str:
     return hashlib.sha256(Path(path).read_bytes()).hexdigest()
 
 
-def finished(path: str) -> bool:
+def _mark(path: str, transcript: str) -> str:
+    # Bound to the calls read as well, so a lead whose calls change (a late transcript, a new cut-off) is read again.
+    return _sha(path) + ":" + hashlib.sha256(transcript.encode()).hexdigest()
+
+
+def finished(path: str, transcript: str) -> bool:
     ok = path[:-5] + ".ok"
-    return os.path.exists(path) and os.path.exists(ok) and Path(ok).read_text().strip() == _sha(path)
+    return os.path.exists(path) and os.path.exists(ok) and Path(ok).read_text().strip() == _mark(path, transcript)
 
 
 def norm(s: str) -> str:
@@ -198,5 +203,5 @@ def check(path: str, transcript: str) -> list[str]:
         return [f"not readable JSON: {e}"]
     out = problems(result, transcript)
     if not out:
-        Path(path[:-5] + ".ok").write_text(_sha(path))
+        Path(path[:-5] + ".ok").write_text(_mark(path, transcript))
     return out
