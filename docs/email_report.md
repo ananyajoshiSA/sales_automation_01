@@ -22,6 +22,7 @@ Reports are real files, not just chat text, and they can be in any folder of the
 | Daily plan (PDF and workbook) | `<Team>_call_plan_<Day>.pdf`, `.xlsx` | `exports/daily/DATE/` |
 | Nightly call plan | `call_plan_..._DATE.xlsx` | `exports/plans/` |
 | Anything a chat builds by hand | PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG, HTML | wherever it saved it, often its scratch folder |
+| A bundle of report files, such as the discovery audit's per-lead PDFs | ZIP holding only the types above, no folders | same |
 
 They are never saved to GitHub (they name callers and leads) and they stay in the session that made them.
 That is why the email is sent from **that same conversation**: it is the only place that can see the files.
@@ -52,6 +53,10 @@ The repo's `data/` folder (raw lead data) and hidden files such as `.env` are ne
   the approved list gets it. Set `off` to stop everything at once.
 - **A daily cap.** At most 20 emails a day (you can change this), so a leaked password can't flood
   inboxes. One email counts once, however many files it carries (at most 10).
+- **ZIPs hold reports only.** A ZIP goes out only if it opens and every file in it is one of the report types
+  above, with no folders and no ZIP inside it; anything else is refused. On WhatsApp a ZIP goes as a Drive
+  link in the text of the PDF message, never as a document. A mailer older than this rule refuses ZIPs, and the
+  script says "outdated" before uploading anything.
 - **Size.** A set over 20 MB in total is not sent (Gmail allows 25 MB per email). Claude offers to share a Drive link
   with the approved recipients instead, and does nothing until you agree.
 - **Secrets stay out of GitHub and out of the chat.** The web address and password live only in Google's

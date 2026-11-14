@@ -1,8 +1,10 @@
 import base64
 import hashlib
+import io
 import json
 import os
 import time
+import zipfile
 
 import pytest
 import responses
@@ -13,6 +15,7 @@ URL = "https://script.google.com/macros/s/AKfy-abc_123/exec"
 ECHO = "https://script.googleusercontent.com/macros/echo?user_content_key=k"
 TOKEN = "t" * 40
 PDF, XLSX, CSV = b"%PDF-1.7 fake report", b"PK\x03\x04 fake workbook", b"caller,dials\nA,40\n"
+ZIP_HEAD = b"PK\x03\x04"
 NOW = time.time()
 
 
@@ -48,9 +51,11 @@ def real(paths):
     return [os.path.realpath(p) for p in paths]
 
 
-def mailer(*answers, mode="live", recipients=3, multi=True):
+def mailer(*answers, mode="live", recipients=3, multi=True, zip_ok=True):
     """Apps Script answers each POST with a 302 to an echo URL that serves the JSON."""
-    for a in ({"ok": True, "status": "ready", "mode": mode, "recipients": recipients, **({"multi": True} if multi else {})},) + answers:
+    ready = {"ok": True, "status": "ready", "mode": mode, "recipients": recipients, **({"multi": True} if multi else {}),
+             **({"zip": True} if zip_ok else {})}
+    for a in (ready,) + answers:
         responses.add(responses.POST, URL, status=302, headers={"Location": ECHO})
         responses.add(responses.GET, ECHO, json=a)
 
@@ -193,6 +198,35 @@ def test_a_set_with_a_bad_file_a_shared_name_or_too_many_files_contacts_nothing(
         assert er.main([good, many[0]]) == 2
         assert "too_large: over 20 MB together" in capsys.readouterr().out
         assert not os.path.exists(er.LAST_SENT)
+
+
+def zip_bytes(entries: dict[str, bytes]) -> bytes:
+    buf = io.BytesIO()
+    with zipfile.ZipFile(buf, "w") as z:
+        for name, data in entries.items():
+            z.writestr(name, data)
+    return buf.getvalue()
+
+
+@responses.activate
+def test_a_zip_of_reports_goes_but_not_one_holding_anything_else_or_to_an_old_mailer(repo, capsys):
+    good = put(repo, "project_reports/audit/Lead_PDFs_13112026.zip", zip_bytes({"a.pdf": PDF, "Batch_Summary.csv": CSV}), 600)
+    summary = put(repo, "project_reports/audit/Summary_13112026.pdf", PDF, 600)
+    assert er.problem(good) is None
+    for i, inner in enumerate(({"run.exe": b"MZ"}, {"inner.zip": b"PK"}, {"leads/a.pdf": PDF})):
+        bad = put(repo, f"project_reports/bad/bad_{i}.zip", zip_bytes(inner), 600)
+        assert "a ZIP must open and hold only report files" in er.problem(bad)
+    assert er.problem(put(repo, "project_reports/bad/empty.zip", zip_bytes({}), 600))
+    fake = put(repo, "project_reports/bad/fake.zip", ZIP_HEAD + b" not really a zip", 600)
+    assert "a ZIP must open" in er.problem(fake)
+    mailer({"ok": True, "status": "sent", "detail": "2 files in one email"})
+    assert er.main([summary, good]) == 0
+    assert [f["file_name"] for f in bodies()[1]["files"]] == ["Summary_13112026.pdf", "Lead_PDFs_13112026.zip"]
+    responses.reset()
+    mailer(zip_ok=False)
+    assert er.main([summary, good, "--resend"]) == 2
+    assert "mailer: outdated - this Apps Script refuses ZIP files" in capsys.readouterr().out
+    assert [x["action"] for x in bodies()] == ["check"]
 
 
 @responses.activate
