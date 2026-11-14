@@ -170,3 +170,23 @@ def test_review_splits_into_parts_numbers_on_and_applies_each_verdict_once(tmp_p
     assert r["compliance_flags"] == "NONE" and r["review"]["before"].startswith("CRITICAL")
     assert review.apply(entries, str(folder)) == {"kept": 0, "changed": 0, "failed": []}
     assert review.prepare(entries, str(folder)) == []
+
+
+def test_missing_transcripts_are_retried_twice_then_marked_final(tmp_path, monkeypatch):
+    from analytics.discovery_audit_module import __main__ as cli
+    monkeypatch.setattr(cli, "BASE", str(tmp_path))
+    e = {"lead": LEAD, "calls_day": "2026-11-11", "calls": [call(LEAD["ProspectID"], "2026-11-11 08:00:00", transcript=None)]}
+
+    def run(day: str, carried: list[dict]) -> list[dict]:
+        (tmp_path / day).mkdir()
+        (tmp_path / day / "leads.json").write_text(json.dumps(carried))
+        return carried
+
+    run("2026-11-11", [e])
+    second = cli.retry_earlier("2026-11-12")
+    assert [x["tries"] for x in second] == [2] and "try 2 of 3" in report.status(second[0], str(tmp_path))[1]
+    run("2026-11-12", second)
+    third = cli.retry_earlier("2026-11-13")
+    assert [x["tries"] for x in third] == [3] and "not retried again" in report.status(third[0], str(tmp_path))[1]
+    run("2026-11-13", third)
+    assert cli.retry_earlier("2026-11-14") == []

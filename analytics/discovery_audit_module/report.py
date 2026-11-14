@@ -51,13 +51,20 @@ def callers(entry: dict) -> str:
     return f"Unverified (user id {', '.join(sorted(ids))})" if ids else "Unverified"
 
 
+MAX_TRIES = 3  # the run for the day itself plus the next two mornings
+
+
 def status(entry: dict, folder: str) -> tuple[str, str]:
     """(status, reason) for one lead."""
     conv = [c for c in entry["calls"] if is_conversation(c)]
     if not conv:
         return "NOT_AUDITABLE", f"No answered call of {MIN_CONVERSATION_SECS}+ seconds that day (voicemail, screening or very short calls only)"
     if not any(c.get("transcript") for c in conv):
-        return "TRANSCRIPT_NOT_FOUND", "Answered call(s) found, but Salesa holds no transcript yet; retried in the next run"
+        if entry.get("tries", 1) >= MAX_TRIES:
+            return "TRANSCRIPT_NOT_FOUND", (f"No transcript after {MAX_TRIES} daily tries; not retried again. Team leader: check the "
+                                            "recording in the dialer and Salesa, or review this call by hand")
+        return "TRANSCRIPT_NOT_FOUND", (f"Answered call(s) found, but Salesa holds no transcript yet (try {entry.get('tries', 1)} of "
+                                        f"{MAX_TRIES}); retried in the next run")
     p = f"{folder}/results/{reading.lead_key(entry)}.json"
     if reading.finished(p):
         return "ANALYZED", ""
@@ -330,6 +337,7 @@ HOW = [
     "no objection but something left open = 0.75; H 7.0+. The PDF score out of 10 is the strict total (HOT 7+, WARM 4-6.9, COLD below 4).",
     "Checks: every quoted phrase was matched word for word against the transcripts (a row that fails is redone), and every compliance "
     "decision was re-checked by a second Claude reading against the prompt's fixed bar.",
-    "Not audited: leads with only voicemail, screening or very short calls, or with no transcript yet (retried in the next run).",
+    "Not audited: leads with only voicemail, screening or very short calls, or with no transcript yet. A missing transcript is tried "
+    "again on the next two mornings (the lead then appears in that day's report); after the third try it is marked final for a team leader to check by hand.",
     "The workbook holds lead phone numbers: share it only inside the sales team.",
 ]

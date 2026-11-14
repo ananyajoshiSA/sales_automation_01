@@ -40,7 +40,7 @@ conversation that day, the previous day's calls are audited and the row says so.
 - Scores are computed by code from the reader's five subscores: the sheet's H/M/L uses the prompt's relaxed rule;
   a strict column and the PDF's score out of 10 use the strict objections rule (H/HOT from 7.0).
 - Every quote must match the transcripts word for word (`check`); every compliance decision gets a second reading.
-- Statuses: ANALYZED, PENDING_ANALYSIS, ANALYSIS_FAILED, TRANSCRIPT_NOT_FOUND (carried into the next two runs),
+- Statuses: ANALYZED, PENDING_ANALYSIS, ANALYSIS_FAILED, TRANSCRIPT_NOT_FOUND (carried into the next two runs, then marked final: 3 tries in all),
   NOT_AUDITABLE (voicemail, screening or calls under 30 s only). Every lead appears in the workbook, audited or not.
 - Lead details stay in `data/discovery_audit/` (git-ignored); the per-caller trend history is
   `data/discovery_audit/history.jsonl`.

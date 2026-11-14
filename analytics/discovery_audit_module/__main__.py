@@ -45,15 +45,23 @@ def transcript_of(day: str, key: str) -> str:
 
 
 def retry_earlier(day: str, days_back: int = 2) -> list[dict]:
-    """Leads from the last two runs still waiting for a transcript: tried again and carried into this run."""
-    out = []
-    for k in range(1, days_back + 1):
-        d = find.prev_day(day) if k == 1 else find.prev_day(find.prev_day(day))
+    """Leads from the last two runs still waiting for a transcript, carried into this run until their third try."""
+    last: dict[str, dict] = {}
+    for k in range(days_back, 0, -1):  # oldest first, so the latest run's copy (and its try count) wins
+        d = day
+        for _ in range(k):
+            d = find.prev_day(d)
         p = f"{folder(d)}/leads.json"
         if os.path.exists(p):
             for e in json.load(open(p)):
                 if report.status(e, f"{folder(d)}/reading")[0] == "TRANSCRIPT_NOT_FOUND":
-                    out.append({**e, "note": (e.get("note") + " " if e.get("note") else "") + f"Carried over from the {d} run (transcript was late)."})
+                    last[reading.lead_key(e)] = {**e, "_run": d}
+    out = []
+    for e in last.values():
+        if e.get("tries", 1) < report.MAX_TRIES:
+            run = e.pop("_run")
+            out.append({**e, "tries": e.get("tries", 1) + 1,
+                        "note": (e.get("note") + " " if e.get("note") else "") + f"Carried over from the {run} run (transcript was late)."})
     return out
 
 
