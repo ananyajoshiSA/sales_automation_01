@@ -1,9 +1,9 @@
 /**
  * On-request report mailer (docs/email_report.md).
  *
- * Emails a set of completed reports (PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG images, HTML), all in one email,
- * to the approved recipients when the /email-report skill posts them here, which happens only when someone asks
- * "email this report". Nothing here runs on a timer.
+ * Emails a set of completed reports (PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG images, HTML, or a ZIP holding only
+ * those), all in one email, to the approved recipients when the /email-report skill posts them here, which happens
+ * only when someone asks "email this report". Nothing here runs on a timer. On WhatsApp a ZIP goes as a Drive link.
  *
  * Every setting lives in Script Properties (Project Settings), never in this file:
  *   DELIVERY_MODE      off (default) | test | live
@@ -45,10 +45,13 @@ var TYPES = {
   png: {mime: 'image/png', magic: [0x89, 0x50, 0x4e, 0x47], label: 'PNG image'},
   jpg: {mime: 'image/jpeg', magic: [0xff, 0xd8, 0xff], label: 'JPEG image'},
   jpeg: {mime: 'image/jpeg', magic: [0xff, 0xd8, 0xff], label: 'JPEG image'},
-  html: {mime: 'text/html', magic: null, label: 'HTML'}
+  html: {mime: 'text/html', magic: null, label: 'HTML'},
+  zip: {mime: 'application/zip', magic: ZIP, label: 'ZIP of reports'}
 };
-var FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html)$/i;
-var NAME_RULE = 'file name must end in .pdf, .xlsx, .xls, .csv, .docx, .pptx, .png, .jpg or .html and use only letters, digits, spaces and . _ ( ) + -';
+var FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html|zip)$/i;
+var NAME_RULE = 'file name must end in .pdf, .xlsx, .xls, .csv, .docx, .pptx, .png, .jpg, .html or .zip and use only letters, digits, spaces and . _ ( ) + -';
+// What a ZIP may hold: report files only, no folders and no ZIP inside a ZIP, so it can't carry anything else past the checks.
+var INNER_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html)$/i;
 var TZ = 'Asia/Kolkata';
 var MODES = ['off', 'test', 'live'];
 var MAX_BYTES = 20 * 1024 * 1024;  // Gmail's attachment cap is 25 MB per email; stay clear of it
@@ -160,9 +163,20 @@ function typeOf_(name, bytes) {
   if (!m) return null;
   var t = TYPES[m[1].toLowerCase()];
   if (t.magic) {
-    return t.magic.every(function (b, i) { return i < bytes.length && (bytes[i] + 256) % 256 === b; }) ? t : null;
+    var ok = t.magic.every(function (b, i) { return i < bytes.length && (bytes[i] + 256) % 256 === b; });
+    return ok && (t !== TYPES.zip || zipHoldsReports_(name, bytes)) ? t : null;
   }
   return bytes.slice(0, 4096).indexOf(0) < 0 ? t : null;  // CSV and HTML are text: no zero bytes
+}
+
+/** True when the ZIP opens and holds at least one file, every one a report type by name and none in a folder. */
+function zipHoldsReports_(name, bytes) {
+  try {
+    var inner = Utilities.unzip(Utilities.newBlob(bytes, TYPES.zip.mime, name));
+    return inner.length > 0 && inner.every(function (b) { return INNER_NAME.test(String(b.getName() || '')); });
+  } catch (e) {
+    return false;
+  }
 }
 
 function message_(files, mode, liveCount) {
@@ -187,6 +201,7 @@ function checkFile_(f) {
   if (!FILE_NAME.test(name)) return {rejected: name + ': ' + NAME_RULE};
   if (!f.bytes.length) return {rejected: name + ': file is empty'};
   var type = typeOf_(name, f.bytes);
+  if (!type && /\.zip$/i.test(name)) return {rejected: name + ': a ZIP must open and hold only report files (PDF, Excel, CSV, Word, PowerPoint, images, HTML), no folders'};
   if (!type) return {rejected: name + ': file content does not match its .' + name.split('.').pop() + ' name'};
   var sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, f.bytes));
   if (String(f.sha256 || '').toLowerCase() !== sha) {
@@ -822,7 +837,7 @@ function doPost(e) {
       var bad = cfg.mode === 'off' ? '' : listProblem_(cfg, name);
       if (bad) return reply_({ok: false, status: 'unknown_list', detail: bad});
       var out = {ok: true, status: cfg.mode === 'off' ? 'off' : 'ready', mode: cfg.mode, recipients: recipientsFor_(cfg, name).length,
-                 multi: true, list: name || '', lists: Object.keys(cfg.lists).sort()};
+                 multi: true, zip: true, list: name || '', lists: Object.keys(cfg.lists).sort()};
       var w = readWhatsApp_();
       if (w.mode !== 'off') out.whatsapp = {mode: w.mode, numbers: name && w.lists[name] ? w.lists[name].length : 0, problem: w.problem};
       return reply_(out);

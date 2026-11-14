@@ -15,6 +15,31 @@ const FILES = {
 };
 const PDF = 'team_calling_report_2026-10-11.pdf';
 
+// A stored (uncompressed) ZIP of {name: text}, and a reader of its local headers, enough for Utilities.unzip.
+function zipOf(entries) {
+  const parts = Object.entries(entries).map(([name, text]) => {
+    const n = Buffer.from(name), d = Buffer.from(text), h = Buffer.alloc(30);
+    h.writeUInt32LE(0x04034b50, 0); h.writeUInt16LE(20, 4);
+    h.writeUInt32LE(d.length, 18); h.writeUInt32LE(d.length, 22); h.writeUInt16LE(n.length, 26);
+    return Buffer.concat([h, n, d]);
+  });
+  return Buffer.concat([...parts, Buffer.from('PK\u0005\u0006'), Buffer.alloc(18)]);
+}
+
+function unzip(buf) {
+  const out = [];
+  let at = 0;
+  while (at + 30 <= buf.length && buf.readUInt32LE(at) === 0x04034b50) {
+    const size = buf.readUInt32LE(at + 18), n = buf.readUInt16LE(at + 26), extra = buf.readUInt16LE(at + 28);
+    if (at + 30 + n + extra + size > buf.length) throw new Error('Could not decompress the zip');
+    const name = buf.subarray(at + 30, at + 30 + n).toString();
+    out.push({ getName: () => name });
+    at += 30 + n + extra + size;
+  }
+  if (at + 4 > buf.length || buf.readUInt32LE(at) !== 0x06054b50) throw new Error('Could not decompress the zip');
+  return out;
+}
+
 const signed = (buf) => [...buf].map((b) => (b > 127 ? b - 256 : b));
 const unsigned = (arr) => Buffer.from(arr.map((b) => (b + 256) % 256));
 const sha = (buf) => createHash('sha256').update(buf).digest('hex');
@@ -147,6 +172,7 @@ function load(settings = {}, { mailFails = 0, driveOpts = {}, watiOpts = {} } = 
         ? { getAs: () => ({ getBytes: () => signed(Buffer.from(`%PDF-1.4\n${bytes}`)) }), getBytes: () => signed(Buffer.from(bytes)),
             bytes: Buffer.from(bytes), mime, name }
         : { bytes: unsigned(bytes), mime, name }),
+      unzip: (blob) => unzip(blob.bytes),
     },
     DriveApp: dr.api,
     UrlFetchApp: wa.api,
@@ -176,7 +202,7 @@ const TEST = { ...LIVE, DELIVERY_MODE: 'test' };
 test('nothing is emailed until delivery is switched on', () => {
   const run = load({ ALLOWED_DOMAINS: 'example.in', RECIPIENTS: 'a@example.in', UPLOAD_TOKEN: TOKEN });
   assert.deepEqual([run.send().ok, run.send().status], [true, 'off']);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0, multi: true, list: '', lists: [] });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0, multi: true, zip: true, list: '', lists: [] });
   assert.equal(run.sent.length, 0);
 });
 
@@ -204,9 +230,9 @@ test('unsafe settings stop delivery with a plain reason', () => {
 });
 
 test('check reports mode and recipient count, and sends nothing', () => {
-  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, list: '', lists: [] });
+  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, zip: true, list: '', lists: [] });
   const run = load(TEST);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1, multi: true, list: '', lists: [] });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1, multi: true, zip: true, list: '', lists: [] });
   assert.equal(run.sent.length, 0);
 });
 
@@ -397,12 +423,29 @@ test('Word, PowerPoint, old Excel, images and HTML go out with the right type; f
   assert.equal(run.send('run.exe', {}, FILES[PDF]).status, 'rejected');
 });
 
+test('a ZIP of reports goes out as one attachment; a ZIP holding anything else, a folder or a broken ZIP does not', () => {
+  const run = load(LIVE);
+  const good = { 'Call_Feedback_Batch_13112026_56leads.zip': zipOf({ 'Lead_One_13112026.pdf': '%PDF-1.7', 'Batch_Summary.csv': 'a,b\n' }) };
+  assert.equal(sendMany(run, Object.keys(good), {}, good).status, 'sent');
+  assert.deepEqual([...run.sent[0].attachments.map((a) => [a.name, a.mime])],
+    [['Call_Feedback_Batch_13112026_56leads.zip', 'application/zip']]);
+  for (const inner of [{ 'run.exe': 'MZ' }, { 'nested.zip': 'PK' }, { 'leads/one.pdf': '%PDF-1.7' }, {}]) {
+    const bad = { 'bad.zip': zipOf(inner) };
+    const r = sendMany(run, ['bad.zip'], {}, bad);
+    assert.equal(r.status, 'rejected');
+    assert.match(r.detail, /a ZIP must open and hold only report files/);
+  }
+  const broken = { 'broken.zip': Buffer.from('PK\u0003\u0004 not really a zip') };
+  assert.equal(sendMany(run, ['broken.zip'], {}, broken).status, 'rejected');
+  assert.equal(run.sent.length, 1);
+});
+
 const LISTS = { ...LIVE, LIST_ELITE: 'lead1@example.in, tl@example.in', LIST_DEEPANSHI: 'lead2@example.in; dk@example.in' };
 
 test('a named list sends to that list only; no list sends to RECIPIENTS', () => {
   const run = load(LISTS);
   assert.deepEqual(run.post({ token: TOKEN, action: 'check', list: 'Elite' }),
-    { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, list: 'elite', lists: ['deepanshi', 'elite'] });
+    { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, zip: true, list: 'elite', lists: ['deepanshi', 'elite'] });
   const r = run.send(PDF, { list: 'elite' });
   assert.equal(r.status, 'sent');
   assert.match(r.detail, /list elite/);
@@ -444,6 +487,17 @@ const WA = { ...LISTS, WHATSAPP_MODE: 'live', WATI_TOKEN: 'wati-secret-key', WAT
              WA_LIST_ELITE: '919800000001, +919800000002' };
 const PLAN = { 'Elite_call_plan_Fri_23_Oct.pdf': Buffer.from('%PDF-1.7\nplan'), 'Elite_call_plan_Fri_23_Oct.xlsx': Buffer.from('PK\u0003\u0004 plan') };
 const files = (run) => Object.values(run.drive).filter((x) => x.kind === 'file');
+
+test('on WhatsApp a ZIP goes as a Drive link in the text of the PDF message, never as a document', () => {
+  const run = load(WA);
+  const set = { 'Summary_13112026.pdf': Buffer.from('%PDF-1.7\nsummary'), 'Lead_PDFs_13112026.zip': zipOf({ 'a.pdf': '%PDF-1.7' }) };
+  assert.equal(sendMany(run, Object.keys(set), { list: 'elite' }, set).status, 'sent');
+  assert.equal(run.wati.length, 2);  // the PDF only, to each of 2 numbers
+  const [zip] = files(run);
+  const text = Object.fromEntries(run.wati[0].body.parameters.map((p) => [p.name, p.value]))[2];
+  assert.equal(zip.name, 'Lead_PDFs_13112026.zip');
+  assert.match(text, new RegExp(`\\(PDF; ZIP of reports: https://drive\\.google\\.com/file/d/${zip.id}/view\\)$`));
+});
 
 test('WhatsApp is off until WHATSAPP_MODE is live: email goes out as before, nothing else happens', () => {
   const run = load({ ...WA, WHATSAPP_MODE: undefined });

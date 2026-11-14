@@ -1,4 +1,4 @@
-"""Email the latest set of reports (PDF, Excel, CSV, Word, PowerPoint, images, HTML) in one email, only when asked
+"""Email the latest set of reports (PDF, Excel, CSV, Word, PowerPoint, images, HTML, ZIP) in one email, only when asked
 (docs/email_report.md).
 
 The /email-report skill runs this when someone types /email-report or asks "email this report". Nothing runs
@@ -36,6 +36,7 @@ import subprocess
 import sys
 import tempfile
 import time
+import zipfile
 from datetime import datetime
 
 import requests
@@ -54,8 +55,10 @@ SKIP_DIRS = {"data", "node_modules", "__pycache__", "venv", "uploads"}  # plus h
 ZIP, OLE = b"PK\x03\x04", b"\xd0\xcf\x11\xe0\xa1\xb1\x1a\xe1"
 TYPES = {".pdf": ("PDF", b"%PDF-"), ".xlsx": ("Excel", ZIP), ".xls": ("Excel", OLE), ".csv": ("CSV", None),
          ".docx": ("Word", ZIP), ".pptx": ("PowerPoint", ZIP), ".png": ("PNG image", b"\x89PNG"),
-         ".jpg": ("JPEG image", b"\xff\xd8\xff"), ".jpeg": ("JPEG image", b"\xff\xd8\xff"), ".html": ("HTML", None)}
-NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html)$", re.I)  # the mailer's own rule
+         ".jpg": ("JPEG image", b"\xff\xd8\xff"), ".jpeg": ("JPEG image", b"\xff\xd8\xff"), ".html": ("HTML", None),
+         ".zip": ("ZIP of reports", ZIP)}
+NAME = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html|zip)$", re.I)  # the mailer's own rule
+INNER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html)$", re.I)  # what a ZIP may hold
 NOT_FINISHED = re.compile(r"(?<![a-z])(draft|partial|tmp|temp)(?![a-z])", re.I)  # report_draft.pdf, not attempts.csv
 MAX_BYTES = 20 * 1024 * 1024  # Gmail takes 25 MB of attachments per email; the mailer stays below it
 MAX_FILES = 10
@@ -92,7 +95,7 @@ def problem(path: str, now: float | None = None) -> str | None:
     name = os.path.basename(path)
     ext = os.path.splitext(name)[1].lower()
     if ext not in TYPES:
-        return "only PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG image and HTML files can be emailed"
+        return "only PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG image, HTML and ZIP files can be emailed"
     if not NAME.match(name) or NOT_FINISHED.search(name):
         return "the name marks a draft or unfinished file, or uses characters the mailer refuses"
     real = os.path.realpath(path)
@@ -109,7 +112,19 @@ def problem(path: str, now: float | None = None) -> str | None:
     magic = TYPES[ext][1]
     if magic and not head.startswith(magic) or not magic and b"\0" in head:
         return f"the content is not a real {TYPES[ext][0]} file"
+    if ext == ".zip" and not zip_holds_reports(real):
+        return "a ZIP must open and hold only report files (PDF, Excel, CSV, Word, PowerPoint, images, HTML), no folders"
     return None
+
+
+def zip_holds_reports(path: str) -> bool:
+    """The mailer's own ZIP rule: it opens, holds at least one file, and every one is a report type outside any folder."""
+    try:
+        with zipfile.ZipFile(path) as z:
+            names = z.namelist()
+            return bool(names) and all(INNER.match(n) for n in names) and z.testzip() is None
+    except (zipfile.BadZipFile, OSError, RuntimeError, ValueError):
+        return False
 
 
 def finished(now: float | None = None) -> list[str]:
@@ -288,6 +303,10 @@ def main(argv: list[str]) -> int:
         if len(paths) > 1 and not c.get("multi"):
             print("mailer: outdated - this Apps Script takes one file per email. Paste the new email_report/Code.gs and "
                   "deploy a new version (docs/email_report.md), or send the files one at a time. Nothing was sent.")
+            return 2
+        if any(p.lower().endswith(".zip") for p in paths) and not c.get("zip"):
+            print("mailer: outdated - this Apps Script refuses ZIP files. Paste the new email_report/Code.gs and deploy a "
+                  "new version (docs/email_report.md), or send the set without the ZIP. Nothing was sent.")
             return 2
         if a.check:
             return 0
