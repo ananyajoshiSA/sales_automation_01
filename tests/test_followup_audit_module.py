@@ -96,7 +96,7 @@ def test_reader_text_marks_background_and_scored_calls_and_the_custom_instructio
     assert text.index("BACKGROUND, NOT SCORED") < text.index("financial issue") < text.index("SCORED CALLS") < text.index("six dollars")
     assert "=== CALL 12-11 10:30 IST" in text and "up to the move to Follow Up For Closure on 13-11-2026 12:08 IST" in text
     ci = reading.pack_item(e)["custom_instructions"]
-    assert "2 follow-up call(s)" in ci and "never score them" in ci and "next 48 hours count from the move" in ci
+    assert "These are 2 follow-up calls" in ci and "The 1 call under BACKGROUND" in ci and "never score them" in ci and "next 48 hours count from the move" in ci
     assert reading.pack_item(e)["scored_call_labels"] == ["12-11 10:30", "12-11 13:30"]
 
 

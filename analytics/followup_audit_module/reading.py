@@ -64,11 +64,15 @@ def lead_text(entry: dict) -> str:
     return "\n\n".join(parts)
 
 
+def calls_word(n: int) -> str:
+    return f"{n} call" if n == 1 else f"{n} calls"
+
+
 def custom_instructions(entry: dict) -> str:
     n = len(entry["calls"])
-    bg = (f" The {len(entry['background'])} call(s) under BACKGROUND are the discovery call: use them only to understand the lead "
+    bg = (f" The {calls_word(len(entry['background']))} under BACKGROUND are the discovery call: use them only to understand the lead "
           "(profile, pain, goals, what was promised); never score them, flag them or coach on them.") if entry.get("background") else ""
-    return (f"These are {n} follow-up call(s) with this lead, from {start_text(entry)} up to the move to {STAGE} on "
+    return (f"These are {calls_word(n).replace('call', 'follow-up call')} with this lead, from {start_text(entry)} up to the move to {STAGE} on "
             f"{ist(entry['moved_utc'])} IST, read together as one conversation in time order.{bg} Judge the lead as it stood at "
             f"the end of the last scored call; the next 48 hours count from the move. Discovery-focused cells describe what these "
             f"calls show (write \"Not discussed\" where they do not cover it). Any scored call that is voicemail, an IVR menu, a "
