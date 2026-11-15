@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import os
 from pathlib import Path
+from typing import Callable
 
 from analytics.discovery_audit_module import reading
 
@@ -29,17 +30,18 @@ Remove it and say so in pitch_discipline as risky framing if relevant.
 PER_PART = 14  # leads per reviewer: a reviewer re-reads every transcript in its part
 
 
-def prepare(entries: list[dict], folder: str) -> list[str]:
-    """Writes review/in_NN.json parts (leads not yet re-checked). Each reviewer writes the matching out_NN.json."""
+def prepare(entries: list[dict], folder: str, text: Callable[[dict], str] = reading.day_text) -> list[str]:
+    """Writes review/in_NN.json parts (leads not yet re-checked). Each reviewer writes the matching out_NN.json.
+    ``text`` gives the transcript a lead was read from (the follow-up audit passes its own)."""
     os.makedirs(f"{folder}/review", exist_ok=True)
     items = []
     for e in entries:
         p = f"{folder}/results/{reading.lead_key(e)}.json"
-        if reading.finished(p, reading.day_text(e)):
+        if reading.finished(p, text(e)):
             r = json.load(open(p))
             if "review" not in r:
                 items.append({"lead_key": r["lead_key"], "compliance_flags": r["compliance_flags"],
-                              "pitch_discipline": r["sheet"]["Pitch Discipline"], "transcript": reading.day_text(e)})
+                              "pitch_discipline": r["sheet"]["Pitch Discipline"], "transcript": text(e)})
     Path(f"{folder}/review/REVIEW.md").write_text(REVIEW)
     # Later rounds (late transcripts, carried-over leads) number on, so an earlier round's out file is never overwritten.
     start = max((int(f.stem[3:]) for f in Path(f"{folder}/review").glob("in_*.json")), default=0)
@@ -50,7 +52,12 @@ def prepare(entries: list[dict], folder: str) -> list[str]:
     return paths
 
 
-def apply(entries: list[dict], folder: str) -> dict:
+def _recheck(path: str, entry: dict) -> list[str]:
+    return reading.check(path, reading.day_text(entry))
+
+
+def apply(entries: list[dict], folder: str, text: Callable[[dict], str] = reading.day_text,
+          recheck: Callable[[str, dict], list[str]] = _recheck) -> dict:
     """Writes each verdict into its result. Returns {"kept", "changed", "failed": [(lead_key, problems)]}.
 
     A verdict counts only for the reading it re-checked: same flags and same calls as in its in_NN.json item, so a
@@ -66,7 +73,7 @@ def apply(entries: list[dict], folder: str) -> dict:
             if not ent or not item or not os.path.exists(p):
                 continue
             r = json.load(open(p))
-            if "review" in r or item["compliance_flags"] != r["compliance_flags"] or item["transcript"] != reading.day_text(ent):
+            if "review" in r or item["compliance_flags"] != r["compliance_flags"] or item["transcript"] != text(ent):
                 continue
             old = r["compliance_flags"]
             if v["verdict"] == "change":
@@ -75,7 +82,7 @@ def apply(entries: list[dict], folder: str) -> dict:
                 r["sheet"]["Pitch Discipline"] = v["pitch_discipline"]
             r["review"] = {"verdict": v["verdict"], "reason": v.get("reason", ""), "before": old}
             json.dump(r, open(p, "w"), indent=1, ensure_ascii=False)
-            bad = reading.check(p, reading.day_text(ent))
+            bad = recheck(p, ent)
             if bad:
                 done["failed"].append((v["lead_key"], bad))
             else:
