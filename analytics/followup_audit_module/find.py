@@ -68,6 +68,16 @@ def real_dcd_move(history: list[dict], calls: list[dict], before: datetime) -> t
     return None, (moves[-1] if moves else None)
 
 
+def once(calls: list[dict]) -> list[dict]:
+    """Each call once: LeadSquared sometimes stores one call as two activities (same start, caller, length, status)."""
+    seen: dict[tuple, dict] = {}
+    for c in calls:
+        k = (c.get("start_utc"), c.get("user_id") or c.get("caller"), c.get("duration"), c.get("status"))
+        if k not in seen or (c.get("recording_url") and not seen[k].get("recording_url")):
+            seen[k] = c
+    return list(seen.values())
+
+
 def _brief(c: dict | None) -> dict | None:
     return c and {k: c.get(k) for k in ("start_utc", "caller", "duration", "status")}
 
@@ -87,7 +97,7 @@ def pick(lead: dict, history: list[dict], calls: list[dict], day: str) -> dict |
     start, reason = max(((t, r) for t, r in options if t), default=(floor, "30_days"))
     if start < floor:
         start, reason = floor, "30_days"
-    mine = sorted((c for c in calls if _start(c)), key=lambda c: c["start_utc"])
+    mine = sorted((c for c in once(calls) if _start(c)), key=lambda c: c["start_utc"])
     inside = [c for c in mine if start <= _start(c) < end]
     scored = [c for c in inside if answered(c)]
     background = []

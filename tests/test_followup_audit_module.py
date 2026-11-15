@@ -57,6 +57,16 @@ def test_a_discovery_move_with_no_conversation_before_it_is_ignored_and_the_wind
     assert e["start_reason"] == "30_days" and len(e["background"]) == 1 and len(e["calls"]) == 1
 
 
+def test_one_call_stored_as_two_activities_is_read_once():
+    hist = [stage("2026-11-10 05:00:00", DCD), stage("2026-11-13 06:38:00", FU)]
+    twin = dict(call("2026-11-10 04:30:00", user_id="u1"), activity_id="a-twin", recording_url="https://rec/1")
+    calls = [call("2026-11-10 04:30:00", user_id="u1"), twin, call("2026-11-12 05:00:00", user_id="u1"),
+             call("2026-11-12 05:00:00", user_id="u2", caller="Caller Two")]     # same time, another caller: two calls
+    e = find.pick(LEAD, hist, calls, DAY)
+    assert [c["activity_id"] for c in e["background"]] == ["a-twin"]           # the copy with the recording is kept
+    assert len(e["calls"]) == 2
+
+
 def test_no_real_conversation_in_the_window_means_moved_without_a_conversation(tmp_path):
     hist = [stage("2026-11-06 05:07:00", DCD), stage("2026-11-13 05:48:00", FU)]
     calls = [call("2026-11-06 04:50:00", secs=900, caller="Caller One"),                 # the discovery call
