@@ -186,3 +186,21 @@ def test_an_old_call_without_a_recording_is_scored_around_but_a_recent_one_is_wa
     assert report.waiting(e) == [] and report.status(e, str(tmp_path))[0] == "PENDING_ANALYSIS"
     e["calls"].append(call("2026-11-13 05:00:00", secs=300, transcript=None))      # the morning of the move
     assert len(report.waiting(e)) == 1 and report.status(e, str(tmp_path))[0] == "TRANSCRIPT_NOT_FOUND"
+
+
+def test_every_tab_with_a_lead_shows_its_number_so_a_search_finds_it(tmp_path, monkeypatch):
+    import openpyxl
+    monkeypatch.setattr(report, "print_pdf", lambda doc, html, pdf: open(pdf, "wb").write(b"%PDF-1.4"))
+    hist = [stage("2026-11-06 05:07:00", DCD), stage("2026-11-13 05:48:00", FU)]
+    moved = find.pick(LEAD, hist, [call("2026-11-06 04:50:00", secs=900), call("2026-11-14 05:00:00", secs=500)], DAY)
+    late = entry(transcript=None)
+    late["lead"] = {**LEAD, "ProspectID": "lead-0002-bbbb", "Phone": None, "Mobile": "9123456780"}
+    outcomes = [{"lead": "Test", "mobile": "9876543210", "caller": "Ravi", "label": "M", "moved": "06-11-2026 10:37", "enrolled": "No"}]
+    out = report.build(DAY, [moved, late], str(tmp_path / "f"), str(tmp_path / "out"), str(tmp_path / "history.jsonl"),
+                       ddir=str(tmp_path / "d"), outcomes=outcomes)
+    wb = openpyxl.load_workbook(out["xlsx"])
+    for tab, number in (("Moved without a conversation", "9876543210"), ("Needs a Check", "9123456780"),
+                        ("Calls", "9123456780"), ("7-day outcome", "9876543210")):
+        ws = wb[tab]
+        col = [c.value for c in ws[1]].index("Mobile Number")
+        assert number in [r[col] for r in ws.iter_rows(min_row=2, values_only=True)], tab

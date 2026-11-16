@@ -257,6 +257,15 @@ EXTRA = ["Discovery audit (H/M/L)", "Strict Conversion Potential (H,M,L)", "Scor
          "Background calls (not scored)", "Compliance re-check", "Note"]
 
 
+SIDE = FRONT[:2] + ["Mobile Number"] + FRONT[2:-1]  # the other tabs: no audit status, but searchable by number
+
+
+def side(i: int, ent: dict) -> list:
+    """A lead's columns on the tabs other than the audit: the audit tab's front columns, with the lead's number."""
+    f = front(i, ent, "")[:-1]
+    return f[:2] + [mobile(ent)] + f[2:]
+
+
 def front(i: int, ent: dict, st: str) -> list:
     l = ent["lead"]
     return [i, lead_name(ent), l.get("ProspectStage"), l.get("OwnerIdName"), callers(ent), reading.ist(ent["moved_utc"]),
@@ -324,40 +333,40 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
     sm.column_dimensions["A"].width = 60
 
     mv = wb.create_sheet("Moved without a conversation")
-    mv.append(FRONT[:-1] + ["Last real call before the window", "First real call after the move", "What happened", "What to do"])
+    mv.append(SIDE + ["Last real call before the window", "First real call after the move", "What happened", "What to do"])
     for i, (ent, res) in enumerate(moved, 1):
         what, todo = moved_text(ent, res)
-        mv.append(front(i, ent, "")[:-1] + [when(ent.get("last_call_before")), when(ent.get("first_call_after")), what, todo])
-    _style(mv, [4, 20, 18, 18, 18, 18, 30, 30, 30, 45, 55])
+        mv.append(side(i, ent) + [when(ent.get("last_call_before")), when(ent.get("first_call_after")), what, todo])
+    _style(mv, [4, 20, 13, 18, 18, 18, 18, 30, 30, 30, 45, 55])
 
     na = wb.create_sheet("Needs a Check")
-    na.append(FRONT[:-1] + ["What happened", "What to do"])
+    na.append(SIDE + ["What happened", "What to do"])
     for i, (ent, st, _) in enumerate(missing, 1):
         what, todo = needs_check(ent, st)
-        na.append(front(i, ent, "")[:-1] + [what, todo])
-    _style(na, [4, 20, 18, 18, 18, 18, 30, 45, 50])
+        na.append(side(i, ent) + [what, todo])
+    _style(na, [4, 20, 13, 18, 18, 18, 18, 30, 45, 50])
 
     cl = wb.create_sheet("Calls")
-    cl.append(["Lead (LeadSquared)", "Part", "Call start (IST)", "Direction", "Talk time", "Caller (LeadSquared)", "Transcript"])
+    cl.append(["Lead (LeadSquared)", "Mobile Number", "Part", "Call start (IST)", "Direction", "Talk time", "Caller (LeadSquared)", "Transcript"])
     for ent in entries:
         for part, cs in (("Background (not scored)", ent.get("background") or []), ("Scored", ent["calls"])):
             for c in cs:
-                cl.append([lead_name(ent), part, reading.ist(c["start_utc"]), c.get("direction"), mmss(c.get("duration") or 0),
+                cl.append([lead_name(ent), mobile(ent), part, reading.ist(c["start_utc"]), c.get("direction"), mmss(c.get("duration") or 0),
                            c.get("caller") or "", "Yes" if c.get("transcript") else "Not found"])
-    _style(cl, [22, 18, 17, 10, 9, 20, 11])
+    _style(cl, [22, 13, 18, 17, 10, 9, 20, 11])
 
     oc = wb.create_sheet("7-day outcome")
     if outcomes is None:
         oc.append(["No audit from 7 days earlier on this machine, so no outcome check this time."])
     else:
-        oc.append(["Lead (LeadSquared)", "Caller(s)", "Audited H/M/L", f"Moved to {STAGE} (IST)", "Enrolled since the move"])
+        oc.append(["Lead (LeadSquared)", "Mobile Number", "Caller(s)", "Audited H/M/L", f"Moved to {STAGE} (IST)", "Enrolled since the move"])
         for o in outcomes:
-            oc.append([o["lead"], o["caller"], o["label"], o["moved"], o["enrolled"]])
+            oc.append([o["lead"], o.get("mobile", ""), o["caller"], o["label"], o["moved"], o["enrolled"]])
         oc.append([])
         for lab in ("H", "M", "L"):
             got = [o for o in outcomes if o["label"] == lab]
             oc.append([f"{POT[lab]}: {sum(o['enrolled'] == 'Yes' for o in got)} of {len(got)} enrolled (first-time enrolment, Course Enrolled)"])
-    _style(oc, [24, 20, 12, 18, 30])
+    _style(oc, [24, 13, 20, 12, 18, 30])
 
     how = wb.create_sheet("How This Was Made")
     for t in HOW:

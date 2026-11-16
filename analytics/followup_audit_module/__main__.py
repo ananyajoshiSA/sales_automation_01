@@ -96,7 +96,7 @@ def outcomes(day: str, client: LeadSquaredClient | None = None) -> list[dict] | 
         moves = dfind.stage_changes_to(h, ENROLLED)
         moved = utc(e["moved_utc"])
         enrolled = "Before the move (not first-time)" if any(t < moved for t in moves) else "Yes" if moves else "No"
-        out.append({"lead": report.lead_name(e), "caller": report.callers(e), "label": reading.relaxed_label(reading.totals(r["subscores"])[0]),
+        out.append({"lead": report.lead_name(e), "mobile": report.mobile(e), "caller": report.callers(e), "label": reading.relaxed_label(reading.totals(r["subscores"])[0]),
                     "moved": reading.ist(e["moved_utc"]), "enrolled": enrolled})
     json.dump(out, open(out_path, "w"), indent=1)
     return out
