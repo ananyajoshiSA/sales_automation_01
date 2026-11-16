@@ -206,3 +206,19 @@ def test_missing_transcripts_are_retried_twice_then_marked_final(tmp_path, monke
     assert [x["tries"] for x in third] == [3] and "not retried again" in report.status(third[0], str(tmp_path))[1]
     run("2026-11-13", third)
     assert cli.retry_earlier("2026-11-14") == []
+
+
+def test_every_tab_with_a_lead_shows_its_number_so_a_search_finds_it(tmp_path, monkeypatch):
+    import openpyxl
+    monkeypatch.setattr(report, "print_pdf", lambda doc, html, pdf: open(pdf, "wb").write(b"%PDF-1.4"))
+    moved = find.pick(LEAD, [stage("2026-11-13 04:00:00", "Discovery Call Done")],
+                      [call(LEAD["ProspectID"], "2026-11-13 10:00:00")], DAY)
+    late = {"lead": {**LEAD, "ProspectID": "lead-0002-bbbb", "Phone": None, "Mobile": "9123456780"},
+            "stage_changed_utc": "2026-11-13 09:00:00", "calls_day": DAY,
+            "calls": [call("lead-0002-bbbb", "2026-11-13 08:00:00", transcript=None)]}
+    out = report.build(DAY, [moved, late], str(tmp_path / "f"), str(tmp_path / "out"), str(tmp_path / "history.jsonl"))
+    wb = openpyxl.load_workbook(out["xlsx"])
+    for tab, number in (("Moved without a call", "9876543210"), ("Needs a Check", "9123456780"), ("Calls", "9123456780")):
+        ws = wb[tab]
+        col = [c.value for c in ws[1]].index("Mobile Number")
+        assert number in [r[col] for r in ws.iter_rows(min_row=2, values_only=True)], tab

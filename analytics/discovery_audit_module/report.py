@@ -236,6 +236,15 @@ def front(i: int, ent: dict, st: str) -> list:
             callers(ent), utc(ent["stage_changed_utc"]).astimezone(IST).strftime("%d-%m-%Y %H:%M"), st]
 
 
+SIDE = FRONT[:2] + ["Mobile Number"] + FRONT[2:-1]  # the other tabs: no audit status, but searchable by number
+
+
+def side(i: int, ent: dict) -> list:
+    """A lead's columns on the tabs other than the audit: the audit tab's front columns, with the lead's number."""
+    f = front(i, ent, "")[:-1]
+    return f[:2] + [mobile(ent)] + f[2:]
+
+
 def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path: str) -> dict:
     fresh = now_ist().strftime("%d %b %Y %H:%M")
     rows, missing, moved = [], [], []
@@ -290,27 +299,27 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
     sm.column_dimensions["A"].width = 60
 
     mv = wb.create_sheet("Moved without a call")
-    mv.append(FRONT[:-1] + ["Last real call before the move", "First real call after the move", "What happened", "What to do"])
+    mv.append(SIDE + ["Last real call before the move", "First real call after the move", "What happened", "What to do"])
     for i, ent in enumerate(moved, 1):
         what, todo = moved_without_call(ent)
-        mv.append(front(i, ent, "")[:-1] + [when(ent.get("last_call_before")), when(ent.get("first_call_after")), what, todo])
-    _style(mv, [4, 20, 18, 18, 18, 18, 30, 30, 45, 55])
+        mv.append(side(i, ent) + [when(ent.get("last_call_before")), when(ent.get("first_call_after")), what, todo])
+    _style(mv, [4, 20, 13, 18, 18, 18, 18, 30, 30, 45, 55])
 
     na = wb.create_sheet("Needs a Check")
-    na.append(FRONT[:-1] + ["What happened", "What to do"])
+    na.append(SIDE + ["What happened", "What to do"])
     for i, (ent, st, why) in enumerate(missing, 1):
         what, todo = needs_check(ent, st, why)
-        na.append(front(i, ent, "")[:-1] + [what, todo])
-    _style(na, [4, 20, 18, 18, 18, 18, 45, 50])
+        na.append(side(i, ent) + [what, todo])
+    _style(na, [4, 20, 13, 18, 18, 18, 18, 45, 50])
 
     cl = wb.create_sheet("Calls")
-    cl.append(["Lead (LeadSquared)", "Call start (IST)", "Direction", "Status", "Talk time", "Caller (LeadSquared)", "Transcript"])
+    cl.append(["Lead (LeadSquared)", "Mobile Number", "Call start (IST)", "Direction", "Status", "Talk time", "Caller (LeadSquared)", "Transcript"])
     for ent in entries:
         nm = " ".join(x for x in (ent["lead"].get("FirstName"), ent["lead"].get("LastName")) if x)
         for c in ent["calls"]:
-            cl.append([nm, utc(c["start_utc"]).astimezone(IST).strftime("%d-%m-%Y %H:%M"), c.get("direction"), c.get("status"),
+            cl.append([nm, mobile(ent), utc(c["start_utc"]).astimezone(IST).strftime("%d-%m-%Y %H:%M"), c.get("direction"), c.get("status"),
                        mmss(c.get("duration") or 0), c.get("caller") or "", "Yes" if c.get("transcript") else ("" if c.get("status") != "Answered" else "Not found")])
-    _style(cl, [22, 17, 10, 12, 9, 20, 11])
+    _style(cl, [22, 13, 17, 10, 12, 9, 20, 11])
 
     how = wb.create_sheet("How This Was Made")
     for t in HOW:
