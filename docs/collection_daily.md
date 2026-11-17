@@ -55,8 +55,15 @@ PYTHONPATH=. .venv/bin/python scripts/fetch_lead_notes.py 2026-10-21 $D/notes.js
 .venv/bin/python -m analytics.collection_daily prepare $D
 ```
 
-3. Grade every lead in `$D/tl/index.json` with readers given `docs/collection_daily_brief.md`; merge their files into
-   `$D/judgements.json` as `{lead_id: {date: grade}}`. Carry earlier grades forward for leads with no new activity.
+3. Grade every lead in `$D/tl/index.json` with readers given `docs/collection_daily_brief.md`, each writing
+   `$D/grade/out<n>.json`, then fold them into `$D/judgements.json` (`{lead_id: {date: grade}}`; a grade that does not
+   fit the lead's calls stops the merge). Earlier grades carry forward for leads with no new activity.
+
+```bash
+.venv/bin/python -m analytics.collection_daily merge $D 2026-11-17
+```
+
+Every time in the reports is measured against when the data was read (the earliest weekend fetch), not the clock.
 
 4. Build the morning list for the next day:
 
