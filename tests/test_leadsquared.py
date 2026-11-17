@@ -340,3 +340,13 @@ def test_notes_retry_a_page_that_times_out(client):
     responses.add(responses.POST, url, json={"List": [{"ProspectNoteId": "n1", "CreatedOn": "2026-10-06 10:00:00"}]})
     got = list(client.iter_notes_since(datetime(2026, 10, 5, tzinfo=timezone.utc), page_size=2, retry_wait=0))
     assert [n["ProspectNoteId"] for n in got] == ["n1"]
+
+
+@responses.activate
+def test_notes_wait_out_the_account_wide_limit(client):
+    url = HOST + "LeadManagement.svc/RetrieveNote"
+    for _ in range(2):  # the client's own retry, then the notes reader's
+        responses.add(responses.POST, url, status=429, json={"Status": "Error", "ExceptionMessage": "API calls exceeded the limit"})
+    responses.add(responses.POST, url, json={"List": [{"ProspectNoteId": "n1", "CreatedOn": "2026-10-06 10:00:00"}]})
+    got = list(client.iter_notes_since(datetime(2026, 10, 5, tzinfo=timezone.utc), page_size=2, retry_wait=0))
+    assert [n["ProspectNoteId"] for n in got] == ["n1"]

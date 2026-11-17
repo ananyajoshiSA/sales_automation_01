@@ -439,8 +439,9 @@ class LeadSquaredClient:
                     batch = (self.request("POST", "LeadManagement.svc/RetrieveNote",
                                           json={"Parameter": {}, "Paging": {"PageIndex": page, "PageSize": page_size}}) or {}).get("List") or []
                     break
-                except LeadSquaredError as exc:  # deep pages sometimes outrun the 30 s timeout when the account is busy
-                    if "timed out" not in str(exc) or attempt == timeout_retries:
+                except LeadSquaredError as exc:  # deep pages sometimes outrun the 30 s timeout when the account is busy;
+                    # a 429 is the account-wide limit, spent by other users of the account: wait and read the same page
+                    if not ("timed out" in str(exc) or "HTTP 429" in str(exc)) or attempt == timeout_retries:
                         raise
                     time.sleep(retry_wait * (attempt + 1))
             for n in batch:
