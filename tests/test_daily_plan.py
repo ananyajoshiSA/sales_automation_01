@@ -123,9 +123,12 @@ def test_priority_groups_respect_the_day_the_lead_asked_for():
         {"lead_id": "c", "name": "C", "tier": "B", "chance": 12, "callback_requested": "Monday evening"},
         {"lead_id": "d", "name": "D", "tier": "A", "chance": 40, "callback_requested": "", "exact_ask": "Send the payment link today"},
         {"lead_id": "f", "name": "F", "tier": "B", "chance": 12, "callback_requested": "Monday 12 Oct (on a train Saturday; do not call today)"},
+        {"lead_id": "g", "name": "G", "tier": "A", "chance": 18, "callback_requested": "after 12 Oct (asked on 9 Oct)"},
+        {"lead_id": "h", "name": "H", "tier": "A", "chance": 20, "callback_requested": "Document in 2-3 days (~12-13 Oct)"},
         {"lead_id": "e", "name": "E", "tier": "C", "chance": 2, "callback_requested": ""}]}}
     g = {p["lead_id"]: (p["group"], p["check_by"]) for p in content.priority(R, "2026-10-10")}
-    assert g == {"d": (0, "12:00"), "a": (1, "11:30"), "b": (2, "18:00"), "c": (5, "later"), "f": (5, "later")}
+    assert g == {"d": (0, "12:00"), "a": (1, "11:30"), "b": (2, "18:00"), "c": (5, "later"), "f": (5, "later"),
+                 "g": (5, "later"), "h": (5, "later")}
 
 
 def test_workbook_counts_paid_without_asking_for_proof(tmp_path):
@@ -274,7 +277,7 @@ class _FakeLSQ:
     def iter_leads_by_group(self, group, columns=None):
         return iter([{"ProspectID": "L1"}, {"ProspectID": "L2"}])
 
-    def iter_activities_started(self, ev, d0, d1, edited_since=None):
+    def iter_activities_started(self, ev, d0, d1, edited_since=None, **_):
         self.reads.append((ev, edited_since))
         return iter(self.acts.get(ev, []))
 
@@ -310,6 +313,31 @@ def test_incremental_snapshot_reuses_old_rows_and_takes_fresh_edits(monkeypatch,
     assert {s for _, s in fake.reads} == {_utc("2026-10-10 14:00:00")}   # edits read from 2 h before the last pull
     assert ftd.reusable(prev, "Team X", "2026-10-06") is None         # the old pull doesn't cover the new start
     assert ftd.reusable(prev, "Team Y", "2026-10-08") is None
+
+
+def test_snapshot_of_several_groups_is_one_team_and_the_command_line_takes_them_all(monkeypatch, tmp_path):
+    import scripts.fetch_team_data as ftd
+    from integrations.timeutil import utc as _utc
+
+    class Two(_FakeLSQ):
+        def get_users_in_group(self, group):
+            return [{"ID": "u1"}, {"ID": "u2" if group == "B" else "u1"}]
+
+        def iter_leads_by_group(self, group, columns=None):
+            return iter([{"ProspectID": "L1"}, {"ProspectID": "L3" if group == "B" else "L2"}])
+
+    fake = Two({22: [_act("a1", "L3", "2026-10-10 05:00:00", "2026-10-10 05:01:00")]})
+    monkeypatch.setattr(ftd, "LeadSquaredClient", lambda: fake)
+    monkeypatch.setattr(ftd, "now_utc", lambda: _utc("2026-10-11 05:00:00"))
+    out = tmp_path / "snap.json"
+    ftd.main(["A", "B"], "2026-10-10", "2026-10-10", str(out))
+    snap = json.load(open(out))
+    assert (snap["group"], snap["groups"]) == ("A + B", ["A", "B"])
+    assert sorted(u["ID"] for u in snap["users"]) == ["u1", "u2"] and sorted(l["ProspectID"] for l in snap["leads"]) == ["L1", "L2", "L3"]
+    assert [c["activity_id"] for c in snap["calls"]] == ["a1"]
+    assert ftd.cli(["Team X", "2026-10-07", "2026-10-11", "o.json"]) == ("Team X", "2026-10-07", "2026-10-11", "o.json")
+    assert ftd.cli(["Team X", "2026-10-07", "2026-10-11", "o.json", "p.json"]) == ("Team X", "2026-10-07", "2026-10-11", "o.json", "p.json")
+    assert ftd.cli(["A", "B", "2026-10-07", "2026-10-11", "o.json"]) == (["A", "B"], "2026-10-07", "2026-10-11", "o.json")
 
 
 def test_snapshot_falls_back_to_per_lead_reads_when_bulk_is_refused(monkeypatch, tmp_path):
@@ -359,7 +387,7 @@ def test_snapshot_retries_a_refused_bulk_read_before_falling_back(monkeypatch, t
     class RefusedOnce(_FakeLSQ):
         refusals = 1
 
-        def iter_activities_started(self, ev, d0, d1, edited_since=None):
+        def iter_activities_started(self, ev, d0, d1, edited_since=None, **_):
             if self.refusals:
                 self.refusals -= 1
                 raise LeadSquaredError("Access Denied", status_code=403)
@@ -625,6 +653,22 @@ def test_daily_plan_mails_to_the_elite_list_by_default(monkeypatch):
     assert seen["list"] == "deepanshi"
 
 
+def test_team_options_work_before_or_after_the_command(monkeypatch):
+    """A routine wrote "build <date> --mail --mail-list puja"; that order used to stop the run before anything was sent."""
+    from analytics.daily_plan import __main__ as cli
+    seen = []
+    monkeypatch.setattr(cli, "cmd_build", lambda a: seen.append((a.team, a.leader, a.mail_list, a.state_dir, a.mail, a.publish_state)))
+    team = ["--team", "Team Puja Malik (DSV+Women AI)", "--leader", "Puja Malik"]
+    cli.main(team + ["--mail-list", "puja", "build", "2026-10-30", "--publish-state", "--mail"])
+    cli.main(team + ["build", "2026-10-30", "--publish-state", "--mail", "--mail-list", "puja"])
+    cli.main(["build", "2026-10-30", "--mail", "--publish-state", "--mail-list", "puja", "--team", "Team Puja Malik (DSV+Women AI)",
+              "--leader", "Puja Malik"])
+    assert seen[0] == seen[1] == seen[2] == ("Team Puja Malik (DSV+Women AI)", "Puja Malik", "puja",
+                                             "plan_state/Team_Puja_Malik_DSV_Women_AI", True, True)
+    cli.main(["build", "2026-10-30"])  # nothing given either side: the Elite defaults, as before
+    assert seen[-1][1:4] == (cli.LEADER, "elite", "plan_state")
+
+
 def test_restaged_students_and_old_payments_are_not_the_days_enrollments():
     from analytics.daily_plan import review
     reads = {"L1": {"status": "already_student"}, "L3": {"status": "paid_new", "paid_on": "2026-09"}, "L5": {"status": "paid_new", "paid_on": "2026-10-09"}}
@@ -826,3 +870,75 @@ def test_missed_calls_sheet_separates_dropped_lines_call_backs_and_waiting_leads
     workbook.missed_sheet(wb.active, {"label": "Fri 9 Oct", "rows": list(got.values()), "lines": missed_calls.by_line(s, ["2026-10-09"])})
     cells = [c.value for row in wb.active.iter_rows() for c in row if c.value]
     assert "3 missed calls from 3 leads; 1 not called back" in cells and "Not called back" in cells
+
+
+def test_another_team_gets_its_own_file_names_and_plan_state(monkeypatch):
+    from analytics.daily_plan import __main__ as cli
+    from analytics.daily_plan.common import short_name
+
+    assert short_name("Team Elite Calling") == "Elite" and short_name("ID Closure") == "ID_Closure"
+    seen = {}
+    monkeypatch.setattr(cli, "cmd_fetch", lambda a: seen.update(state=a.state_dir, leader=a.leader))
+    cli.main(["--team", "ID Closure", "--leader", "Darshan Gowda", "fetch", "2026-10-20"])
+    assert seen == {"state": "plan_state/ID_Closure", "leader": "Darshan Gowda"}
+    cli.main(["fetch", "2026-10-20"])
+    assert seen["state"] == "plan_state"
+    monkeypatch.setattr(cli, "cmd_fetch", lambda a: seen.update(mail=a.mail_list))
+    cli.main(["--team", "Team Puja Malik (DSV+Women AI)", "fetch", "2026-10-20"])
+    assert seen["mail"] == "team_puja_malik_dsv_women_ai"                       # never Elite's list by default
+    cli.main(["fetch", "2026-10-20"])
+    assert seen["mail"] == "elite"
+
+
+def test_a_team_that_also_collects_gets_a_plan_without_collection_leads():
+    leads = [dict(LEADS[0], mx_Bootcamp_collections="Remote Work for Women Bootcamp Collection - 1st August'26"),
+             dict(LEADS[1], mx_Bootcamp_collections="Community Webinar Collections"),
+             dict(LEADS[2], ProspectStage="Booking fees received"),          # untagged, but a booking fee is collection work
+             dict(LEADS[3], ProspectStage="Call Back Later")]
+    assert [l["ProspectID"] for l in leads] == ["L1", "L2", "L3", "L4"]
+    calls = [call("u1", f"L{i}", "2026-10-09 05:00:00", "Answered", 300) for i in (1, 2, 3, 4)]
+    zips = [{"ProspectActivityId": f"z{i}", "RelatedProspectId": f"L{i}", "ActivityEvent": 237} for i in (1, 4)]
+    raw = {"group": "Team Puja Malik (DSV+Women AI)", "users": USERS, "fetched_at": "2026-10-10T08:30:00+00:00", "leads": leads,
+           "calls": calls, "zip_activities": zips}
+    s = Snap(raw, leader="Puja Malik")
+    assert set(s.leads) == {"L4"} and {c["lead_id"] for c in s.calls} == {"L4"} and s.excluded == {"L1", "L2", "L3"}
+    assert [z["ProspectActivityId"] for z in s.raw["zip_activities"]] == ["z4"]
+    enrolled = [{"ProspectID": "L1"}, {"ProspectID": "L4"}, {"ProspectID": "L9", "mx_Bootcamp_collections": "ID Bootcamp Collection"}]
+    assert [l["ProspectID"] for l in s.sales(enrolled)] == ["L4"]
+    elite = Snap(dict(raw, group="Team Elite Calling"), leader="Tara L")       # every other team keeps every lead
+    assert len(elite.leads) == 4 and elite.sales(enrolled) == enrolled
+    raw["calls"] += [call("u1", "X1", "2026-10-09 06:00:00", "Answered", 200), call("u1", "X2", "2026-10-09 06:10:00")]
+    raw["outside_leads"] = {"X1": {"OwnerIdName": "Parked", "mx_Bootcamp_collections": "ID Bootcamp Collection - 18th July'26"},
+                            "X2": {"OwnerIdName": "Other team", "ProspectStage": "Call Back Later"}}
+    s = Snap(raw, leader="Puja Malik")
+    assert {c["lead_id"] for c in s.calls} == {"L4", "X2"}                   # a collection lead parked with another owner is left out
+
+
+def test_snapshot_records_collection_tags_of_leads_owned_elsewhere(monkeypatch):
+    import scripts.fetch_team_data as ftd
+
+    looked = []
+
+    class C:
+        def get_lead_by_id(self, lid):
+            looked.append(lid)
+            return {"ProspectID": lid, "OwnerIdName": "Parked", "mx_Bootcamp_collections": "Tag", "Phone": "+91-9000000000"}
+
+    calls = [{"lead_id": "L1"}, {"lead_id": "X1"}, {"lead_id": "X2"}, {"lead_id": None}]
+    got = ftd.outside_leads(C(), calls, {"L1"}, {"X1": {"OwnerIdName": "Known"}, "X9": {}})
+    assert looked == ["X2"] and set(got) == {"X1", "X2"}                     # read once; an earlier pull's lookup is reused
+    assert got["X2"] == {"OwnerIdName": "Parked", "ProspectStage": None, "mx_Bootcamp_collections": "Tag"}   # no PII kept
+
+
+def test_merged_snapshots_keep_their_group(tmp_path):
+    from analytics.daily_plan.common import load_snapshots
+
+    f = tmp_path / "snap.json"
+    json.dump({"group": "Team X", "users": USERS, "fetched_at": "2026-10-10T08:30:00+00:00", "leads": LEADS, "calls": []}, open(f, "w"))
+    assert load_snapshots([str(f)])["group"] == "Team X"
+
+
+def test_a_collection_lead_found_on_reading_stays_off_the_sheets():
+    reads = {"L2": {"lead_id": "L2", "name": "Lead2", "status": "collection", "tier": "B", "chance": 15}}
+    R = rows.build_rows(snap([]), "2026-10-10", reads, {}, [])
+    assert not any(R["by_owner"].values()) and R["dropped"][0]["status"] == "collection"

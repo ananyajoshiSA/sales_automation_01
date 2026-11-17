@@ -54,7 +54,26 @@ scores, calls by hour, calls to review), then the method, every validation check
 
 ```bash
 python -m analytics.nightly_plan "Team Elite Calling" --leader "Shivangi Sahu" [--tier-b-cap 12]
+python -m analytics.nightly_plan "US Bookkeeping Accounting-Sana" "US accounting counselors - Sana" \
+    --leader "Sana Ali" --since 2026-09-01 --sheet-cap 80 --no-inbound --course account \
+    --bot-calls data/bot_calls.json --bot-campaign acc
 ```
+
+For bootcamp teams, discovery is done by the AI voice agent (TimePay) or a counsellor before a closer calls.
+`scripts/fetch_bot_calls.py leads.json data/bot_calls.json` looks up the bot's calls for each lead by phone
+(read-only); the plan shows the bot's latest discovery and the callers' own notes (LeadSquared "Conversation
+Summary") as "Discovery so far", and new leads the bot already discovered come first with a closer's opening.
+`--no-inbound` is for a team that takes no incoming calls (no Tier M); `--course` leaves out other courses.
+
+`python scripts/build_focus_list.py rows.json exports/plans/focus --meta meta.json` cuts the plan to the team
+leader's focus list: every Tier A lead, Tier B at 15%+, and Tier B at 12%+ whose promised date has come, as a
+workbook with day-by-day outcome columns and a short page to print as PDF.
+
+Several groups are planned as one team. `--since` widens the window: every lead with a conversation since that
+day is tiered and every lead created since then without a real conversation is a new lead (F). `--sheet-cap`
+keeps each sheet to a day's work: M, P, A, B and promises now due always stay; the other F, R and C leads go to
+a Backlog sheet in call order. Within a tier, leads are ranked (the lead score for tiered leads; for new leads,
+the least-dialled and newest first), and each lead's best time is the slot in which it answered most often.
 
 This writes `exports/plans/call_plan_{team}_{date}.xlsx`: one sheet per caller, plus a team summary
 that updates as callers fill in their sheets. Leads are ordered by tier:
@@ -71,6 +90,42 @@ that updates as callers fill in their sheets. Leads are ordered by tier:
 
 Each tier's chance of enrolling is an estimate until `tier_outcomes` has measured it on at least 30
 leads. After that, the measured rate is used.
+
+## Consolidated plan with Claude's lead reading (Inayat's teams)
+
+The rule plan tiers every lead; Claude then reads the leads that matter and its tier, chance, opening line and ask
+replace the rule's. This is how the daily plan for Inayat Khan's teams (Corporate law trainees, Team Bootcamp +Anas,
+Team Bootcamp +Jyoti) is built. `G` stands for the three group names, `D` for today, `P` for the last plan's day.
+
+```bash
+# 1. Data: fresh leads and the calls and notes since 2 days before the last plan, cached as they land (resumable;
+#    exit 75 = the gate deferred, rerun the same command later). Merge with the last plan's snapshot in step 2.
+python scripts/fetch_team_resumable.py G <P minus 2 days> D data/inayat_snap_D.json
+# 2. Rule plan; then the AI voice agent's discovery for its leads; then the plan again with it.
+python scripts/plan_review.py plan data/inayat_snap_P.json data/inayat_snap_D.json --date D --since 2026-09-01 \
+    --leader "Inayat Khan" --out data/inayat_plan_D.json --leads-out data/inayat_leads_D.json
+python scripts/fetch_bot_calls.py data/inayat_leads_D.json data/inayat_bot_D.json
+python scripts/plan_review.py plan ... --bot-calls data/inayat_bot_D.json --out data/inayat_plan_D.json \
+    --snapshot-out data/inayat_snapshot_D_merged.json
+# 3. Leads to read (read before and touched since the last plan's data, plus new A, B and missed callbacks),
+#    in 8 files, with the brief filled from docs/plan_review_brief.md and docs/plan_teams/inayat.md.
+python scripts/plan_review.py pack data/inayat_plan_D.json --snapshot data/inayat_snapshot_D_merged.json \
+    --reviews "data/review/out_*.json" "data/review/r2_out_*.json" "data/review/20*/out_*.json" \
+    --changed-since <last plan's data time, UTC> --out-dir data/review/D --context docs/plan_teams/inayat.md \
+    --today "<weekday D month year>" --data-to "<D HH:MM IST>" --previous "<P, data to HH:MM IST>" --promise-by "<D + 3 days>"
+# 4. One subagent per file: "Read data/review/D/brief.md and follow it exactly with K = k". Then:
+python scripts/plan_review.py check data/review/D
+# 5. Workbook (focus list, cover and PDF from it as before).
+python scripts/plan_review.py merge data/inayat_plan_D.json --reviews <the same globs> "data/review/D/out_*.json" \
+    --team "Inayat Khan's teams" --date-label "<Day D Mon year>" --out exports/plans/call_plan_Inayat_D.xlsx
+python scripts/build_focus_list.py exports/plans/call_plan_Inayat_D.json exports/plans/Inayat_focus_D --meta data/inayat_meta_D.json \
+    --into exports/plans/call_plan_Inayat_D.xlsx
+python scripts/build_plan_pdf.py exports/plans/call_plan_Inayat_D.json exports/plans/Inayat_plan_D.html --meta data/inayat_meta_D.json
+```
+
+Review files are applied oldest first, so a lead's latest reading wins; a lead read before with nothing new keeps its
+reading. The meta JSON (cover text: how the last plan went, dialer lines to fix, notes) is written per day from the
+data; `scripts/build_plan_pdf.py` lists its keys. Every file here holds lead details: `data/` and `exports/` only.
 
 ## Snapshot inputs
 
@@ -90,5 +145,7 @@ last caller who spoke to the lead, not to whoever owns it today.
   source is connected.
 - **The average fee per enrolment is not set**, so no rupee figures are shown. Set it with
   `--avg-fee` or `REVENUE_AVG_FEE_INR`.
-- **The narrative plan PDF is a one-off for 8 Oct.** `scripts/build_plan_pdf.py` was written for
-  that date. The nightly job builds the workbook only.
+- **The narrative plan PDF needs a short meta file.** `scripts/build_plan_pdf.py rows.json out.html --meta meta.json`
+  renders any team's plan (team, leader, day, window, team leader's to-dos, objection playbook; see its docstring).
+  The nightly job builds the workbook only. Opening lines, asks and objections per lead come from a lead review
+  (Claude reading each hot lead's notes); without one, each tier's standard lines are used.

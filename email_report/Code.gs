@@ -1,9 +1,9 @@
 /**
  * On-request report mailer (docs/email_report.md).
  *
- * Emails a set of completed reports (PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG images, HTML), all in one email,
- * to the approved recipients when the /email-report skill posts them here, which happens only when someone asks
- * "email this report". Nothing here runs on a timer.
+ * Emails a set of completed reports (PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG images, HTML, or a ZIP holding only
+ * those), all in one email, to the approved recipients when the /email-report skill posts them here, which happens
+ * only when someone asks "email this report". Nothing here runs on a timer. On WhatsApp a ZIP goes as a Drive link.
  *
  * Every setting lives in Script Properties (Project Settings), never in this file:
  *   DELIVERY_MODE      off (default) | test | live
@@ -17,7 +17,9 @@
  *
  * WhatsApp (WATI), optional, off until WHATSAPP_MODE is live. After a live email to list NAME, the same new files also
  * go on WhatsApp to WA_LIST_NAME, one message per file per number, using the approved WATI template, whose header
- * document link is {{1}} and body {{2}} report, {{3}} team, {{4}} date(s):
+ * document link is {{1}} and body {{2}} report, {{3}} team, {{4}} date(s). A template's document header takes PDFs
+ * only (WATI names every one "Document.pdf"), so another file, such as the Excel workbook, goes as a view link in
+ * the text of its report's PDF message; a set with no PDF stays in the email only:
  *   WHATSAPP_MODE      off (default) | live
  *   WATI_TOKEN         the WATI API key;  WATI_CLIENT_ID  the WATI client (tenant) ID
  *   WA_LIST_<NAME>     comma-separated numbers with country code, e.g. 9198xxxxxxxx
@@ -43,10 +45,13 @@ var TYPES = {
   png: {mime: 'image/png', magic: [0x89, 0x50, 0x4e, 0x47], label: 'PNG image'},
   jpg: {mime: 'image/jpeg', magic: [0xff, 0xd8, 0xff], label: 'JPEG image'},
   jpeg: {mime: 'image/jpeg', magic: [0xff, 0xd8, 0xff], label: 'JPEG image'},
-  html: {mime: 'text/html', magic: null, label: 'HTML'}
+  html: {mime: 'text/html', magic: null, label: 'HTML'},
+  zip: {mime: 'application/zip', magic: ZIP, label: 'ZIP of reports'}
 };
-var FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html)$/i;
-var NAME_RULE = 'file name must end in .pdf, .xlsx, .xls, .csv, .docx, .pptx, .png, .jpg or .html and use only letters, digits, spaces and . _ ( ) + -';
+var FILE_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html|zip)$/i;
+var NAME_RULE = 'file name must end in .pdf, .xlsx, .xls, .csv, .docx, .pptx, .png, .jpg, .html or .zip and use only letters, digits, spaces and . _ ( ) + -';
+// What a ZIP may hold: report files only, no folders and no ZIP inside a ZIP, so it can't carry anything else past the checks.
+var INNER_NAME = /^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|docx|pptx|png|jpe?g|html)$/i;
 var TZ = 'Asia/Kolkata';
 var MODES = ['off', 'test', 'live'];
 var MAX_BYTES = 20 * 1024 * 1024;  // Gmail's attachment cap is 25 MB per email; stay clear of it
@@ -158,9 +163,20 @@ function typeOf_(name, bytes) {
   if (!m) return null;
   var t = TYPES[m[1].toLowerCase()];
   if (t.magic) {
-    return t.magic.every(function (b, i) { return i < bytes.length && (bytes[i] + 256) % 256 === b; }) ? t : null;
+    var ok = t.magic.every(function (b, i) { return i < bytes.length && (bytes[i] + 256) % 256 === b; });
+    return ok && (t !== TYPES.zip || zipHoldsReports_(name, bytes)) ? t : null;
   }
   return bytes.slice(0, 4096).indexOf(0) < 0 ? t : null;  // CSV and HTML are text: no zero bytes
+}
+
+/** True when the ZIP opens and holds at least one file, every one a report type by name and none in a folder. */
+function zipHoldsReports_(name, bytes) {
+  try {
+    var inner = Utilities.unzip(Utilities.newBlob(bytes, TYPES.zip.mime, name));
+    return inner.length > 0 && inner.every(function (b) { return INNER_NAME.test(String(b.getName() || '')); });
+  } catch (e) {
+    return false;
+  }
 }
 
 function message_(files, mode, liveCount) {
@@ -185,6 +201,7 @@ function checkFile_(f) {
   if (!FILE_NAME.test(name)) return {rejected: name + ': ' + NAME_RULE};
   if (!f.bytes.length) return {rejected: name + ': file is empty'};
   var type = typeOf_(name, f.bytes);
+  if (!type && /\.zip$/i.test(name)) return {rejected: name + ': a ZIP must open and hold only report files (PDF, Excel, CSV, Word, PowerPoint, images, HTML), no folders'};
   if (!type) return {rejected: name + ': file content does not match its .' + name.split('.').pop() + ' name'};
   var sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, f.bytes));
   if (String(f.sha256 || '').toLowerCase() !== sha) {
@@ -332,8 +349,11 @@ function istDate_(y, m, d) {
   return d + ' ' + MONTHS[m - 1] + ' ' + y;
 }
 
-/** The template's words for a set of files: report name per file, team and the day or days the files cover. */
-function waLabels_(file, listName) {
+/**
+ * The template's words for a set of files: report name per file, team and the day or days the files cover.
+ * links are the same report's other files as view links, e.g. ['Excel: https://drive.google.com/file/d/…/view'].
+ */
+function waLabels_(file, listName, links) {
   var base = file.name.replace(/\.[^.]+$/, '');
   var dates = [];
   base = base.replace(/(\d{4})-(\d{2})-(\d{2})/g, function (all, y, m, d) {
@@ -355,7 +375,8 @@ function waLabels_(file, listName) {
       a[0] === b[0] && a[1] === b[1] ? a[2] + '–' + istDate_(b[0], b[1], b[2]) : istDate_(a[0], a[1], a[2]) + ' – ' + istDate_(b[0], b[1], b[2]);
   }
   team = team.charAt(0).toUpperCase() + team.slice(1) + (/\bteam$/i.test(team) ? '' : ' team');
-  return {report: (words + ' (' + file.type.label + ')').slice(0, 60), team: team.slice(0, 60), period: period};
+  var report = words.slice(0, 57 - file.type.label.length) + ' (' + file.type.label + (links && links.length ? '; ' + links.join('; ') : '') + ')';
+  return {report: report, team: team.slice(0, 60), period: period};
 }
 
 /** The archive folder for one team and day, made on first use; files are kept there for good. */
@@ -465,30 +486,63 @@ function waReserve_(w, n) {
   }
 }
 
+/** The base name a report's PDF and workbook share, e.g. elite_pipeline_to_31_oct. */
+function stem_(name) {
+  return name.replace(/\.[^.]+$/, '').toLowerCase();
+}
+
+/** Keeps a file in the team's archive and opens its link to anyone who has it, closed after WA_LINK_DAYS. */
+function archiveAndOpen_(f, team, store) {
+  var file, step = 'saving to Drive';
+  try {
+    file = archiveFolder_(team, nowIst_('yyyy-MM-dd')).createFile(Utilities.newBlob(f.bytes, f.type.mime, f.name));
+    step = 'opening its link (your Google Workspace may block sharing outside the company)';
+    openLink_(file);
+  } catch (e) {
+    throw new Error(f.name + ' (Drive, ' + step + ': ' + (e && e.message || e) + ')');
+  }
+  store.setProperty('walink:' + file.getId(), String(new Date().getTime()));
+  return file;
+}
+
 /**
- * Sends each file as one WhatsApp template message to each person: archive the file in Drive, open a link for
- * WATI to collect it, send. Returns a one-line summary. Never throws.
+ * Sends each PDF as one WhatsApp template message to each person: archive the file in Drive, open a link for
+ * WATI to collect it, send. A template's document must be a PDF (WATI delivers anything else as a broken
+ * "Document.pdf"), so each other file goes as a view link in the text of the PDF with the same name, else the
+ * first PDF. Returns a one-line summary. Never throws.
  */
 function whatsappSend_(w, files, people, listName) {
-  if (!waReserve_(w, files.length * people.length)) {
-    return 'not sent: ' + files.length * people.length + ' more messages would pass WA_MAX_PER_DAY (' + w.maxPerDay + ')';
+  var pdfs = files.filter(function (f) { return f.type === TYPES.pdf; });
+  var others = files.filter(function (f) { return f.type !== TYPES.pdf; });
+  if (!pdfs.length) {
+    return 'not sent: a WhatsApp template carries a PDF, and these go by email only: ' + others.map(function (f) { return f.name; }).join(', ');
+  }
+  if (!waReserve_(w, pdfs.length * people.length)) {
+    return 'not sent: ' + pdfs.length * people.length + ' more messages would pass WA_MAX_PER_DAY (' + w.maxPerDay + ')';
   }
   closeExpiredLinks();
   ensureCleanupTrigger_();
   var store = PropertiesService.getUserProperties();
   var auth = /^bearer /i.test(w.token) ? w.token : 'Bearer ' + w.token;
-  var ok = 0, failed = [];
-  files.forEach(function (f) {
-    var labels = waLabels_(f, listName);
-    var link, file, step = 'saving to Drive';
+  var ok = 0, failed = [], links = {}, linked = 0;
+  var team = waLabels_(pdfs[0], listName).team;
+  others.forEach(function (o) {
+    var host = pdfs.filter(function (f) { return stem_(f.name) === stem_(o.name); })[0] || pdfs[0];
     try {
-      file = archiveFolder_(labels.team, nowIst_('yyyy-MM-dd')).createFile(Utilities.newBlob(f.bytes, f.type.mime, f.name));
-      step = 'opening its link (your Google Workspace may block sharing outside the company)';
-      openLink_(file);
-      store.setProperty('walink:' + file.getId(), String(new Date().getTime()));
-      link = 'https://drive.google.com/uc?export=download&id=' + file.getId();
+      var id = archiveAndOpen_(o, team, store).getId();
+      (links[host.name] = links[host.name] || []).push(o.type.label + ': https://drive.google.com/file/d/' + id + '/view');
+      linked++;
     } catch (e) {
-      failed.push(f.name + ' (Drive, ' + step + ': ' + (e && e.message || e) + ')');
+      failed.push(e.message);
+    }
+  });
+  pdfs.forEach(function (f) {
+    var labels = waLabels_(f, listName, links[f.name]);
+    var link;
+    try {
+      link = 'https://drive.google.com/uc?export=download&id=' + archiveAndOpen_(f, labels.team, store).getId();
+    } catch (e) {
+      failed.push(e.message);
       return;
     }
     var requests = people.map(function (p) {
@@ -520,7 +574,8 @@ function whatsappSend_(w, files, people, listName) {
     store.setProperty('wa:' + listName + ':' + f.sha, JSON.stringify({at: nowIst_('yyyy-MM-dd HH:mm') + ' IST', name: f.name,
                                                                         to: people.length, file: link.split('id=')[1]}));
   });
-  var line = ok + ' of ' + files.length * people.length + ' messages sent (' + files.length + ' file(s) to ' + people.length + ' number(s))';
+  var line = ok + ' of ' + pdfs.length * people.length + ' messages sent (' + pdfs.length + ' file(s) to ' + people.length + ' number(s)' +
+             (linked ? ', with ' + linked + ' other file(s) as view links' : '') + ')';
   if (failed.length) {
     console.error('WhatsApp failures: ' + failed.join('; '));
     line += '; failed: ' + failed.slice(0, 3).join('; ') + (failed.length > 3 ? '; and ' + (failed.length - 3) + ' more' : '');
@@ -542,6 +597,219 @@ function whatsappAfterEmail_(files, listName) {
   }
 }
 
+// ------------------------------------------------------------------ team chat saves (Drive)
+
+/*
+ * A chat's working files (its scripts, lead snapshots and readings) live on a cloud machine that is replaced when the
+ * chat sits idle, and everything on it is lost. scripts/state_sync.py saves them here at the end of every run and
+ * loads them back at the start of the next (docs/state_sync.md). Saves never send email and never count toward
+ * MAX_SENDS_PER_DAY.
+ *
+ * Off until the Script Property STATE_SAVES is on. Each team has a folder inside one PRIVATE Drive folder,
+ * "Team chat saves (private)", never shared with anyone. A save is a bundle sent in parts; it can be loaded only once
+ * every part has arrived and checked out (its manifest is written last). Since 12 Nov 2026 every finished save is kept
+ * forever (the owner's rule: Drive holds every file a chat ever made); a save holds only the files that are new or
+ * changed since the one before, plus the list of every file the chat had, so keeping them all stays affordable. Only
+ * parts of a save that never finished (left over a day) go to the Drive bin; they hold no file that a finished save
+ * needs. STATE_KEEP is no longer read.
+ *   STATE_SAVES  off (default) | on
+ */
+
+var STATE_ROOT = 'Team chat saves (private)';
+var STATE_TEAM = /^[a-z0-9_]{1,40}$/;
+var STATE_VERSION = /^\d{8}T\d{6}Z-[0-9a-f]{8}$/;
+var STATE_MAX_PART = 10 * 1024 * 1024;
+var STATE_MAX_PARTS = 100;
+var STATE_STALE_MS = 24 * 3600 * 1000;
+
+/** Throws a plain reason when saves are off. */
+function stateConfig_() {
+  var p = PropertiesService.getScriptProperties().getProperties();
+  var on = String(p.STATE_SAVES || 'off').trim().toLowerCase();
+  if (on !== 'on') throw new Error('team chat saves are off: set the Script Property STATE_SAVES to on');
+  return {};
+}
+
+/** The private root folder, made on first use and never shared. */
+function stateRoot_() {
+  var store = PropertiesService.getUserProperties();
+  var id = store.getProperty('state:root'), root = null;
+  if (id) {
+    try { root = DriveApp.getFolderById(id); } catch (e) { root = null; }
+    if (root && root.isTrashed()) root = null;
+  }
+  if (!root) {
+    root = DriveApp.createFolder(STATE_ROOT);
+    store.setProperty('state:root', root.getId());
+  }
+  try { root.setSharing(DriveApp.Access.PRIVATE, DriveApp.Permission.NONE); } catch (e) { /* new folders are private already */ }
+  return root;
+}
+
+function stateTeam_(team) {
+  var root = stateRoot_();
+  var it = root.getFoldersByName(team);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) return f;
+  }
+  return root.createFolder(team);
+}
+
+/** A folder's files, leaving out any in the Drive bin (DriveApp still lists those as children). */
+function stateFiles_(folder) {
+  var out = [], it = folder.getFiles();
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) out.push(f);
+  }
+  return out;
+}
+
+/** Every file of that name in the folder, outside the bin. */
+function stateNamed_(folder, name) {
+  var out = [], it = folder.getFilesByName(name);
+  while (it.hasNext()) {
+    var f = it.next();
+    if (!f.isTrashed()) out.push(f);
+  }
+  return out;
+}
+
+function partName_(version, i) {
+  return version + '.part' + ('00' + i).slice(-3);
+}
+
+/** The manifest files of a team's finished saves, newest first (a save's name starts with its UTC time). */
+function stateManifestFiles_(folder) {
+  return stateFiles_(folder).filter(function (f) { return /\.manifest\.json$/.test(f.getName()); })
+    .sort(function (a, b) { return a.getName() < b.getName() ? 1 : a.getName() > b.getName() ? -1 : 0; });
+}
+
+function readManifest_(f) {
+  return JSON.parse(f.getBlob().getDataAsString());
+}
+
+/** Finished saves, newest first; reads only the newest `limit` of them (all when no limit). */
+function stateManifests_(folder, limit) {
+  var files = stateManifestFiles_(folder);
+  return (limit ? files.slice(0, limit) : files).map(readManifest_);
+}
+
+/** Bins parts of saves that never finished within a day. A finished save is never touched: every one is kept. */
+function stateTidy_(folder) {
+  var now = new Date().getTime(), binned = 0, files = stateFiles_(folder), finished = {};
+  files.forEach(function (f) {
+    if (/\.manifest\.json$/.test(f.getName())) finished[f.getName().replace(/\.manifest\.json$/, '')] = true;
+  });
+  files.forEach(function (f) {
+    var version = f.getName().split('.')[0];
+    if (finished[version] || now - f.getDateCreated().getTime() < STATE_STALE_MS) return;
+    f.setTrashed(true);
+    binned++;
+  });
+  return binned;
+}
+
+function stateHasManifest_(folder, version) {
+  return stateNamed_(folder, version + '.manifest.json').length > 0;
+}
+
+/** state_put: one part of a save. state_commit: every part arrived, so write the manifest. state_list: finished saves.
+ * state_get: a finished save's manifest (no part) or one part's bytes. Returns the reply object. */
+function stateAction_(req) {
+  stateConfig_();
+  var team = String(req.team || '');
+  if (!STATE_TEAM.test(team)) return {ok: false, status: 'bad_request', detail: 'team must use only lower-case letters, digits and _'};
+  var version = req.version === undefined || req.version === null || req.version === '' ? '' : String(req.version);
+  if (version && !STATE_VERSION.test(version)) return {ok: false, status: 'bad_request', detail: 'version is not a save name'};
+  var folder = stateTeam_(team);
+
+  if (req.action === 'state_list') {
+    var names = stateManifestFiles_(folder);
+    var limit = Number(req.limit) >= 1 ? Math.min(Math.floor(Number(req.limit)), 1000) : 30;
+    return {ok: true, status: 'listed', total: names.length, saves: names.slice(0, limit).map(readManifest_),
+            versions: names.map(function (f) { return f.getName().replace(/\.manifest\.json$/, ''); })};
+  }
+
+  if (req.action === 'state_get') {
+    var mf = version ? stateNamed_(folder, version + '.manifest.json')[0] : stateManifestFiles_(folder)[0];
+    var m = mf ? readManifest_(mf) : null;
+    if (!m) return {ok: false, status: 'not_found', detail: version ? 'no finished save ' + version + ' for ' + team : 'no finished save for ' + team};
+    if (req.part === undefined || req.part === null) return {ok: true, status: 'found', manifest: m};
+    var i = Number(req.part);
+    if (!(i >= 0 && i < m.parts && i % 1 === 0)) return {ok: false, status: 'bad_request', detail: 'part must be 0 to ' + (m.parts - 1)};
+    var stored = stateNamed_(folder, partName_(m.version, i))[0];
+    if (!stored) return {ok: false, status: 'not_found', detail: 'part ' + i + ' of ' + m.version + ' is missing from Drive'};
+    var bytes = stored.getBlob().getBytes();
+    return {ok: true, status: 'found', version: m.version, part: i, sha256: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes)),
+            content_b64: Utilities.base64Encode(bytes)};
+  }
+
+  if (!version) return {ok: false, status: 'bad_request', detail: 'version is required'};
+  var parts = Number(req.parts);
+  if (!(parts >= 1 && parts <= STATE_MAX_PARTS && parts % 1 === 0)) {
+    return {ok: false, status: 'bad_request', detail: 'parts must be a whole number from 1 to ' + STATE_MAX_PARTS};
+  }
+  var lock = LockService.getScriptLock();
+  lock.waitLock(30000);
+  try {
+    if (stateHasManifest_(folder, version)) return {ok: false, status: 'bad_request', detail: 'save ' + version + ' is already finished'};
+
+    if (req.action === 'state_put') {
+      var n = Number(req.part);
+      if (!(n >= 0 && n < parts && n % 1 === 0)) return {ok: false, status: 'bad_request', detail: 'part must be 0 to ' + (parts - 1)};
+      var data = Utilities.base64Decode(String(req.content_b64 || ''));
+      if (!data.length) return {ok: false, status: 'rejected', detail: 'part ' + n + ' is empty'};
+      if (data.length > STATE_MAX_PART) return {ok: false, status: 'rejected', detail: 'part ' + n + ' is over 10 MB'};
+      var sha = hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, data));
+      if (String(req.sha256 || '').toLowerCase() !== sha) {
+        return {ok: false, status: 'rejected', detail: 'part ' + n + ': checksum mismatch, the upload arrived incomplete'};
+      }
+      var name = partName_(version, n);
+      stateNamed_(folder, name).forEach(function (f) { f.setTrashed(true); });  // a retried part replaces the earlier copy
+      folder.createFile(Utilities.newBlob(data, 'application/octet-stream', name)).setDescription(sha);
+      return {ok: true, status: 'stored', part: n};
+    }
+
+    if (req.action === 'state_commit') {
+      var shas = Array.isArray(req.part_sha256) ? req.part_sha256.map(String) : [];
+      if (shas.length !== parts) return {ok: false, status: 'bad_request', detail: 'part_sha256 must list ' + parts + ' checksums'};
+      var size = 0;
+      for (var k = 0; k < parts; k++) {
+        var file = stateNamed_(folder, partName_(version, k))[0];
+        if (!file) return {ok: false, status: 'incomplete', detail: 'part ' + k + ' of ' + parts + ' never arrived'};
+        if (file.getDescription() !== shas[k].toLowerCase()) {
+          return {ok: false, status: 'incomplete', detail: 'part ' + k + ' in Drive does not match what was sent'};
+        }
+        size += file.getSize();
+      }
+      var manifest = {version: version, team: team, parts: parts, size: size, sha256: String(req.sha256 || '').toLowerCase(),
+                      part_sha256: shas.map(function (x) { return x.toLowerCase(); }), saved_at: nowIst_('yyyy-MM-dd HH:mm') + ' IST',
+                      label: String(req.label || '').slice(0, 200), files: Number(req.files) || 0};
+      if (req.format !== undefined && req.format !== null) {  // a save that holds only new or changed files (format 2)
+        var ib = Number(req.index_bytes), changed = Number(req.changed);
+        if (Number(req.format) !== 2 || !(ib >= 1 && ib <= size && ib % 1 === 0) || !(changed >= 0 && changed % 1 === 0)) {
+          return {ok: false, status: 'bad_request', detail: 'format 2 needs index_bytes (1 to the save size) and changed'};
+        }
+        manifest.format = 2;
+        manifest.index_bytes = ib;
+        manifest.changed = changed;
+        manifest.full = req.full === true;
+      }
+      folder.createFile(Utilities.newBlob(JSON.stringify(manifest), 'application/json', version + '.manifest.json'));
+      var binned = stateTidy_(folder);
+      var total = stateManifestFiles_(folder).length;
+      console.log('state save ' + team + ' ' + version + ': ' + parts + ' part(s), ' + size + ' bytes; ' + total +
+                  ' save(s) kept; binned ' + binned + ' unfinished part(s)');
+      return {ok: true, status: 'saved', manifest: manifest, kept: total};
+    }
+  } finally {
+    lock.releaseLock();
+  }
+  return {ok: false, status: 'bad_request', detail: 'unknown save action'};
+}
+
 // ------------------------------------------------------------------ web app
 
 function reply_(obj) {
@@ -549,7 +817,8 @@ function reply_(obj) {
 }
 
 /** action "check": what would happen, sends nothing. action "send": email one file (file_name, content_b64,
- * sha256) or several in one email (files: a list of those three). Either may name a recipient list (list). */
+ * sha256) or several in one email (files: a list of those three). Either may name a recipient list (list).
+ * Actions state_put, state_commit, state_list and state_get save and load a team chat's files (stateAction_). */
 function doPost(e) {
   var req;
   try {
@@ -568,12 +837,13 @@ function doPost(e) {
       var bad = cfg.mode === 'off' ? '' : listProblem_(cfg, name);
       if (bad) return reply_({ok: false, status: 'unknown_list', detail: bad});
       var out = {ok: true, status: cfg.mode === 'off' ? 'off' : 'ready', mode: cfg.mode, recipients: recipientsFor_(cfg, name).length,
-                 multi: true, list: name || '', lists: Object.keys(cfg.lists).sort()};
+                 multi: true, zip: true, list: name || '', lists: Object.keys(cfg.lists).sort()};
       var w = readWhatsApp_();
       if (w.mode !== 'off') out.whatsapp = {mode: w.mode, numbers: name && w.lists[name] ? w.lists[name].length : 0, problem: w.problem};
       return reply_(out);
     }
-    if (req.action !== 'send') return reply_({ok: false, status: 'bad_request', detail: 'action must be check or send'});
+    if (/^state_(put|commit|list|get)$/.test(String(req.action))) return reply_(stateAction_(req));
+    if (req.action !== 'send') return reply_({ok: false, status: 'bad_request', detail: 'action must be check, send or a state_ action'});
     var list = Array.isArray(req.files) ? req.files : [req];
     var uploads = list.map(function (f) {
       f = f && typeof f === 'object' ? f : {};
@@ -665,7 +935,10 @@ function checkWhatsApp() {
   console.log(lines.join('\n'));
 }
 
-/** Sends one sample PDF (no lead data) on WhatsApp to WA_TEST_NUMBER only, to prove the whole path works. */
+/**
+ * Sends one sample PDF and a sample sheet (no lead data) on WhatsApp to WA_TEST_NUMBER only, to prove the whole path
+ * works: the PDF arrives attached, the sheet as a view link in its text, as a report's Excel workbook does.
+ */
 function sendWhatsAppTest() {
   var w = readWhatsApp_();
   if (w.problem) throw new Error(w.problem);
@@ -675,7 +948,10 @@ function sendWhatsAppTest() {
   var bytes = pdf.getBytes();
   var file = {name: 'WhatsApp_test_' + nowIst_('yyyy-MM-dd') + '.pdf', bytes: bytes, type: TYPES.pdf,
               sha: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes))};
-  console.log('WhatsApp test: ' + whatsappSend_(w, [file], [w.test], 'test'));
+  var csv = Utilities.newBlob('Caller,Leads to call\nSample caller A,12\nSample caller B,9\n', 'text/csv', 'test.csv').getBytes();
+  var sheet = {name: 'WhatsApp_test_' + nowIst_('yyyy-MM-dd') + '.csv', bytes: csv, type: TYPES.csv,
+               sha: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, csv))};
+  console.log('WhatsApp test: ' + whatsappSend_(w, [file, sheet], [w.test], 'test'));
 }
 
 /** WhatsApp only, no email: two sample PDFs (no lead data) to every number in WA_LIST_<list> (default elite). */
@@ -692,6 +968,30 @@ function sendWhatsAppDemo(list) {
             sha: hex_(Utilities.computeDigest(Utilities.DigestAlgorithm.SHA_256, bytes))};
   });
   console.log('WhatsApp demo: ' + whatsappSend_(w, files, w.lists[name], name));
+}
+
+/** Says whether team chat saves are on, shows that their folder is private, and lists each team's saves. Changes nothing. */
+function checkStateSaves() {
+  var lines = [];
+  try {
+    stateConfig_();
+    var root = stateRoot_();
+    var sharing = '';
+    try { sharing = String(root.getSharingAccess()); } catch (e) { sharing = 'unknown'; }
+    lines.push('Team chat saves: ON, every save kept forever', 'Folder: ' + STATE_ROOT + ' (sharing: ' + sharing + ')');
+    var it = root.getFolders();
+    while (it.hasNext()) {
+      var f = it.next();
+      if (f.isTrashed()) continue;
+      var files = stateManifestFiles_(f);
+      var newest = files.length ? readManifest_(files[0]) : null;
+      lines.push(f.getName() + ': ' + (newest ? files.length + ' save(s), newest ' + newest.saved_at + ', ' +
+                 Math.round(newest.size / 1024 / 1024 * 10) / 10 + ' MB' : 'no finished save'));
+    }
+  } catch (e) {
+    lines.push(String(e && e.message || e));
+  }
+  console.log(lines.join('\n'));
 }
 
 /** Lists every file this script has emailed, newest first. */

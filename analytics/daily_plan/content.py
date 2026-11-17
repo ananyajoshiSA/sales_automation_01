@@ -9,7 +9,7 @@ from __future__ import annotations
 import re
 from datetime import datetime
 
-from analytics.daily_plan.common import LEADER, TEAM
+from analytics.daily_plan.common import LEADER, TEAM, short_name
 
 SLOTS = {"P": "10:00–11:30, balance first", "M": "10:00–10:30; new missed calls within 15 min",
          "A": "10:30–11:30, redial in 10–15 min, retry 15:00 & 19:00", "B": "11:30–13:00, retry 15:30",
@@ -57,6 +57,18 @@ def _hhmm(txt):
 
 LATER_DAY = 5  # priority group of leads who asked to be called on another day
 NOT_TODAY = re.compile(r"\b(?:do not|don't|dont|not to|no)\s+(?:call\s+)?today\b|\bnot today\b", re.I)
+DATE = re.compile(r"\b(\d{1,2})\s*(jan|feb|mar|apr|may|jun|jul|aug|sep|oct|nov|dec)\w*", re.I)
+
+
+def _future_date(text: str, day: datetime) -> bool:
+    """True when ``text`` names a calendar date after ``day`` ("after 21 Oct", "~21-22 Oct")."""
+    for dd, mon in DATE.findall(text or ""):
+        try:
+            if datetime.strptime(f"{dd} {mon[:3]} {day.year}", "%d %b %Y") > day:
+                return True
+        except ValueError:
+            pass
+    return False
 
 
 def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict]:
@@ -70,7 +82,7 @@ def priority(rows: dict, today: str, overrides: dict | None = None) -> list[dict
     for o, rs in rows["by_owner"].items():
         for r in rs:
             cb = r.get("callback_requested") or ""
-            later = bool(later_rx.search(cb)) and (not today_rx.search(cb) or bool(NOT_TODAY.search(cb)))
+            later = bool(later_rx.search(cb) or _future_date(cb, d)) and (not today_rx.search(cb) or bool(NOT_TODAY.search(cb)))
             if later:
                 g = 5 if r["tier"] in "AB" and r["chance"] >= 10 else None
             elif r["tier"] == "A" and re.search(r"pay|link|emi|block|token|today", (r.get("exact_ask") or "") + " " + cb, re.I) and r["chance"] >= 30:
@@ -242,7 +254,7 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
                    "Counting enrollments:", "Choose Outcome 'Paid – new enrollment' when the lead says they have paid (a note of what they paid is enough), then move the lead to Course Enrolled. Leads already enrolled never appear on the sheets. Existing students: 'Already a student', send to support, don't change the stage.",
                    "Chances:", "'Est. chance (3 days)' is a judgement-based estimate from the lead's calls and transcripts, not a target.",
                    "Data:", f"LeadSquared pulled {rows['built_at']} IST; {rows['reads']} leads re-read from {pl}'s calls, Zipteams notes and Salesa transcripts."],
-        "pdf_title": f"Elite call plan {d.strftime('%a %-d %b')}", "cover_kicker": f"{team} · for {leader}, team leader",
+        "pdf_title": f"{short_name(team).replace('_', ' ')} call plan {d.strftime('%a %-d %b')}", "cover_kicker": f"{team} · for {leader}, team leader",
         "cover_h1": f"Call plan and workflow {d.strftime('%A %-d %B %Y')}",
         "cover_sub": f"A review of {pl} first (what worked, what did not, missed opportunities), then your priority leads and checks, the feedback to give each caller, the dialling changes, then each caller's list.",
         "contents": [f"{pl} review: what worked, what didn't, missed opportunities", "Your priority leads", "What you check, and when", "Feedback to give each caller",
@@ -272,7 +284,8 @@ def build(rows: dict, facts: dict, narrative: dict | None, team: str = TEAM, lea
         "hours": HOURS, "ab_rules": AB_RULES,
         "excluded_note": (f"Removed from the call order after re-reading {pl}'s calls: {cnt('not_interested')} clear not-interested, {cnt('irrelevant')} irrelevant/invalid, "
                           f"{cnt('21day')} 21-day course (Rs 100 community — pass to support), {cnt('already_student')} existing students (support), {cnt('dnc', 'support')} do-not-call/support, "
-                          f"{cnt('shelved')} marked Not Interested, May buy later or Irrelevant in LeadSquared (back on the sheet only if they ring us)."),
+                          f"{cnt('shelved')} marked Not Interested, May buy later or Irrelevant in LeadSquared (back on the sheet only if they ring us)"
+                          + (f", {cnt('collection')} bootcamp collection leads not tagged in LeadSquared (collection work, not this sheet)" if cnt('collection') else "") + "."),
         "overview_note": "'Likely today' takes about 60% of each A lead's 3-day chance, 35% of B and 30% of the rest; P leads have already paid a booking and count 0. Judgement-based estimates.",
         "review": {"title": f"{pl} review: what worked, what didn't, missed opportunities",
                    "headline": N.get("headline") or f"<b>{pl}: {len(confirmed)} confirmed enrollment(s).</b> {T['dials']:,} dials, {T['answer_pct']}% answered, {T['real']} real conversations; full ask in {ask} of {conv}.",

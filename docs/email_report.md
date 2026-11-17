@@ -22,6 +22,7 @@ Reports are real files, not just chat text, and they can be in any folder of the
 | Daily plan (PDF and workbook) | `<Team>_call_plan_<Day>.pdf`, `.xlsx` | `exports/daily/DATE/` |
 | Nightly call plan | `call_plan_..._DATE.xlsx` | `exports/plans/` |
 | Anything a chat builds by hand | PDF, Excel, CSV, Word, PowerPoint, PNG/JPEG, HTML | wherever it saved it, often its scratch folder |
+| A bundle of report files, such as the discovery audit's per-lead PDFs | ZIP holding only the types above, no folders | same |
 
 They are never saved to GitHub (they name callers and leads) and they stay in the session that made them.
 That is why the email is sent from **that same conversation**: it is the only place that can see the files.
@@ -52,6 +53,10 @@ The repo's `data/` folder (raw lead data) and hidden files such as `.env` are ne
   the approved list gets it. Set `off` to stop everything at once.
 - **A daily cap.** At most 20 emails a day (you can change this), so a leaked password can't flood
   inboxes. One email counts once, however many files it carries (at most 10).
+- **ZIPs hold reports only.** A ZIP goes out only if it opens and every file in it is one of the report types
+  above, with no folders and no ZIP inside it; anything else is refused. On WhatsApp a ZIP goes as a Drive
+  link in the text of the PDF message, never as a document. A mailer older than this rule refuses ZIPs, and the
+  script says "outdated" before uploading anything.
 - **Size.** A set over 20 MB in total is not sent (Gmail allows 25 MB per email). Claude offers to share a Drive link
   with the approved recipients instead, and does nothing until you agree.
 - **Secrets stay out of GitHub and out of the chat.** The web address and password live only in Google's
@@ -181,14 +186,17 @@ the day start sooner (speed to lead, calling the right leads first). We will see
 first dials of the day come.
 
 After a **live** email to a list, the mailer also sends the same new files on WhatsApp to that list's numbers,
-using the approved WATI template `daily_report_pdf`: one message per file per number, so a plan PDF and its
-workbook arrive as two messages. Nothing changes in the chats, the scheduled jobs or the Python code: whatever
+using the approved WATI template `daily_report_pdf`: one message per PDF per number. A template's document must
+be a PDF (WATI delivers anything else as a broken "Document.pdf"), so the workbook comes as a view link inside its
+PDF's message: "the Call plan Sat 24 Oct (PDF; Excel: https://drive.google.com/file/d/…/view) for Elite team …".
+Tapping it opens the real .xlsx in Drive's viewer or the Sheets app. A set with no PDF goes by email only. Nothing changes in the chats, the scheduled jobs or the Python code: whatever
 emails a list also WhatsApps it. A file already emailed is never sent again on WhatsApp either. Email is never
 held up by WhatsApp: a WhatsApp problem only adds a "WhatsApp: not sent ..." line to the result.
 
 Each file is kept for good in the Drive folder **Sales reports / <team> / <date>**, which only people at your
-company can open (on a personal Google account it stays private to you). WATI collects the file through a link
-that is closed again after 3 days; people keep the file itself in their WhatsApp chat.
+company can open (on a personal Google account it stays private to you). Each file's link opens to anyone who has
+it and is closed again after 3 days: people keep the PDF itself in their WhatsApp chat, and after 3 days the
+workbook link stops working (the workbook is still in the email).
 
 | Property | Value |
 |---|---|
@@ -202,13 +210,13 @@ that is closed again after 3 days; people keep the file itself in their WhatsApp
 | `WA_MAX_PER_DAY` | leave out to use 200 messages a day (at most 1000) |
 
 WATI numbers the template's variables. The mailer fills `{{1}}` (header document link), `{{2}}` (report, from
-the file name, e.g. "Status at 13:50 (PDF)"), `{{3}}` (team, "Elite team") and `{{4}}` (the dates in the file name,
+the file name, e.g. "Status at 13:50 (PDF)", plus any workbook link), `{{3}}` (team, "Elite team") and `{{4}}` (the dates in the file name,
 else the day it is sent, IST). The message greets "Hello team". Any new team or report works with the same template: add its `WA_LIST_<NAME>`.
 
 To switch it on: paste the new `Code.gs` **and** `appsscript.json` (it adds Drive, outside requests and a
 clean-up timer), deploy a new version and allow the new permissions. Run `checkWhatsApp`: it checks the key and
 client ID with WATI and says whether the template is APPROVED, sending nothing. Run `sendWhatsAppTest`: one
-sample PDF with no lead data goes to `WA_TEST_NUMBER`. When it arrives, set `WHATSAPP_MODE` to `live`.
+sample PDF with no lead data goes to `WA_TEST_NUMBER`, with a sample sheet as a view link in its text. When it arrives, set `WHATSAPP_MODE` to `live`.
 `showSentLog` lists WhatsApp sends too. To stop WhatsApp at once, set `WHATSAPP_MODE` to `off`.
 
 ## Update the mailer (after `Code.gs` changes)
@@ -221,6 +229,11 @@ deployed, single files to `RECIPIENTS` still go out, and a set or a send to a li
 2. **Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy.** The web address stays
    the same, so nothing changes in the Claude Code environment settings.
 3. Run `checkSetup` once: it should still list your mode and recipients.
+
+Team chat saves (12 Nov 2026) also need the new `Code.gs`, plus the Script Property `STATE_SAVES` = `on`; run
+`checkStateSaves` to confirm (docs/state_sync.md). Until then `state_sync.py` stops with "action must be check or send".
+Since the change of 12 Nov 2026 (evening) every save is kept forever and saves hold only new or changed files: `state_sync.py` from main stops
+with "the mailer is out of date" until the `Code.gs` from that change is deployed. `STATE_KEEP` is no longer read.
 
 ## When something goes wrong
 
@@ -251,5 +264,7 @@ Free limits: Google Workspace scripts can email about 1,500 recipients a day, at
   `requests` only). It remembers this machine's last email in `data/email_report/last_sent.json`.
 - `email_report/Code.gs`, `email_report/appsscript.json`: the mailer. Its one permission is
   `script.send_mail`.
+- Team chat saves (`state_put`, `state_commit`, `state_list`, `state_get`, off until `STATE_SAVES` is `on`): a
+  chat's working files kept in a private Drive folder across machine resets. Guide: [state_sync.md](state_sync.md).
 - Tests: `.venv/bin/python -m pytest tests/test_email_report.py` and `node --test email_report/code.test.mjs`
   (fake Google services, nothing is emailed).

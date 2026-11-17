@@ -73,7 +73,8 @@ def enrolled(since: str, out: str, client: LeadSquaredClient | None = None, cach
     d0 = ist_day_start(since)
     rows, fetched = [], 0
     for l in c.iter_leads("ProspectStage", ENROLLED, columns=["ProspectID", "FirstName", "LastName", "Phone", "ModifiedOn", "OwnerId",
-                                                              "OwnerIdName", "mx_Enquired_Course", "CreatedOn"], sort_by="ModifiedOn", page_size=1000):
+                                                              "OwnerIdName", "mx_Enquired_Course", "CreatedOn", "ProspectStage",
+                                                              "mx_Bootcamp_collections"], sort_by="ModifiedOn", page_size=1000):
         mod = utc(l.get("ModifiedOn"))
         if mod and mod < d0:
             break

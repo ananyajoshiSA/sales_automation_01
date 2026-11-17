@@ -75,5 +75,58 @@
   "google-accounting-quote-ad-oct10": "Accountants and commerce grads, generic \"from home\"",
   "sep12-usacc-paychart-2": "Any Indian accountant wanting US clients (pay chart)",
   "usacc-oct-tuition": "Accountancy tuition teachers"
+ },
+ "stated_icp_codes": {
+  "1": "Employed accountants",
+  "2": "50+ experienced accountants",
+  "3": "Women restarting after a career break",
+  "4": "B.Com / commerce graduates",
+  "5": "Tax consultants & ITR filers",
+  "6": "CA Inter / MBA Finance / CMA",
+  "7": "General"
+ },
+ "playbook": {
+  "Employed accountants": {
+   "pain": "Fixed salary; work priced as if anyone could do it.",
+   "open_with": "It's the same work US small businesses outsource, and their working day overlaps our evening, so it fits after your job.",
+   "story": "Nitin Dhawan: accountant from Gurgaon, 12+ years; secured multiple projects and earned over 2,000 US dollars.",
+   "day": "Day 2"
+  },
+  "50+ experienced accountants": {
+   "pain": "Experience stopped turning into raises.",
+   "open_with": "US firms need judgement. Remote work removes the age question, and the Enrolled Agent licence has no age bar.",
+   "story": "Madhuri Samdani: accountant from Aurangabad, 14 years; learned US GAAP, cleared all 3 EA papers, joined a CPA firm while growing her own.",
+   "day": "Day 3"
+  },
+  "Women restarting after a career break": {
+   "pain": "The gap on the CV does the talking.",
+   "open_with": "US clients hire clean books, not your CV gap, and you choose your hours.",
+   "story": "Priyanka Rathore: BCom from Ahmedabad, restarted after 7 years away; long-term US bookkeeping project at 20 dollars an hour, over Rs 1 lakh in 4 months.",
+   "day": "Day 2"
+  },
+  "B.Com / commerce graduates": {
+   "pain": "The degree opens no door.",
+   "open_with": "No CA needed. What matters is US standards and US software.",
+   "story": "Praveen Kumar: BCom from Chandigarh; bookkeeping at 10 dollars an hour for a US client and 7 for a UK client.",
+   "day": "Day 1"
+  },
+  "Tax consultants & ITR filers": {
+   "pain": "Local fees; clients only ask the price.",
+   "open_with": "The filing discipline you have is the same discipline for US returns, paid in dollars, alongside your Indian clients.",
+   "story": "Amul Sethi: BCom tax consultant without a CA; multiple US clients and a 1,500 dollar a month US accounting project.",
+   "day": "Day 3"
+  },
+  "CA Inter / MBA Finance / CMA": {
+   "pain": "Real training, no credit in the Indian market.",
+   "open_with": "The EA licence asks for no finals, no articleship and no US degree.",
+   "story": "Nageshwar K C: Bengaluru, BCom + CA Inter, 11+ years; consultant role with a US fintech within a week, 50% above his old salary.",
+   "day": "Day 1"
+  },
+  "General": {
+   "pain": "",
+   "open_with": "The US is short of accountants, and the work is done remotely for US clients.",
+   "story": "Praveen Kumar: BCom from Chandigarh; bookkeeping at 10 dollars an hour for a US client and 7 for a UK client.",
+   "day": "Day 1"
+  }
  }
 }

@@ -107,5 +107,51 @@
  "general_segments": {
   "oct10-id-f20-social-sector": "Social-sector professionals (NGO, CSR, 10+ yrs)",
   "id-oct-cxo": "CEOs and CXOs"
+ },
+ "stated_icp_codes": {
+  "A": "Corporate professionals",
+  "B": "Senior women professionals",
+  "C": "Business owners / promoters",
+  "D": "Defence veterans",
+  "E": "Retired / about to retire",
+  "F": "General",
+  "T": "Teachers / educators"
+ },
+ "playbook": {
+  "Corporate professionals": {
+   "open_with": "This sits alongside your current job: about 15 to 20 board meetings a year, mostly online. Boards need people who know how the work actually gets done.",
+   "story": "Nilesh D Shah: chemical engineer, 38+ years in operations and governance; first appointment at Baroda Extrusion.",
+   "day": "Day 1"
+  },
+  "Senior women professionals": {
+   "open_with": "The top 1,000 listed companies must have a woman director, and several of the largest still don't have one. Then connect it to her domain.",
+   "story": "Suman Choudhary: agri-business consultant, 20+ years; appointed at ZappFresh within 3 months.",
+   "day": "Day 1"
+  },
+  "Business owners / promoters": {
+   "open_with": "Promoters prefer directors from their side of the table. You already know growing companies in your network.",
+   "story": "Ullas Pradhan: business owner, BCom from Cuttack; cleared the exam, built LinkedIn, first appointment at 66 at Aesthetic Engineers.",
+   "day": "Day 2"
+  },
+  "Defence veterans": {
+   "open_with": "Your years of institutional responsibility are exactly what boards want; a large share of CPSE board positions are vacant.",
+   "story": "Sanjay Roye: 36 years in the Indian Navy; now an independent director at Sachee Rome Limited.",
+   "day": "Day 1"
+  },
+  "Retired / about to retire": {
+   "open_with": "After so many years of leading, what would you like your experience to do for you now: some income, staying engaged, or recognition? (Listen, then reflect their answer.)",
+   "story": "Golock Chandra Sahoo: retired Senior Audit Officer; appointed at Ganesh Infra, then Ravita Engineering Services.",
+   "day": "Day 1"
+  },
+  "Teachers / educators": {
+   "open_with": "Teachers and principals carry credibility boards respect, and former students now run businesses. If still teaching: this sits alongside teaching; books, guest lectures and TEDx build board credibility fast.",
+   "story": "Dr N Ganga Vidya: management professor, 25 years in ESG consulting; appointed at Solar91. (Working teacher: Manisha Deep, coaching centre in Ranchi, cleared the exam in 3 months.)",
+   "day": "Day 2"
+  },
+  "General": {
+   "open_with": "Any professional with 10+ years in a business field qualifies; most first appointments come at SME boards.",
+   "story": "M.K. Sateesh: 40+ years in construction; first appointment in 10 months at Kirtiman Agro, at 63.",
+   "day": "Day 1"
+  }
  }
 }

@@ -12,7 +12,7 @@ from analytics.daily_plan.common import CLOSED, REAL_SECS, SHELVED, Snap, ist, p
 
 TIERS = "MABFRC"
 PAID = {"paid_new", "enrolled_no_proof"}  # enrolled_no_proof: older reads, before stage = enrolled
-EXCLUDE = {"already_student", "dnc", "support", "21day", "irrelevant", "not_interested"}
+EXCLUDE = {"already_student", "dnc", "support", "21day", "irrelevant", "not_interested", "collection"}
 CARRY_CHANCE = {"A": 20, "B": 8, "F": 4, "R": 3, "C": 2, "M": 3}
 
 
