@@ -70,7 +70,7 @@ def place(lead: dict, j: dict, day: date) -> dict:
     if lead["unreturned_calls"]:
         why.append(f"Lead called {hm(lead['unreturned_calls'][-1])}, not returned")
     if waiting and not lead["unreturned_calls"]:
-        return {"group": 9, "due": None, "why": f"Asked to wait until {j['waiting_until']}"}
+        return {"group": 9, "due": None, "why": f"Asked to wait until {date.fromisoformat(j['waiting_until'][:10]):%a %d %b}"}
     if why:
         return {"group": 1, "due": min(times) if times else None, "why": "; ".join(why)}
     if lead["due48"] and lead["deadline"] >= start - timedelta(days=1):  # the race: due today or later, or missed yesterday
