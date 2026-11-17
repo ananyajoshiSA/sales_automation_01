@@ -96,3 +96,9 @@ def test_latest_grade_before_the_day(tmp_path):
     p.write_text(json.dumps({"1": {"2026-11-16": {"status": "connected"}, "2026-11-17": {"status": "hot"},
                                    "2026-11-18": {"status": "cold"}}}))
     assert judged_on(str(p), date(2026, 11, 18)) == {"1": {"status": "hot"}}
+
+
+def test_note_html_read_as_text():
+    from analytics.collection_daily.timelines import text
+    raw = '<div style="x"><h3>Summary</h3><p>Loan &amp; EMI</p><br/><ul><li>Docs by Thu</li></ul></div>'
+    assert text(raw) == "Summary / Loan & EMI / Docs by Thu"

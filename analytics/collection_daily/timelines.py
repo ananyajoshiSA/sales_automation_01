@@ -7,8 +7,10 @@ every batch so a refusal loses nothing).
 
 from __future__ import annotations
 
+import html
 import json
 import os
+import re
 from datetime import datetime, timedelta
 
 from analytics.bootcamp_collections import _call, _data, _fields, _note_text
@@ -19,6 +21,13 @@ from integrations.transcripts import TranscriptClient
 from integrations.transcripts.client import Call, match_to_calls, normalize_phone
 
 LEAD_FIELDS = ("mx_Last_Remark", "mx_Followup_comments")
+
+
+def text(raw: str | None) -> str:
+    """Note HTML (Zipteams writes styled divs) as plain text."""
+    t = re.sub(r"<br\s*/?>|</(?:p|div|li|h\d)>", " / ", raw or "", flags=re.I)
+    t = html.unescape(re.sub(r"<[^>]+>", " ", t))
+    return re.sub(r"(?:\s*/\s*)+", " / ", re.sub(r"[ \t\r\n]+", " ", t)).strip(" /")
 
 
 def ist(t: datetime | None) -> str:
@@ -96,7 +105,7 @@ def events(lead: dict, acts: list[dict], notes: list[dict], cut: datetime, tx_di
             d = _data(a)
             com = d.get("Comment") or ""
             ev.append((t, f"STAGE {d.get('PreviousStage')} -> {d.get('CurrentStage')} by {d.get('CreatedBy')}"
-                       + (f" · comment: {com}" if com and not com.startswith('{"ActionType"') else "")))
+                       + (f" · comment: {text(com)}" if com and not com.startswith('{"ActionType"') else "")))
         elif code == 3001:
             d = _data(a)
             ev.append((t, f"OWNER {d.get('PreviousOwner')} -> {d.get('CurrentOwner')}"))
@@ -104,13 +113,13 @@ def events(lead: dict, acts: list[dict], notes: list[dict], cut: datetime, tx_di
             f = _fields(a)
             due = utc(f.get("mx_Custom_1"))
             ev.append((t, f"DISPOSITION by {_data(a).get('CreatedByName')} · {f.get('Status')}"
-                       + (f" · call-back set for {ist(due)}" if due else "") + f" · note: {_note_text(a)}"))
-        elif (txt := _note_text(a)) and code != 97:  # 97: the disposition form itself, already read above
+                       + (f" · call-back set for {ist(due)}" if due else "") + f" · note: {text(_note_text(a))}"))
+        elif (txt := text(_note_text(a))) and code != 97:  # 97: the disposition form itself, already read above
             ev.append((t, f"NOTE ({a.get('EventName')}) by {_data(a).get('CreatedByName') or ''}: {txt}"))
     for n in notes:
         t = utc(n["t"])
         if t and t <= cut:
-            ev.append((t, f"NOTE (Notes tab) by {n['by']}: {n['text']}"))
+            ev.append((t, f"NOTE (Notes tab) by {n['by']}: {text(n['text'])}"))
     return sorted(ev, key=lambda e: e[0])
 
 
