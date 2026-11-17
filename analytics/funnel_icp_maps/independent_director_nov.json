@@ -165,5 +165,128 @@
   "nov14-id-vid-iica-databank-waiting": "IICA exam cleared, waiting on databank",
   "nov14-id-vid-iica-databank-waiting-google": "IICA exam cleared, waiting on databank",
   "nov14-id-iceberg-iica": "IICA exam cleared, waiting on databank"
+ },
+ "playbook": {
+  "Corporate professionals (no CXO title)": {
+   "pain": "",
+   "open_with": "This sits alongside your current job — about 15 to 20 board meetings a year, mostly online. Boards need people who know how the work actually gets done.",
+   "story": "Nilesh D Shah: Chemical engineer, 38 plus years in operations and governance; first appointment at Baroda Extrusion.",
+   "day": "Day 1"
+  },
+  "Senior women professionals": {
+   "pain": "",
+   "open_with": "The top 1000 listed companies must have a woman director, and several of the largest still don't have one.",
+   "story": "Suman Choudhary: Agri-business consultant, 20 plus years; appointed at ZappFresh within 3 months, with zero IICA databank searches.",
+   "day": "Day 1"
+  },
+  "Business owners / promoters / consultants": {
+   "pain": "",
+   "open_with": "Promoters prefer directors from their side of the table — you already know growing companies in your network.",
+   "story": "Ullas Pradhan: Business owner, BCom from Cuttack; cleared the exam, built LinkedIn, first appointment at 66 at Aesthetic Engineers, then Vdeal System.",
+   "day": "Day 2"
+  },
+  "Defence veterans / government / PSU": {
+   "pain": "",
+   "open_with": "Your years of institutional responsibility are exactly what boards want; a large share of CPSE board positions are vacant.",
+   "story": "Sanjay Roye: 36 years in the Indian Navy; now an independent director at Sachee Rome Limited.",
+   "day": "Day 1"
+  },
+  "Retired professionals": {
+   "pain": "",
+   "open_with": "After so many years of leading, what would you like your experience to do for you now — some income, staying engaged, or recognition?",
+   "story": "Golock Chandra Sahoo: Retired Senior Audit Officer; appointed at Ganesh Infra, then Ravita Engineering Services.",
+   "day": "Day 1"
+  },
+  "Educators - retired": {
+   "pain": "",
+   "open_with": "Teachers and principals carry credibility boards respect — and former students now run businesses.",
+   "story": "Dr N Ganga Vidya: Management professor with 25 years in ESG consulting; appointed at Solar91.",
+   "day": "Day 2"
+  },
+  "Educators - working": {
+   "pain": "",
+   "open_with": "This sits alongside teaching — books, guest lectures and TEDx build board credibility faster for educators than anyone.",
+   "story": "Manisha Deep: Runs a coaching centre and distributorship in Ranchi; cleared the exam in 3 months, published a book and got a TEDx invite.",
+   "day": "Day 2"
+  },
+  "Engineers / construction": {
+   "pain": "",
+   "open_with": "Boards of engineering and construction companies need someone who can read a project, a plant and a safety risk — that is your daily work.",
+   "story": "M.K. Sateesh: 40 plus years in construction; started on LinkedIn and guest lectures, first appointment in 10 months at Kirtiman Agro, more after that, at 63.",
+   "day": "Day 1"
+  },
+  "Agri / food professionals": {
+   "pain": "",
+   "open_with": "Agri and food companies are growing fast and listing on SME platforms — they need directors who understand their sector, not generic names.",
+   "story": "Suman Choudhary: Agri-business consultant, 20 plus years; appointed at ZappFresh within 3 months, with zero IICA databank searches.",
+   "day": "Day 1"
+  },
+  "Retired bankers": {
+   "pain": "",
+   "open_with": "Boards want someone who can read credit, cash flow and risk — a banker's whole career, now on the other side of the table.",
+   "story": "Golock Chandra Sahoo: Retired Senior Audit Officer; appointed at Ganesh Infra, then Ravita Engineering Services.",
+   "day": "Day 1"
+  },
+  "Retired women professionals": {
+   "pain": "",
+   "open_with": "The top 1000 listed companies must have a woman director, and your years of experience are exactly what a board looks for.",
+   "story": "Suman Choudhary: Agri-business consultant, 20 plus years; appointed at ZappFresh within 3 months, with zero IICA databank searches.",
+   "day": "Day 1"
+  },
+  "CXOs / corporate leaders": {
+   "pain": "",
+   "open_with": "You have already sat at the table where decisions are made — an independent directorship is the same judgement, across several companies, without the daily operations.",
+   "story": "Nilesh D Shah: Chemical engineer, 38 plus years in operations and governance; first appointment at Baroda Extrusion.",
+   "day": "Day 2"
+  },
+  "CFOs / finance heads": {
+   "pain": "",
+   "open_with": "Every board needs an audit committee, and the audit committee needs someone who can truly read the numbers — that is your role.",
+   "story": "Golock Chandra Sahoo: Retired Senior Audit Officer; appointed at Ganesh Infra, then Ravita Engineering Services.",
+   "day": "Day 2"
+  },
+  "IT leaders": {
+   "pain": "",
+   "open_with": "Boards now worry about technology, data and cyber risk, and very few directors can question it properly — that is the gap you fill.",
+   "story": "Yakub Bhetasiwala: 21 years in industrial automation; cleared the exam, struggled for months, then built brand and network and was appointed at CORE Energy Systems.",
+   "day": "Day 1"
+  },
+  "Practising CA / CS": {
+   "pain": "",
+   "open_with": "Your clients already trust you with their compliance — promoters prefer directors from their own side of the table, and you know growing companies in your network.",
+   "story": "Ullas Pradhan: Business owner, BCom from Cuttack; cleared the exam, built LinkedIn, first appointment at 66 at Aesthetic Engineers, then Vdeal System.",
+   "day": "Day 2"
+  },
+  "Retiring soon": {
+   "pain": "",
+   "open_with": "The best time to build board credibility is before retirement, while your title and network are active — the first appointment often takes months.",
+   "story": "Golock Chandra Sahoo: Retired Senior Audit Officer; appointed at Ganesh Infra, then Ravita Engineering Services.",
+   "day": "Day 1"
+  },
+  "General": {
+   "pain": "",
+   "open_with": "Any professional with 10 plus years in a business field qualifies; most first appointments come at SME boards.",
+   "story": "M.K. Sateesh: 40 plus years in construction; started on LinkedIn and guest lectures, first appointment in 10 months at Kirtiman Agro, more after that, at 63.",
+   "day": "Day 1"
+  }
+ },
+ "stated_icp_codes": {
+  "A": "Corporate professionals (no CXO title)",
+  "B": "Senior women professionals",
+  "C": "Business owners / promoters / consultants",
+  "D": "Defence veterans / government / PSU",
+  "E": "Retired professionals",
+  "F": "Educators - retired",
+  "G": "Educators - working",
+  "H": "Engineers / construction",
+  "I": "Agri / food professionals",
+  "J": "Retired bankers",
+  "K": "Retired women professionals",
+  "L": "CXOs / corporate leaders",
+  "M": "CFOs / finance heads",
+  "N": "IT leaders",
+  "O": "Practising CA / CS",
+  "P": "Retiring soon",
+  "Q": "General"
  }
 }
