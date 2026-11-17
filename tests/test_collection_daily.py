@@ -65,10 +65,15 @@ def test_order_of_groups_and_one_place_per_lead():
     judged = {"1": {"status": "cold"}, "2": {"status": "callback"}, "3": {"status": "hot"}, "4": {"status": "counsel"},
               "5": {"status": "hot", "waiting_until": "2026-11-25"}, "6": {"status": "connected", "followup_at": "2026-11-18 16:30"},
               "8": {"status": "connected"}}
+    leads += [open_lead("9", real=0, deadline=ist("2026-11-17 20:00")), open_lead("10", real=0, deadline=ist("2026-11-18 20:00")),
+              open_lead("11", real=0)]
+    judged |= {"9": {"status": "notconnected"}, "10": {"status": "callback"}, "11": {"status": "notconnected"}}
     rows = morning.plan(leads, judged, day)
     got = [(l["lead_id"], p["group"]) for l, _, p in rows]
-    assert got == [("3", 1), ("6", 1), ("8", 1), ("2", 2), ("4", 4), ("1", 7), ("5", 8)]
-    assert rows[3][2]["why"].startswith("48 h passed")
+    # 2 and 11 missed their 48 hours on 16 Nov, before yesterday: out of the race, into their status group
+    assert got == [("3", 1), ("6", 1), ("8", 1), ("9", 2), ("10", 2), ("4", 4), ("2", 5), ("11", 7), ("1", 8), ("5", 9)]
+    assert rows[3][2]["why"].startswith("48 h missed") and rows[4][2]["why"].startswith("Needs a real talk by")
+    assert rows[6][2]["why"] == "No real talk yet; 48 h missed 16 Nov"
 
 
 def test_grade_must_fit_the_calls():
@@ -81,7 +86,7 @@ def test_grade_must_fit_the_calls():
 
 
 def test_build_writes_caller_sheets_and_the_plan(tmp_path):
-    leads = [open_lead("1"), open_lead("2", caller="Ravi", real=0)]
+    leads = [open_lead("1"), open_lead("2", caller="Ravi", real=0, deadline=ist("2026-11-18 20:00"))]
     judged = {"1": {"status": "hot", "payment": "Card EMI · Sat 21 Nov"}, "2": {"status": "notconnected"}}
     leads = [l | {"allocated": ist("2026-11-14 10:00")} for l in leads]
     xlsx, saved = morning.build(leads, judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
@@ -123,3 +128,11 @@ def test_cut_is_the_earliest_weekend_read(tmp_path):
         (tmp_path / name / "meta.json").write_text(json.dumps({"bootcamps": [tag], "fetched_at_utc": at}))
     assert [day for _, day in facts.weekends(str(tmp_path))] == ["2026-10-24", "2026-10-31"]
     assert facts.read_at(str(tmp_path)) == ist("2026-11-17 16:47")
+
+
+def test_a_week_without_pick_up_despite_calls_turns_cold():
+    cut = ist("2026-11-17 20:00")
+    calls = [call(f"2026-11-{d} {h}:00", answered=False) for d in range(10, 18) for h in (11, 16)]
+    rows = morning.plan([open_lead("1", real=1, calls=calls)], {"1": {"status": "hot"}}, date(2026, 11, 18), cut)
+    l, j, p = rows[0]
+    assert (j["status"], p["group"]) == ("cold", 8) and p["why"].startswith("Was Hot; no pick-up since")

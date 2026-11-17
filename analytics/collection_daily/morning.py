@@ -2,9 +2,9 @@
 summary and a 48-hour tracker for the team leaders, and the plan saved for the evening update.
 
 Order of work (agreed 17 Nov 2026): 1 follow-ups due today and anything carried over (a follow-up not kept, the lead's
-own call not returned), 2 the 48-hour clock (no substantial conversation yet), 3 Hot, 4 To be counselled, 5 Call-back
-requested, 6 Connected – payment not discussed, 7 Cold. Leads that asked us to wait until a later date are listed last
-and not called before it. Each lead appears once, in its first group.
+own call not returned), 2 the 48-hour clock (no substantial conversation yet; due today or later, or missed yesterday),
+3 Hot, 4 To be counselled, 5 Call-back requested, 6 Connected – payment not discussed, 7 Not connected (48 hours missed
+before yesterday), 8 Cold. Leads that asked us to wait until a later date are listed last and not called before it. Each lead appears once, in its first group.
 """
 
 from __future__ import annotations
@@ -18,6 +18,7 @@ from openpyxl import Workbook
 from openpyxl.styles import Font
 from openpyxl.worksheet.datavalidation import DataValidation
 
+from analytics.collection_cycle import silent_since
 from analytics.daily_plan.workbook import F, hdr, put, title
 from integrations.timeutil import IST
 
@@ -25,9 +26,10 @@ STATUS = {"notconnected": "Not connected", "callback": "Call-back requested", "c
           "hot": "Hot", "counsel": "To be counselled", "cold": "Cold"}
 NO_TALK, TALK = {"notconnected", "callback", "cold"}, {"connected", "hot", "counsel", "cold"}
 GROUPS = {1: "Follow-up due today / carried over", 2: "48-hour clock: no substantial conversation yet", 3: "Hot", 4: "To be counselled",
-          5: "Call-back requested", 6: "Connected – payment not discussed", 7: "Cold", 8: "Waiting – do not call before the date"}
-FILL = {1: "FBE0DE", 2: "FFF0C2", 3: "DCEFE6", 4: "F3EAF7", 5: "E8F0FA", 6: "F2F2F2", 7: "EDEDED", 8: "FFFFFF"}
-BY_STATUS = {"hot": 3, "counsel": 4, "callback": 5, "connected": 6, "cold": 7, "notconnected": 2}
+          5: "Call-back requested", 6: "Connected – payment not discussed", 7: "Not connected – 48 h missed earlier", 8: "Cold",
+          9: "Waiting – do not call before the date"}
+FILL = {1: "FBE0DE", 2: "FFF0C2", 3: "DCEFE6", 4: "F3EAF7", 5: "E8F0FA", 6: "F2F2F2", 7: "FDF3E7", 8: "EDEDED", 9: "FFFFFF"}
+BY_STATUS = {"hot": 3, "counsel": 4, "callback": 5, "connected": 6, "notconnected": 7, "cold": 8}
 OUTCOMES = ["Payment done", "Payment date fixed", "Loan documents shared", "Objection – counselled", "Call-back requested",
             "Spoke – payment not discussed", "Not answered", "Switched off / failed", "Refused / wants refund", "Wrong number"]
 
@@ -68,16 +70,18 @@ def place(lead: dict, j: dict, day: date) -> dict:
     if lead["unreturned_calls"]:
         why.append(f"Lead called {hm(lead['unreturned_calls'][-1])}, not returned")
     if waiting and not lead["unreturned_calls"]:
-        return {"group": 8, "due": None, "why": f"Asked to wait until {j['waiting_until']}"}
+        return {"group": 9, "due": None, "why": f"Asked to wait until {j['waiting_until']}"}
     if why:
         return {"group": 1, "due": min(times) if times else None, "why": "; ".join(why)}
-    if lead["due48"]:
+    if lead["due48"] and lead["deadline"] >= start - timedelta(days=1):  # the race: due today or later, or missed yesterday
         late = start > lead["deadline"]
-        return {"group": 2, "due": lead["deadline"], "why": ("48 h passed " if late else "Needs a real talk by ") + hm(lead["deadline"])}
+        return {"group": 2, "due": lead["deadline"], "why": ("48 h missed " if late else "Needs a real talk by ") + hm(lead["deadline"])}
+    if lead["due48"] and j["status"] != "cold":
+        return {"group": BY_STATUS[j["status"]], "due": None, "why": f"No real talk yet; 48 h missed {hm(lead['deadline'], '%d %b')}"}
     return {"group": BY_STATUS[j["status"]], "due": None, "why": ""}
 
 
-def plan(leads: list[dict], judged: dict, day: date) -> list[tuple[dict, dict, dict]]:
+def plan(leads: list[dict], judged: dict, day: date, cut: datetime | None = None) -> list[tuple[dict, dict, dict]]:
     rows = []
     for l in leads:
         if l["enrolled"] or l["dropped"]:
@@ -86,7 +90,13 @@ def plan(leads: list[dict], judged: dict, day: date) -> list[tuple[dict, dict, d
         if not j:
             raise ValueError(f"no grade for open lead {l['phone']} ({l['caller']})")
         check(l, j)
-        rows.append((l, j, place(l, j, day)))
+        if cut and j["status"] != "cold" and l.get("calls") and (quiet := silent_since(l, cut)) and not l["unreturned_calls"]:
+            # the user's rule (10 Nov): no pick-up for a week despite 2+ dials a day makes a lead cold, whatever was said before
+            j = {**j, "status": "cold", "silent": f"Was {STATUS[j['status']]}; no pick-up since {quiet.astimezone(IST):%d %b} despite 2+ dials a day"}
+        p = place(l, j, day)
+        if j.get("silent") and p["group"] == 8:
+            p["why"] = j["silent"]
+        rows.append((l, j, p))
     far = datetime.max.replace(tzinfo=IST)
     rows.sort(key=lambda r: (r[0]["caller"], r[2]["group"], r[2]["due"] or far, r[0]["last_real"] or far))
     return rows
@@ -130,18 +140,18 @@ def team_sheet(wb: Workbook, rows: list, leads: list[dict], day: date, cut: date
     title(ws, 1, f"Bootcamp collections — team summary for {day:%a %d %b %Y}", 13)
     put(ws, 2, 1, f"November bootcamp leads, both teams. LeadSquared read {cut.astimezone(IST):%d %b %H:%M} IST. Statuses read from each lead's "
                   "calls, transcripts, comments and Notes.", italic=True, wrap=False)
-    cols = ["AD", "TL", "Caller", "Open leads"] + [GROUPS[k].split(":")[0] for k in range(1, 9)]
-    hdr(ws, 4, cols, [16, 18, 22, 8] + [11] * 8)
+    cols = ["AD", "TL", "Caller", "Open leads"] + [GROUPS[k].split(":")[0] for k in GROUPS]
+    hdr(ws, 4, cols, [16, 18, 22, 8] + [11] * len(GROUPS))
     by = {}
     for l, j, p in rows:
         by.setdefault((l["ad"], l["tl"], l["caller"]), Counter())[p["group"]] += 1
     r = 5
     for (ad, tl, caller), g in sorted(by.items()):
-        for c, v in enumerate([ad, tl, caller, sum(g.values())] + [g.get(k, 0) for k in range(1, 9)], 1):
+        for c, v in enumerate([ad, tl, caller, sum(g.values())] + [g.get(k, 0) for k in GROUPS], 1):
             put(ws, r, c, v)
         r += 1
     tot = Counter(p["group"] for _, _, p in rows)
-    for c, v in enumerate(["Total", "", "", len(rows)] + [tot.get(k, 0) for k in range(1, 9)], 1):
+    for c, v in enumerate(["Total", "", "", len(rows)] + [tot.get(k, 0) for k in GROUPS], 1):
         put(ws, r, c, v, bold=True)
     r += 2
     title(ws, r, "48-hour rule: one substantial conversation (2 min+) by 20:00 IST two days after allocation")
@@ -186,7 +196,7 @@ def how_sheet(wb: Workbook) -> None:
 
 
 def build(leads: list[dict], judged: dict, day: date, cut: datetime, out_dir: str) -> tuple[str, str]:
-    rows = plan(leads, judged, day)
+    rows = plan(leads, judged, day, cut)
     wb = Workbook()
     team_sheet(wb, rows, leads, day, cut)
     how_sheet(wb)
