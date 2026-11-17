@@ -44,6 +44,12 @@ def weekends(run_dir: str) -> list[tuple[str, str]]:
     return out
 
 
+def read_at(run_dir: str) -> datetime:
+    """When the run's LeadSquared data was read: the earliest weekend fetch, so nothing later is taken as missing."""
+    times = [utc(json.load(open(os.path.join(d, "meta.json"))).get("fetched_at_utc")) for d, _ in weekends(run_dir)]
+    return min(t for t in times if t)
+
+
 def deadline_of(allocated: datetime) -> datetime:
     """20:00 IST two calendar days after the allocation day."""
     d = allocated.astimezone(IST).date() + timedelta(days=2)

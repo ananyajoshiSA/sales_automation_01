@@ -102,3 +102,24 @@ def test_note_html_read_as_text():
     from analytics.collection_daily.timelines import text
     raw = '<div style="x"><h3>Summary</h3><p>Loan &amp; EMI</p><br/><ul><li>Docs by Thu</li></ul></div>'
     assert text(raw) == "Summary / Loan & EMI / Docs by Thu"
+
+
+def test_merge_checks_grades_and_lists_the_ungraded(tmp_path):
+    from analytics.collection_daily.__main__ import merge
+    (tmp_path / "grade").mkdir()
+    (tmp_path / "grade" / "out0.json").write_text(json.dumps({"1": {"status": "hot"}, "x": {"status": "cold"}}))
+    added, missing = merge(str(tmp_path), "2026-11-17", [open_lead("1"), open_lead("2")])
+    assert (added, missing) == (1, ["2"])
+    assert json.load(open(tmp_path / "judgements.json")) == {"1": {"2026-11-17": {"status": "hot"}}}
+    (tmp_path / "grade" / "out0.json").write_text(json.dumps({"2": {"status": "hot"}}))
+    with pytest.raises(ValueError):
+        merge(str(tmp_path), "2026-11-17", [open_lead("2", real=0)])
+
+
+def test_cut_is_the_earliest_weekend_read(tmp_path):
+    for name, tag, at in (("w1", "US Accounting Bootcamp Collection - 24th October'26", "2026-11-17 11:22:00"),
+                          ("w2", "NCA Bootcamp Collection - 31st October'26", "2026-11-17 11:17:00")):
+        (tmp_path / name).mkdir()
+        (tmp_path / name / "meta.json").write_text(json.dumps({"bootcamps": [tag], "fetched_at_utc": at}))
+    assert [day for _, day in facts.weekends(str(tmp_path))] == ["2026-10-24", "2026-10-31"]
+    assert facts.read_at(str(tmp_path)) == ist("2026-11-17 16:47")
