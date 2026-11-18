@@ -97,11 +97,14 @@ def test_build_writes_one_workbook_per_team_and_the_plan(tmp_path):
     mayur, anmol = (load_workbook(b) for b in books)
     assert mayur.sheetnames == ["Team summary", "How to use", "Ankita", "Ravi"]
     assert anmol.sheetnames == ["Team summary", "How to use", "Shweta"]
-    assert mayur["Ankita"].cell(row=6, column=12).value == "Card EMI · Sat 21 Nov"
+    assert mayur["Ankita"].cell(row=5, column=6).value == "Lead details"
+    assert mayur["Ankita"].row_dimensions[6].height == 62.5
+    assert mayur["Ankita"].cell(row=6, column=6).value.splitlines() == [
+        "Bootcamp: US Accounting · D1", "Status: Hot", "48-hour deadline: done in time", "Last real talk: 15 Nov",
+        "Payment: Card EMI · Sat 21 Nov"]
     assert "Mayur's team" in mayur["Team summary"].cell(row=1, column=1).value
     summary = [v for row in mayur["Team summary"].iter_rows(values_only=True) for v in row if v]
     assert "Score: real talk within 48 hours (%)" in summary and "1. Follow-ups due today or missed" in summary
-    assert mayur["Ankita"].cell(row=5, column=9).value == "48-hour deadline"
     assert json.load(open(saved))["leads"]["2"]["group"] == 2
 
 

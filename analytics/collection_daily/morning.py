@@ -103,9 +103,7 @@ def plan(leads: list[dict], judged: dict, day: date, cut: datetime | None = None
     return rows
 
 
-COLS = [("#", 4), ("Priority group", 16), ("Due / when", 13), ("Number", 15), ("Lead", 16), ("Bootcamp · day", 18),
-        ("Status", 14), ("Why call today", 22), ("48-hour deadline", 15), ("Last real talk (date)", 12),
-        ("What was discussed last time", 34), ("Payment mode · timeline", 20), ("Objection to handle", 20),
+COLS = [("#", 4), ("Priority group", 16), ("Due / when", 13), ("Number", 15), ("Lead", 16), ("Lead details", 60),
         ("Calls so far (calls / days)", 9), ("Call 1 – time", 9), ("Call 1 – result", 15), ("Call 2 – time", 9), ("Call 2 – result", 15),
         ("Call 3 – time", 9), ("Call 3 – result", 15), ("Next call (date and time)", 14), ("Today's final result", 18),
         ("Your notes", 24), ("Lead ID", 10)]
@@ -114,6 +112,16 @@ FILL_FROM = COLS.index(("Call 1 – time", 9)) + 1
 GROUP_COLS = {1: "Follow-ups due today or missed", 2: "New leads: first real talk due", 3: "Hot: payment plan agreed",
               4: "Objection: needs counselling", 5: "Asked to call back", 6: "Talked, payment not discussed yet",
               7: "Never reached (48 hours missed earlier)", 8: "Cold", 9: "Waiting until an agreed date"}
+
+
+def details(l: dict, j: dict, p: dict) -> str:
+    """Bootcamp, status, why on the list, the 48-hour deadline, the last real talk, payment and objection in one cell,
+    one per line (the user's layout, 18 Nov 2026); empty parts are left out."""
+    deadline = hm(l["deadline"]) if l["due48"] else "done in time" if l["met48"] else "done, late"
+    talk = " — ".join(x for x in (hm(l["last_real"], "%d %b") if l["last_real"] else "", j.get("last_talk") or "") if x and x != "—")
+    parts = [("Bootcamp", f"{l['bootcamp']} · D{l['day']}"), ("Status", STATUS[j["status"]]), ("Why on the list", p["why"]),
+             ("48-hour deadline", deadline), ("Last real talk", talk), ("Payment", j.get("payment")), ("Objection", j.get("objection"))]
+    return "\n".join(f"{k}: {v}" for k, v in parts if v and v != "—")
 
 
 def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime) -> None:
@@ -129,12 +137,11 @@ def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime
     ws.add_data_validation(dv)
     for i, (l, j, p) in enumerate(rows, 1):
         r = 5 + i
-        vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], f"{l['bootcamp']} · D{l['day']}",
-                STATUS[j["status"]], p["why"], hm(l["deadline"]) if l["due48"] else "Done in time" if l["met48"] else "Done, late",
-                hm(l["last_real"], "%d %b"), j.get("last_talk") or "", j.get("payment") or "", j.get("objection") or "",
+        vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], details(l, j, p),
                 f"{l['dials']} / {l['dial_days']}"] + [""] * 9 + [l["lead_id"]]
         for c, v in enumerate(vals, 1):
             put(ws, r, c, v, fill=FILL[p["group"]] if c <= 3 else ("FFF4CC" if FILL_FROM <= c < len(COLS) else None))
+        ws.row_dimensions[r].height = 12.5 * max(2, vals[5].count("\n") + 1)  # Excel does not grow rows for written text
         for c in (FILL_FROM + 1, FILL_FROM + 3, FILL_FROM + 5, FILL_FROM + 7):
             dv.add(ws.cell(row=r, column=c))
     ws.freeze_panes = "F6"
