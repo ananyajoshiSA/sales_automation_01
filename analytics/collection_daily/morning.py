@@ -16,7 +16,6 @@ from datetime import date, datetime, timedelta
 
 from openpyxl import Workbook
 from openpyxl.styles import Font
-from openpyxl.worksheet.datavalidation import DataValidation
 
 from analytics.collection_cycle import silent_since
 from analytics.daily_plan.workbook import F, hdr, put, title
@@ -30,8 +29,6 @@ GROUPS = {1: "Follow-up due today / carried over", 2: "48-hour clock: no substan
           9: "Waiting – do not call before the date"}
 FILL = {1: "FBE0DE", 2: "FFF0C2", 3: "DCEFE6", 4: "F3EAF7", 5: "E8F0FA", 6: "F2F2F2", 7: "FDF3E7", 8: "EDEDED", 9: "FFFFFF"}
 BY_STATUS = {"hot": 3, "counsel": 4, "callback": 5, "connected": 6, "notconnected": 7, "cold": 8}
-OUTCOMES = ["Payment done", "Payment date fixed", "Loan documents shared", "Objection – counselled", "Call-back requested",
-            "Spoke – payment not discussed", "Not answered", "Switched off / failed", "Refused / wants refund", "Wrong number"]
 
 
 def hm(t: datetime | None, fmt: str = "%a %d %b %H:%M") -> str:
@@ -104,10 +101,7 @@ def plan(leads: list[dict], judged: dict, day: date, cut: datetime | None = None
 
 
 COLS = [("#", 4), ("Priority group", 16), ("Due / when", 13), ("Number", 15), ("Lead", 16), ("Lead details", 60),
-        ("Calls so far (calls / days)", 9), ("Call 1 – time", 9), ("Call 1 – result", 15), ("Call 2 – time", 9), ("Call 2 – result", 15),
-        ("Call 3 – time", 9), ("Call 3 – result", 15), ("Next call (date and time)", 14), ("Today's final result", 18),
-        ("Your notes", 24), ("Lead ID", 10)]
-FILL_FROM = COLS.index(("Call 1 – time", 9)) + 1
+        ("Calls so far (calls / days)", 10)]  # nothing for callers to fill: LeadSquared records every attempt (the user, 18 Nov)
 # short names for the team summary's columns, one per group
 GROUP_COLS = {1: "Follow-ups due today or missed", 2: "New leads: first real talk due", 3: "Hot: payment plan agreed",
               4: "Objection: needs counselling", 5: "Asked to call back", 6: "Talked, payment not discussed yet",
@@ -130,20 +124,16 @@ def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime
     title(ws, 1, f"{caller} — call list for {day:%a %d %b %Y}", 13)
     g = Counter(p["group"] for _, _, p in rows)
     put(ws, 2, 1, f"TL {l0['tl']} · {len(rows)} open leads · " + " · ".join(f"{GROUPS[k].split(':')[0]} {g[k]}" for k in sorted(g)), wrap=False)
-    put(ws, 3, 1, "Work top to bottom. After every attempt fill its time and outcome; after a talk set the next follow-up date and time. "
+    put(ws, 3, 1, "Work top to bottom. Save every call's disposition, and after a talk the next call-back time, in LeadSquared. "
                   f"LeadSquared read {cut.astimezone(IST):%d %b %H:%M} IST.", italic=True, wrap=False)
     hdr(ws, 5, [c for c, _ in COLS], [w for _, w in COLS])
-    dv = DataValidation(type="list", formula1='"' + ",".join(OUTCOMES) + '"', allow_blank=True)
-    ws.add_data_validation(dv)
     for i, (l, j, p) in enumerate(rows, 1):
         r = 5 + i
         vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], details(l, j, p),
-                f"{l['dials']} / {l['dial_days']}"] + [""] * 9 + [l["lead_id"]]
+                f"{l['dials']} / {l['dial_days']}"]
         for c, v in enumerate(vals, 1):
-            put(ws, r, c, v, fill=FILL[p["group"]] if c <= 3 else ("FFF4CC" if FILL_FROM <= c < len(COLS) else None))
+            put(ws, r, c, v, fill=FILL[p["group"]] if c <= 3 else None)
         ws.row_dimensions[r].height = 12.5 * max(2, vals[5].count("\n") + 1)  # Excel does not grow rows for written text
-        for c in (FILL_FROM + 1, FILL_FROM + 3, FILL_FROM + 5, FILL_FROM + 7):
-            dv.add(ws.cell(row=r, column=c))
     ws.freeze_panes = "F6"
 
 
@@ -206,7 +196,8 @@ def how_sheet(wb: Workbook) -> None:
              "48-hour rule: a lead allocated on day D needs one substantial conversation (answered, 2 min or more) by 20:00 IST on D+2. If a "
              "lead moves to another caller, the clock restarts.",
              "Follow-ups: call-back times saved in LeadSquared after a call, and times agreed on calls or in Notes.",
-             "After every attempt fill its time and outcome; after a talk set the next follow-up date and time in LeadSquared as well.",
+             "Nothing is filled in here: save every call's disposition, and after a talk the next call-back time, in LeadSquared. "
+             "Write anything the lead says outside a call (WhatsApp, email) as a LeadSquared Note with the date and channel.",
              "The evening update compares the day with this list: what was done, what was missed, and the next steps."]
     for i, t in enumerate(lines, 1):
         c = ws.cell(row=i, column=1, value=t)

@@ -14,7 +14,7 @@ by 20:00 IST on Wednesday. Baseline from 13 Nov: talk within 48 h 78–83%, pick
 
 | Report | When | For | What |
 |---|---|---|---|
-| Morning call list | before calling starts | each caller, TLs | one sheet per caller: every open lead in the order below, with what was discussed, payment mode and timeline, objection, the 48-hour deadline; columns for the caller to fill (attempts, next follow-up, outcome) |
+| Morning call list | before calling starts | each caller, TLs | one sheet per caller: every open lead in the order below, with what was discussed, payment mode and timeline, objection, the 48-hour deadline, in one Lead details cell; nothing to fill in (LeadSquared records every attempt) |
 | End-of-day update | end of the calling day (20:00 IST) | TLs, ADs | at the top: what was missed (follow-ups not kept, 48-hour deadlines passed, leads' calls not returned) and each caller's score; then what was achieved and the next steps. No separate "yesterday" review in the morning list |
 
 Order of the morning list (each lead once, in its first group): 1 follow-ups due today and carried over (a saved

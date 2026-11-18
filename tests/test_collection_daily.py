@@ -191,3 +191,10 @@ def test_transcripts_read_before_the_data_are_read_again(tmp_path, monkeypatch):
     assert timelines.fetch_transcripts(str(tmp_path), ["+91-9000000001"], fresh_after=ist("2026-11-18 12:00")) == (1, 0)
     assert timelines.fetch_transcripts(str(tmp_path), ["+91-9000000001"], fresh_after=ist("2026-11-18 12:00")) == (0, 0)
     assert len(asked) == 1
+
+
+def test_caller_sheet_ends_at_calls_so_far(tmp_path):
+    leads = [open_lead("1") | {"allocated": ist("2026-11-14 10:00")}]
+    books, _ = morning.build(leads, {"1": {"status": "hot"}}, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
+    ws = load_workbook(books[0])["Ankita"]
+    assert [c.value for c in ws[5] if c.value][-1] == "Calls so far (calls / days)" and ws.max_column == 7
