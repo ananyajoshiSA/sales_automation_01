@@ -14,7 +14,7 @@ by 20:00 IST on Wednesday. Baseline from 13 Nov: talk within 48 h 78–83%, pick
 
 | Report | When | For | What |
 |---|---|---|---|
-| Morning call list | before calling starts | each caller, TLs | one sheet per caller: every open lead in the order below, with what was discussed, payment mode and timeline, objection, the 48-hour deadline, in one Lead details cell; nothing to fill in (LeadSquared records every attempt) |
+| Morning call list | before calling starts | each caller, TLs | one sheet per caller: every open lead in the order below, with what was discussed, payment mode and timeline, objection, the 48-hour deadline, in one Lead details cell, and an IIT Pitch column (pitched or not, and what was said); nothing to fill in (LeadSquared records every attempt) |
 | End-of-day update | end of the calling day (20:00 IST) | TLs, ADs | at the top: what was missed (follow-ups not kept, 48-hour deadlines passed, leads' calls not returned) and each caller's score; then what was achieved and the next steps. No separate "yesterday" review in the morning list |
 
 Order of the morning list (each lead once, in its first group): 1 follow-ups due today and carried over (a saved
@@ -76,6 +76,9 @@ Every time in the reports is measured against when the data was read (the earlie
 One workbook per team (Mayur's team, Anmol's team), each with Team summary (open leads per caller by group, and the
 48-hour table per caller), How to use, and one sheet per caller. `plan_<day>.json` (both teams) is kept for the
 end-of-day update. The list uses each lead's latest grade made on or before the day the data was read.
+
+**A new grading field** (such as `iit_pitch`, added 18 Nov 2026): regrade every open lead once, running `prepare`
+without `--since`; a grade made before the field existed shows "Not read yet".
 
 **A refresh during the day:** copy the previous run's `judgements.json` into the new run folder, run `prepare` with
 `--since` set to the previous read time so only leads with new activity get a timeline, grade those, `merge` under

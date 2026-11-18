@@ -43,6 +43,10 @@ the lead said but no answered call is near it and the channel is not stated, tak
   a different time. Leave it out otherwise. A day without a time: use 11:00.
 - `waiting_until` — "YYYY-MM-DD" only when the lead asked us to wait until a named date or event and the caller agreed
   (salary date, exam, loan decision). The lead is not called before it unless it calls us. Leave it out otherwise.
+- `iit_pitch` — ≤ 25 words, always present: whether the IIT add-on (the IIT programme offered with the bootcamp) was
+  pitched to the lead, when, and what was said about it: the lead's interest, price or EMI talk, a decision ("Pitched 16
+  Nov: interested, will add to card EMI"; "Pitched 17 Nov: declined, budget"; "Asked about it 15 Nov, not pitched yet").
+  Write "Not pitched" when no call, transcript, comment or Note mentions it.
 - `next` — ≤ 15 words: the next step for the caller ("Call Wed 11:00 to collect Bajaj documents").
 
 ## Wording

@@ -101,7 +101,7 @@ def plan(leads: list[dict], judged: dict, day: date, cut: datetime | None = None
 
 
 COLS = [("#", 4), ("Priority group", 16), ("Due / when", 13), ("Number", 15), ("Lead", 16), ("Lead details", 60),
-        ("Calls so far (calls / days)", 10)]  # nothing for callers to fill: LeadSquared records every attempt (the user, 18 Nov)
+        ("IIT Pitch", 30), ("Calls so far (calls / days)", 10)]  # nothing for callers to fill: LeadSquared records every attempt (the user, 18 Nov)
 # short names for the team summary's columns, one per group
 GROUP_COLS = {1: "Follow-ups due today or missed", 2: "New leads: first real talk due", 3: "Hot: payment plan agreed",
               4: "Objection: needs counselling", 5: "Asked to call back", 6: "Talked, payment not discussed yet",
@@ -119,6 +119,12 @@ def details(l: dict, j: dict, p: dict) -> str:
     return "\n".join(f"{k}: {v}" for k, v in parts if v and v != "—")
 
 
+def iit(j: dict) -> str:
+    """Whether the IIT add-on was pitched and what was said about it (the user's column, 18 Nov 2026). A grade made before
+    the column existed has no answer: say so rather than "not pitched"."""
+    return j.get("iit_pitch") or "Not read yet"
+
+
 def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime) -> None:
     ws = wb.create_sheet(caller[:31])
     l0 = rows[0][0]
@@ -131,7 +137,7 @@ def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime
     for i, (l, j, p) in enumerate(rows, 1):
         r = 5 + i
         vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], details(l, j, p),
-                f"{l['dials']} / {l['dial_days']}"]
+                iit(j), f"{l['dials']} / {l['dial_days']}"]
         for c, v in enumerate(vals, 1):
             put(ws, r, c, v, fill=FILL[p["group"]] if c <= 3 else None)
         ws.row_dimensions[r].height = 12.5 * max(2, vals[5].count("\n") + 1)  # Excel does not grow rows for written text

@@ -197,7 +197,7 @@ def test_caller_sheet_ends_at_calls_so_far(tmp_path):
     leads = [open_lead("1") | {"allocated": ist("2026-11-14 10:00")}]
     books, _ = morning.build(leads, {"1": {"status": "hot"}}, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
     ws = load_workbook(books[0])["Ankita"]
-    assert [c.value for c in ws[5] if c.value][-1] == "Calls so far (calls / days)" and ws.max_column == 7
+    assert [c.value for c in ws[5] if c.value][-1] == "Calls so far (calls / days)" and ws.max_column == 8
 
 
 def test_one_caller_sample_leaves_the_plan_alone(tmp_path):
@@ -213,3 +213,12 @@ def test_last_talk_uses_the_readers_dated_text():
     l = open_lead("1")
     got = morning.details(l, {"status": "hot", "last_talk": "17 Nov: card EMI chosen"}, {"why": ""})
     assert "Last real talk: 17 Nov: card EMI chosen" in got.splitlines()
+
+
+def test_iit_pitch_column(tmp_path):
+    leads = [l | {"allocated": ist("2026-11-14 10:00")} for l in (open_lead("1"), open_lead("2"))]
+    judged = {"1": {"status": "hot", "iit_pitch": "Pitched 16 Nov: declined, budget"}, "2": {"status": "hot"}}
+    books, _ = morning.build(leads, judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
+    ws = load_workbook(books[0])["Ankita"]
+    assert ws.cell(row=5, column=7).value == "IIT Pitch"
+    assert [ws.cell(row=r, column=7).value for r in (6, 7)] == ["Pitched 16 Nov: declined, budget", "Not read yet"]
