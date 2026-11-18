@@ -71,5 +71,10 @@ Every time in the reports is measured against when the data was read (the earlie
 .venv/bin/python -m analytics.collection_daily morning $D 2026-11-18 exports/collection_daily
 ```
 
-The workbook has Team summary (open leads per caller by group, and the 48-hour table per caller), How to use, and one
-sheet per caller. `plan_<day>.json` is kept for the end-of-day update.
+One workbook per team (Mayur's team, Anmol's team), each with Team summary (open leads per caller by group, and the
+48-hour table per caller), How to use, and one sheet per caller. `plan_<day>.json` (both teams) is kept for the
+end-of-day update. The list uses each lead's latest grade made on or before the day the data was read.
+
+**A refresh during the day:** copy the previous run's `judgements.json` into the new run folder, run `prepare` with
+`--since` set to the previous read time so only leads with new activity get a timeline, grade those, `merge` under
+today's date and build again.

@@ -25,11 +25,11 @@ from analytics.collection_daily import facts, morning, timelines
 from integrations.timeutil import IST
 
 
-def judged_on(path: str, day: date) -> dict:
-    """Each lead's latest grade dated before ``day``."""
+def judged_on(path: str, upto: date) -> dict:
+    """Each lead's latest grade made on or before ``upto`` (the day the data was read)."""
     out = {}
     for lead_id, by_date in json.load(open(path)).items():
-        dates = sorted(d for d in by_date if d < day.isoformat())
+        dates = sorted(d for d in by_date if d <= upto.isoformat())
         if dates:
             out[lead_id] = by_date[dates[-1]]
     return out
@@ -84,9 +84,9 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{added} grades added; {len(missing)} open leads without a grade")
     else:
         day = date.fromisoformat(a.day)
-        xlsx, saved = morning.build(leads, judged_on(os.path.join(a.run_dir, "judgements.json"), day), day, cut, a.out_dir)
-        print(xlsx)
-        print(saved)
+        books, saved = morning.build(leads, judged_on(os.path.join(a.run_dir, "judgements.json"), cut.astimezone(IST).date()),
+                                     day, cut, a.out_dir)
+        print("\n".join(books + [saved]))
 
 
 if __name__ == "__main__":

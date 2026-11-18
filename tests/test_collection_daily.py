@@ -1,4 +1,5 @@
 import json
+import os
 from datetime import date, datetime, timezone
 
 import pytest
@@ -49,7 +50,7 @@ def test_follow_ups_only_after_an_answered_call_and_kept_within_two_hours():
 
 
 def open_lead(lid, caller="Ankita", real=1, **kw):
-    base = {"lead_id": lid, "phone": "9" + lid.rjust(9, "0"), "name": "", "caller": caller, "tl": "Sonal", "ad": "Sahil",
+    base = {"lead_id": lid, "side": "Mayur", "phone": "9" + lid.rjust(9, "0"), "name": "", "caller": caller, "tl": "Sonal", "ad": "Sahil",
             "bootcamp": "US Accounting", "day": 1, "enrolled": False, "dropped": False, "real_talks": real,
             "deadline": ist("2026-11-16 20:00"), "due48": real == 0, "met48": real > 0, "first_pickup": None,
             "next_follow_up": None, "follow_ups": [], "unreturned_calls": [], "last_real": ist("2026-11-15 12:00") if real else None,
@@ -85,22 +86,28 @@ def test_grade_must_fit_the_calls():
         morning.plan([open_lead("1")], {}, date(2026, 11, 18))
 
 
-def test_build_writes_caller_sheets_and_the_plan(tmp_path):
-    leads = [open_lead("1"), open_lead("2", caller="Ravi", real=0, deadline=ist("2026-11-18 20:00"))]
-    judged = {"1": {"status": "hot", "payment": "Card EMI · Sat 21 Nov"}, "2": {"status": "notconnected"}}
+def test_build_writes_one_workbook_per_team_and_the_plan(tmp_path):
+    leads = [open_lead("1"), open_lead("2", caller="Ravi", real=0, deadline=ist("2026-11-18 20:00")),
+             open_lead("3", caller="Shweta", side="Puja / Anmol", tl="Aditya", ad="Anmol")]
+    judged = {"1": {"status": "hot", "payment": "Card EMI · Sat 21 Nov"}, "2": {"status": "notconnected"}, "3": {"status": "connected"}}
     leads = [l | {"allocated": ist("2026-11-14 10:00")} for l in leads]
-    xlsx, saved = morning.build(leads, judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
-    wb = load_workbook(xlsx)
-    assert wb.sheetnames == ["Team summary", "How to use", "Ankita", "Ravi"]
-    assert wb["Ankita"].cell(row=6, column=12).value == "Card EMI · Sat 21 Nov"
+    books, saved = morning.build(leads, judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
+    assert [os.path.basename(b) for b in books] == ["Bootcamp collections call list - Mayur's team - Wed 18 Nov 2026.xlsx",
+                                                    "Bootcamp collections call list - Anmol's team - Wed 18 Nov 2026.xlsx"]
+    mayur, anmol = (load_workbook(b) for b in books)
+    assert mayur.sheetnames == ["Team summary", "How to use", "Ankita", "Ravi"]
+    assert anmol.sheetnames == ["Team summary", "How to use", "Shweta"]
+    assert mayur["Ankita"].cell(row=6, column=12).value == "Card EMI · Sat 21 Nov"
+    assert "Mayur's team" in mayur["Team summary"].cell(row=1, column=1).value
     assert json.load(open(saved))["leads"]["2"]["group"] == 2
 
 
-def test_latest_grade_before_the_day(tmp_path):
+def test_latest_grade_made_by_the_read_day(tmp_path):
     p = tmp_path / "j.json"
     p.write_text(json.dumps({"1": {"2026-11-16": {"status": "connected"}, "2026-11-17": {"status": "hot"},
                                    "2026-11-18": {"status": "cold"}}}))
-    assert judged_on(str(p), date(2026, 11, 18)) == {"1": {"status": "hot"}}
+    assert judged_on(str(p), date(2026, 11, 17)) == {"1": {"status": "hot"}}
+    assert judged_on(str(p), date(2026, 11, 18)) == {"1": {"status": "cold"}}
 
 
 def test_note_html_read_as_text():

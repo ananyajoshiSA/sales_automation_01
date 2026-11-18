@@ -134,11 +134,11 @@ def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime
     ws.freeze_panes = "F6"
 
 
-def team_sheet(wb: Workbook, rows: list, leads: list[dict], day: date, cut: datetime) -> None:
+def team_sheet(wb: Workbook, rows: list, leads: list[dict], day: date, cut: datetime, team: str) -> None:
     ws = wb.active
     ws.title = "Team summary"
-    title(ws, 1, f"Bootcamp collections — team summary for {day:%a %d %b %Y}", 13)
-    put(ws, 2, 1, f"November bootcamp leads, both teams. LeadSquared read {cut.astimezone(IST):%d %b %H:%M} IST. Statuses read from each lead's "
+    title(ws, 1, f"Bootcamp collections — {team} — team summary for {day:%a %d %b %Y}", 13)
+    put(ws, 2, 1, f"November bootcamp leads. LeadSquared read {cut.astimezone(IST):%d %b %H:%M} IST. Statuses read from each lead's "
                   "calls, transcripts, comments and Notes.", italic=True, wrap=False)
     cols = ["AD", "TL", "Caller", "Open leads"] + [GROUPS[k].split(":")[0] for k in GROUPS]
     hdr(ws, 4, cols, [16, 18, 22, 8] + [11] * len(GROUPS))
@@ -195,19 +195,28 @@ def how_sheet(wb: Workbook) -> None:
     ws.column_dimensions["A"].width = 150
 
 
-def build(leads: list[dict], judged: dict, day: date, cut: datetime, out_dir: str) -> tuple[str, str]:
+TEAMS = {"Mayur": "Mayur's team", "Puja / Anmol": "Anmol's team"}
+
+
+def build(leads: list[dict], judged: dict, day: date, cut: datetime, out_dir: str) -> tuple[list[str], str]:
+    """One workbook per collection team (Mayur's, Anmol's) and the plan of both for the evening update."""
     rows = plan(leads, judged, day, cut)
-    wb = Workbook()
-    team_sheet(wb, rows, leads, day, cut)
-    how_sheet(wb)
-    for caller in sorted({l["caller"] for l, _, _ in rows}, key=lambda c: (next(l["tl"] for l, _, _ in rows if l["caller"] == c), c)):
-        caller_sheet(wb, caller, [r for r in rows if r[0]["caller"] == caller], day, cut)
     os.makedirs(out_dir, exist_ok=True)
-    xlsx = os.path.join(out_dir, f"Bootcamp collections call list {day:%a %d %b %Y}.xlsx")
-    wb.save(xlsx)
+    books = []
+    for side, team in TEAMS.items():
+        mine = [r for r in rows if r[0]["side"] == side]
+        if not mine:
+            continue
+        wb = Workbook()
+        team_sheet(wb, mine, [l for l in leads if l["side"] == side], day, cut, team)
+        how_sheet(wb)
+        for caller in sorted({l["caller"] for l, _, _ in mine}, key=lambda c: (next(l["tl"] for l, _, _ in mine if l["caller"] == c), c)):
+            caller_sheet(wb, caller, [r for r in mine if r[0]["caller"] == caller], day, cut)
+        books.append(os.path.join(out_dir, f"Bootcamp collections call list - {team} - {day:%a %d %b %Y}.xlsx"))
+        wb.save(books[-1])
     saved = os.path.join(out_dir, f"plan_{day.isoformat()}.json")
     json.dump({"day": day.isoformat(), "cut": cut.isoformat(),
-               "leads": {l["lead_id"]: {"caller": l["caller"], "group": p["group"], "status": j["status"], "why": p["why"],
-                                        "due": p["due"].isoformat() if p["due"] else None} for l, j, p in rows}},
+               "leads": {l["lead_id"]: {"caller": l["caller"], "side": l["side"], "group": p["group"], "status": j["status"],
+                                        "why": p["why"], "due": p["due"].isoformat() if p["due"] else None} for l, j, p in rows}},
               open(saved, "w"), indent=1)
-    return xlsx, saved
+    return books, saved
