@@ -103,9 +103,9 @@ def plan(leads: list[dict], judged: dict, day: date, cut: datetime | None = None
     return rows
 
 
-COLS = [("#", 4), ("Priority group", 16), ("Call at (time)", 13), ("Phone", 15), ("Lead name", 16), ("Bootcamp", 18),
-        ("Lead status", 14), ("Why call today", 22), ("First real talk due by (48-hour rule)", 15), ("Last real talk (date)", 12),
-        ("What was discussed last time", 34), ("How and when the lead will pay", 20), ("Objection to handle", 20),
+COLS = [("#", 4), ("Priority group", 16), ("Due / when", 13), ("Number", 15), ("Lead", 16), ("Bootcamp · day", 18),
+        ("Status", 14), ("Why call today", 22), ("48-hour deadline", 15), ("Last real talk (date)", 12),
+        ("What was discussed last time", 34), ("Payment mode · timeline", 20), ("Objection to handle", 20),
         ("Calls so far (calls / days)", 9), ("Call 1 – time", 9), ("Call 1 – result", 15), ("Call 2 – time", 9), ("Call 2 – result", 15),
         ("Call 3 – time", 9), ("Call 3 – result", 15), ("Next call (date and time)", 14), ("Today's final result", 18),
         ("Your notes", 24), ("Lead ID", 10)]
@@ -129,7 +129,7 @@ def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime
     ws.add_data_validation(dv)
     for i, (l, j, p) in enumerate(rows, 1):
         r = 5 + i
-        vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], l["bootcamp"],
+        vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], f"{l['bootcamp']} · D{l['day']}",
                 STATUS[j["status"]], p["why"], hm(l["deadline"]) if l["due48"] else "Done in time" if l["met48"] else "Done, late",
                 hm(l["last_real"], "%d %b"), j.get("last_talk") or "", j.get("payment") or "", j.get("objection") or "",
                 f"{l['dials']} / {l['dial_days']}"] + [""] * 9 + [l["lead_id"]]
