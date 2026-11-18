@@ -60,7 +60,8 @@ def place(lead: dict, j: dict, day: date) -> dict:
     end = start + timedelta(days=1)
     waiting = (j.get("waiting_until") or "") > day.isoformat()
     agreed = agreed_at(j.get("followup_at"))
-    times = [t for t in (lead["next_follow_up"], agreed) if t and start <= t < end]
+    dialled_since = lambda t: lead.get("last_dial") and lead["last_dial"] >= t - timedelta(minutes=15)
+    times = [t for t in (lead["next_follow_up"], agreed) if t and start <= t < end and not dialled_since(t)]  # a refresh drops kept ones
     missed = [f for f in lead["follow_ups"] if f["kept"] is False and (not lead["last_real"] or f["due"] > lead["last_real"])]
     why = []
     if times:

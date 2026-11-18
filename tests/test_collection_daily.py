@@ -143,3 +143,12 @@ def test_a_week_without_pick_up_despite_calls_turns_cold():
     rows = morning.plan([open_lead("1", real=1, calls=calls)], {"1": {"status": "hot"}}, date(2026, 11, 18), cut)
     l, j, p = rows[0]
     assert (j["status"], p["group"]) == ("cold", 8) and p["why"].startswith("Was Hot; no pick-up since")
+
+
+def test_a_follow_up_already_dialled_today_leaves_group_one():
+    day = date(2026, 11, 18)
+    due = ist("2026-11-18 10:00")
+    kept = open_lead("1", next_follow_up=due, last_dial=ist("2026-11-18 10:05"))
+    open_ = open_lead("2", next_follow_up=due, last_dial=ist("2026-11-17 15:00"))
+    rows = morning.plan([kept, open_], {"1": {"status": "hot"}, "2": {"status": "hot"}}, day)
+    assert [(l["lead_id"], p["group"]) for l, _, p in rows] == [("2", 1), ("1", 3)]
