@@ -99,6 +99,9 @@ def test_build_writes_one_workbook_per_team_and_the_plan(tmp_path):
     assert anmol.sheetnames == ["Team summary", "How to use", "Shweta"]
     assert mayur["Ankita"].cell(row=6, column=12).value == "Card EMI · Sat 21 Nov"
     assert "Mayur's team" in mayur["Team summary"].cell(row=1, column=1).value
+    summary = [v for row in mayur["Team summary"].iter_rows(values_only=True) for v in row if v]
+    assert "Score: real talk within 48 hours (%)" in summary and "1. Follow-ups due today or missed" in summary
+    assert mayur["Ankita"].cell(row=5, column=9).value == "First real talk due by (48-hour rule)"
     assert json.load(open(saved))["leads"]["2"]["group"] == 2
 
 

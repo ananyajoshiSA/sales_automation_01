@@ -103,12 +103,17 @@ def plan(leads: list[dict], judged: dict, day: date, cut: datetime | None = None
     return rows
 
 
-COLS = [("#", 4), ("Group", 16), ("Due / when", 13), ("Number", 15), ("Lead", 16), ("Bootcamp · day", 18), ("Status", 14),
-        ("Why on the list", 22), ("48-hour deadline", 13), ("Last real talk", 12), ("What was discussed", 34),
-        ("Payment mode · timeline", 20), ("Objection", 20), ("Dials / days", 7), ("Attempt 1 time", 9), ("Attempt 1 outcome", 15),
-        ("Attempt 2 time", 9), ("Attempt 2 outcome", 15), ("Attempt 3 time", 9), ("Attempt 3 outcome", 15),
-        ("Next follow-up (date, time)", 14), ("Outcome", 18), ("Notes", 24), ("Lead ID", 10)]
-FILL_FROM = COLS.index(("Attempt 1 time", 9)) + 1
+COLS = [("#", 4), ("Priority group", 16), ("Call at (time)", 13), ("Phone", 15), ("Lead name", 16), ("Bootcamp", 18),
+        ("Lead status", 14), ("Why call today", 22), ("First real talk due by (48-hour rule)", 15), ("Last real talk (date)", 12),
+        ("What was discussed last time", 34), ("How and when the lead will pay", 20), ("Objection to handle", 20),
+        ("Calls so far (calls / days)", 9), ("Call 1 – time", 9), ("Call 1 – result", 15), ("Call 2 – time", 9), ("Call 2 – result", 15),
+        ("Call 3 – time", 9), ("Call 3 – result", 15), ("Next call (date and time)", 14), ("Today's final result", 18),
+        ("Your notes", 24), ("Lead ID", 10)]
+FILL_FROM = COLS.index(("Call 1 – time", 9)) + 1
+# short names for the team summary's columns, one per group
+GROUP_COLS = {1: "Follow-ups due today or missed", 2: "New leads: first real talk due", 3: "Hot: payment plan agreed",
+              4: "Objection: needs counselling", 5: "Asked to call back", 6: "Talked, payment not discussed yet",
+              7: "Never reached (48 hours missed earlier)", 8: "Cold", 9: "Waiting until an agreed date"}
 
 
 def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime) -> None:
@@ -124,8 +129,8 @@ def caller_sheet(wb: Workbook, caller: str, rows: list, day: date, cut: datetime
     ws.add_data_validation(dv)
     for i, (l, j, p) in enumerate(rows, 1):
         r = 5 + i
-        vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], f"{l['bootcamp']} · D{l['day']}",
-                STATUS[j["status"]], p["why"], hm(l["deadline"]) if l["due48"] else "met" if l["met48"] else "—",
+        vals = [i, GROUPS[p["group"]], hm(p["due"], "%d %b %H:%M") if p["due"] else "", l["phone"], l["name"], l["bootcamp"],
+                STATUS[j["status"]], p["why"], hm(l["deadline"]) if l["due48"] else "Done in time" if l["met48"] else "Done, late",
                 hm(l["last_real"], "%d %b"), j.get("last_talk") or "", j.get("payment") or "", j.get("objection") or "",
                 f"{l['dials']} / {l['dial_days']}"] + [""] * 9 + [l["lead_id"]]
         for c, v in enumerate(vals, 1):
@@ -141,12 +146,13 @@ def team_sheet(wb: Workbook, rows: list, leads: list[dict], day: date, cut: date
     title(ws, 1, f"Bootcamp collections — {team} — team summary for {day:%a %d %b %Y}", 13)
     put(ws, 2, 1, f"November bootcamp leads. LeadSquared read {cut.astimezone(IST):%d %b %H:%M} IST. Statuses read from each lead's "
                   "calls, transcripts, comments and Notes.", italic=True, wrap=False)
-    cols = ["AD", "TL", "Caller", "Open leads"] + [GROUPS[k].split(":")[0] for k in GROUPS]
-    hdr(ws, 4, cols, [16, 18, 22, 8] + [11] * len(GROUPS))
+    title(ws, 4, "Open leads to call, by priority group (each lead counted once)")
+    cols = ["AD", "Team leader", "Caller", "Open leads (total)"] + [f"{k}. {GROUP_COLS[k]}" for k in GROUPS]
+    hdr(ws, 5, cols, [16, 18, 22, 10] + [13] * len(GROUPS))
     by = {}
     for l, j, p in rows:
         by.setdefault((l["ad"], l["tl"], l["caller"]), Counter())[p["group"]] += 1
-    r = 5
+    r = 6
     for (ad, tl, caller), g in sorted(by.items()):
         for c, v in enumerate([ad, tl, caller, sum(g.values())] + [g.get(k, 0) for k in GROUPS], 1):
             put(ws, r, c, v)
@@ -155,9 +161,14 @@ def team_sheet(wb: Workbook, rows: list, leads: list[dict], day: date, cut: date
     for c, v in enumerate(["Total", "", "", len(rows)] + [tot.get(k, 0) for k in GROUPS], 1):
         put(ws, r, c, v, bold=True)
     r += 2
-    title(ws, r, "48-hour rule: one substantial conversation (2 min+) by 20:00 IST two days after allocation")
+    title(ws, r, "48-hour rule: every lead needs one real talk (2 minutes or more) by 8 pm on the second day after it reaches the caller. "
+                 "Target 90%.")
     r += 1
-    hdr(ws, r, ["AD", "TL", "Caller", "Leads allocated", "Deadline passed", "Talked in 48 h", "%", "Picked up in 48 h", "Still due (open)"])
+    put(ws, r, 1, "Only leads whose 48 hours are over are scored. Example: 7 real talks in time out of 11 leads past their deadline = 64%. "
+                  "Red = below 90%.", italic=True, wrap=False)
+    r += 1
+    hdr(ws, r, ["AD", "Team leader", "Caller", "Leads given to the caller", "Leads whose 48 hours are over", "Real talk within 48 hours",
+                "Score: real talk within 48 hours (%)", "Answered within 48 hours (any length)", "No real talk yet (leads still open)"])
     r += 1
     by48 = {}
     for l in leads:
