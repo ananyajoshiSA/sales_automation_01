@@ -207,3 +207,9 @@ def test_one_caller_sample_leaves_the_plan_alone(tmp_path):
     assert saved is None and [os.path.basename(b) for b in books] == ["Bootcamp collections call list - Ravi - Wed 18 Nov 2026.xlsx"]
     assert load_workbook(books[0]).sheetnames == ["Team summary", "How to use", "Ravi"]
     assert not list(tmp_path.glob("plan_*.json"))
+
+
+def test_last_talk_uses_the_readers_dated_text():
+    l = open_lead("1")
+    got = morning.details(l, {"status": "hot", "last_talk": "17 Nov: card EMI chosen"}, {"why": ""})
+    assert "Last real talk: 17 Nov: card EMI chosen" in got.splitlines()

@@ -112,7 +112,8 @@ def details(l: dict, j: dict, p: dict) -> str:
     """Bootcamp, status, why on the list, the 48-hour deadline, the last real talk, payment and objection in one cell,
     one per line (the user's layout, 18 Nov 2026); empty parts are left out."""
     deadline = hm(l["deadline"]) if l["due48"] else "done in time" if l["met48"] else "done, late"
-    talk = " — ".join(x for x in (hm(l["last_real"], "%d %b") if l["last_real"] else "", j.get("last_talk") or "") if x and x != "—")
+    said = j.get("last_talk") if j.get("last_talk") not in (None, "", "—") else ""
+    talk = said or (hm(l["last_real"], "%d %b") if l["last_real"] else "")  # the reader's text carries its own date
     parts = [("Bootcamp", f"{l['bootcamp']} · D{l['day']}"), ("Status", STATUS[j["status"]]), ("Why on the list", p["why"]),
              ("48-hour deadline", deadline), ("Last real talk", talk), ("Payment", j.get("payment")), ("Objection", j.get("objection"))]
     return "\n".join(f"{k}: {v}" for k, v in parts if v and v != "—")
