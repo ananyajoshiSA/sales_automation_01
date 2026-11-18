@@ -155,3 +155,36 @@ def test_a_follow_up_already_dialled_today_leaves_group_one():
     open_ = open_lead("2", next_follow_up=due, last_dial=ist("2026-11-17 15:00"))
     rows = morning.plan([kept, open_], {"1": {"status": "hot"}, "2": {"status": "hot"}}, day)
     assert [(l["lead_id"], p["group"]) for l, _, p in rows] == [("2", 1), ("1", 3)]
+
+
+def test_numbers_whose_real_talk_has_no_saved_transcript(tmp_path):
+    from analytics.collection_daily.timelines import without_transcript
+    talk = {"id": "a1", "t": ist("2026-11-17 11:14"), "answered": True, "dur": 423, "out": True}
+    lead = open_lead("1", phone="+91-9000000001", calls=[talk])
+    rec = {"start_time": "2026-11-17T05:44:00.000Z", "end_time": "2026-11-17T05:51:03.000Z", "call_duration": 423,
+           "transcript": {"text": "balance payment by card"}}
+    (tmp_path / "919000000001.json").write_text(json.dumps({"sales_call": []}))  # read before Salesa had written it
+    assert without_transcript([lead], [str(tmp_path)], ist("2026-11-18 12:00")) == ["+91-9000000001"]
+    (tmp_path / "919000000001.json").write_text(json.dumps({"sales_call": [rec]}))
+    assert without_transcript([lead], [str(tmp_path)], ist("2026-11-18 12:00")) == []
+
+
+def test_transcripts_read_before_the_data_are_read_again(tmp_path, monkeypatch):
+    from analytics.collection_daily import timelines
+    asked = []
+
+    class Fake:
+        def __init__(self, **kw):
+            pass
+
+        def search_raw(self, nums):
+            asked.append(list(nums))
+            return {n: {"sales_call": []} for n in nums}
+    monkeypatch.setattr(timelines, "TranscriptClient", Fake)
+    old = tmp_path / "919000000001.json"
+    old.write_text("{}")
+    os.utime(old, (ist("2026-11-17 17:00").timestamp(),) * 2)
+    assert timelines.fetch_transcripts(str(tmp_path), ["+91-9000000001"]) == (0, 0)  # saved copy kept
+    assert timelines.fetch_transcripts(str(tmp_path), ["+91-9000000001"], fresh_after=ist("2026-11-18 12:00")) == (1, 0)
+    assert timelines.fetch_transcripts(str(tmp_path), ["+91-9000000001"], fresh_after=ist("2026-11-18 12:00")) == (0, 0)
+    assert len(asked) == 1

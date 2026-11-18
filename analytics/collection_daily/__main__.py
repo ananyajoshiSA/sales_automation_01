@@ -71,13 +71,15 @@ def main(argv: list[str] | None = None) -> None:
     leads = facts.collect(a.run_dir, cut)
     if a.cmd == "prepare":
         tx = os.path.join(a.run_dir, "transcripts")
+        older = sorted(glob.glob("data/**/transcripts", recursive=True), key=os.path.getmtime, reverse=True)
+        tx_dirs = [tx] + [d for d in older if os.path.abspath(d) != os.path.abspath(tx)]
         if not a.no_fetch:
             timelines.fetch_lead_fields(a.run_dir, [d for d, _ in facts.weekends(a.run_dir)])
-            open_phones = [l["phone"] for l in leads if not l["enrolled"] and not l["dropped"] and l["real_talks"]]
-            print("transcripts fetched %d, still to fetch %d" % timelines.fetch_transcripts(tx, open_phones))
-        older = sorted(glob.glob("data/**/transcripts", recursive=True), key=os.path.getmtime, reverse=True)
+            # every number with a real talk that no saved transcript covers, read again unless already read after the data
+            todo = timelines.without_transcript(leads, tx_dirs, cut)
+            print("transcripts fetched %d, still to fetch %d" % timelines.fetch_transcripts(tx, todo, fresh_after=cut))
         since = datetime.fromisoformat(a.since).replace(tzinfo=IST) if a.since else None
-        index = timelines.write(a.run_dir, leads, cut, [tx] + [d for d in older if os.path.abspath(d) != os.path.abspath(tx)], since)
+        index = timelines.write(a.run_dir, leads, cut, tx_dirs, since)
         print(f"{len(index)} timelines in {a.run_dir}/tl")
     elif a.cmd == "merge":
         added, missing = merge(a.run_dir, a.day, leads)

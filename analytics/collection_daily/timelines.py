@@ -57,11 +57,16 @@ def fetch_lead_fields(run_dir: str, dirs: list[str]) -> dict:
     return got
 
 
-def fetch_transcripts(tx_dir: str, phones: list[str]) -> tuple[int, int]:
-    """One run (at most 9 requests of 10 numbers) for numbers not fetched yet; returns (fetched, still to fetch)."""
+def fetch_transcripts(tx_dir: str, phones: list[str], fresh_after: datetime | None = None) -> tuple[int, int]:
+    """One run (at most 9 requests of 10 numbers) for numbers not fetched yet, or (with ``fresh_after``) last fetched before
+    that time; returns (fetched, still to fetch)."""
     os.makedirs(tx_dir, exist_ok=True)
     need = sorted({n for n in (normalize_phone(p) for p in phones) if n})
-    todo = [n for n in need if not os.path.exists(os.path.join(tx_dir, n.lstrip("+") + ".json"))]
+
+    def fresh(n: str) -> bool:
+        f = os.path.join(tx_dir, n.lstrip("+") + ".json")
+        return os.path.exists(f) and (fresh_after is None or os.path.getmtime(f) >= fresh_after.timestamp())
+    todo = [n for n in need if not fresh(n)]
     client, got = TranscriptClient(max_retries=0), 0
     for i in range(0, min(len(todo), 90), 10):
         chunk = todo[i:i + 10]
@@ -74,6 +79,23 @@ def fetch_transcripts(tx_dir: str, phones: list[str]) -> tuple[int, int]:
             json.dump(raw.get(key) or {}, open(os.path.join(tx_dir, n.lstrip("+") + ".json"), "w"))
         got += len(chunk)
     return got, len(todo) - got
+
+
+def without_transcript(leads: list[dict], tx_dirs: list[str], cut: datetime) -> list[str]:
+    """Numbers of open leads with a real talk (answered, 2 min+) that no saved transcript matches. Salesa writes a
+    transcript some hours after the call, so a number read the same day can lack one; these are read again."""
+    out = []
+    for l in leads:
+        if l["enrolled"] or l["dropped"]:
+            continue
+        real = [c for c in l["calls"] if c["answered"] and c["dur"] >= 120 and c["t"] <= cut]
+        if not real:
+            continue
+        api = [x for x in transcripts_for(l["phone"], tx_dirs) if x.has_transcript]
+        got = match_to_calls(api, [{"activity_id": c["id"], "lead_number": l["phone"], "t": c["t"], "duration": c["dur"]} for c in real])
+        if any(c["id"] not in got for c in real):
+            out.append(l["phone"])
+    return out
 
 
 def transcripts_for(phone: str, tx_dirs: list[str]) -> list[Call]:

@@ -48,7 +48,9 @@ PYTHONPATH=. .venv/bin/python scripts/fetch_lead_histories.py $D/w3/ids.json $D/
 PYTHONPATH=. .venv/bin/python scripts/fetch_lead_notes.py 2026-10-21 $D/notes.jsonl
 ```
 
-2. Comment fields, one run of transcripts and the timelines (`--since` limits timelines to leads with new activity,
+2. Comment fields, one run of transcripts and the timelines. Salesa writes a transcript some hours after the call, so
+   every number with a real talk that no saved transcript covers is read again (unless already read after the data);
+   run `prepare` again a minute later while it reports numbers still to fetch (`--since` limits timelines to leads with new activity,
    including new comments and Notes, after the last grading):
 
 ```bash
