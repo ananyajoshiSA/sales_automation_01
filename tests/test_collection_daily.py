@@ -198,3 +198,12 @@ def test_caller_sheet_ends_at_calls_so_far(tmp_path):
     books, _ = morning.build(leads, {"1": {"status": "hot"}}, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
     ws = load_workbook(books[0])["Ankita"]
     assert [c.value for c in ws[5] if c.value][-1] == "Calls so far (calls / days)" and ws.max_column == 7
+
+
+def test_one_caller_sample_leaves_the_plan_alone(tmp_path):
+    leads = [l | {"allocated": ist("2026-11-14 10:00")} for l in (open_lead("1"), open_lead("2", caller="Ravi"))]
+    judged = {"1": {"status": "hot"}, "2": {"status": "connected"}}
+    books, saved = morning.build(leads, judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path), caller="Ravi")
+    assert saved is None and [os.path.basename(b) for b in books] == ["Bootcamp collections call list - Ravi - Wed 18 Nov 2026.xlsx"]
+    assert load_workbook(books[0]).sheetnames == ["Team summary", "How to use", "Ravi"]
+    assert not list(tmp_path.glob("plan_*.json"))

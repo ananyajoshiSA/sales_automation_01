@@ -208,8 +208,14 @@ def how_sheet(wb: Workbook) -> None:
 TEAMS = {"Mayur": "Mayur's team", "Puja / Anmol": "Anmol's team"}
 
 
-def build(leads: list[dict], judged: dict, day: date, cut: datetime, out_dir: str) -> tuple[list[str], str]:
-    """One workbook per collection team (Mayur's, Anmol's) and the plan of both for the evening update."""
+def build(leads: list[dict], judged: dict, day: date, cut: datetime, out_dir: str,
+          caller: str | None = None) -> tuple[list[str], str | None]:
+    """One workbook per collection team (Mayur's, Anmol's) and the plan of both for the evening update; with ``caller``,
+    one workbook for that caller alone and no plan (a sample, which must not replace the day's plan)."""
+    if caller:
+        leads = [l for l in leads if l["caller"] == caller]
+        if not leads:
+            raise ValueError(f"no leads for caller {caller!r}")
     rows = plan(leads, judged, day, cut)
     os.makedirs(out_dir, exist_ok=True)
     books = []
@@ -220,10 +226,12 @@ def build(leads: list[dict], judged: dict, day: date, cut: datetime, out_dir: st
         wb = Workbook()
         team_sheet(wb, mine, [l for l in leads if l["side"] == side], day, cut, team)
         how_sheet(wb)
-        for caller in sorted({l["caller"] for l, _, _ in mine}, key=lambda c: (next(l["tl"] for l, _, _ in mine if l["caller"] == c), c)):
-            caller_sheet(wb, caller, [r for r in mine if r[0]["caller"] == caller], day, cut)
-        books.append(os.path.join(out_dir, f"Bootcamp collections call list - {team} - {day:%a %d %b %Y}.xlsx"))
+        for who in sorted({l["caller"] for l, _, _ in mine}, key=lambda c: (next(l["tl"] for l, _, _ in mine if l["caller"] == c), c)):
+            caller_sheet(wb, who, [r for r in mine if r[0]["caller"] == who], day, cut)
+        books.append(os.path.join(out_dir, f"Bootcamp collections call list - {caller or team} - {day:%a %d %b %Y}.xlsx"))
         wb.save(books[-1])
+    if caller:
+        return books, None
     saved = os.path.join(out_dir, f"plan_{day.isoformat()}.json")
     json.dump({"day": day.isoformat(), "cut": cut.isoformat(),
                "leads": {l["lead_id"]: {"caller": l["caller"], "side": l["side"], "group": p["group"], "status": j["status"],

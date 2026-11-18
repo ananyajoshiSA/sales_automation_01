@@ -10,7 +10,7 @@ scripts/fetch_lead_notes.py. Steps:
 
     python -m analytics.collection_daily prepare <run_dir> [--since YYYY-MM-DDTHH:MM] [--no-fetch]
     python -m analytics.collection_daily merge <run_dir> <date YYYY-MM-DD>
-    python -m analytics.collection_daily morning <run_dir> <day YYYY-MM-DD> <out_dir>
+    python -m analytics.collection_daily morning <run_dir> <day YYYY-MM-DD> <out_dir> [--caller "Name"]
 """
 
 from __future__ import annotations
@@ -66,6 +66,7 @@ def main(argv: list[str] | None = None) -> None:
     m.add_argument("run_dir")
     m.add_argument("day")
     m.add_argument("out_dir")
+    m.add_argument("--caller", help="one caller's sheet alone (a sample; the day's plan is not written)")
     a = ap.parse_args(argv)
     cut = facts.read_at(a.run_dir)  # the data's own time, not the clock: a dial after the fetch is not "missed"
     leads = facts.collect(a.run_dir, cut)
@@ -87,8 +88,8 @@ def main(argv: list[str] | None = None) -> None:
     else:
         day = date.fromisoformat(a.day)
         books, saved = morning.build(leads, judged_on(os.path.join(a.run_dir, "judgements.json"), cut.astimezone(IST).date()),
-                                     day, cut, a.out_dir)
-        print("\n".join(books + [saved]))
+                                     day, cut, a.out_dir, a.caller)
+        print("\n".join(books + ([saved] if saved else [])))
 
 
 if __name__ == "__main__":
