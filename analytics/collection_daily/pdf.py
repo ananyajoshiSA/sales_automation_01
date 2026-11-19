@@ -264,7 +264,6 @@ class TeamPDF:
                         for l in self.leads if l["lead_id"] in rows and rows[l["lead_id"]][0].get("status") == "connected"
                         and any(c["answered"] and c["dur"] >= 300 and review.on(c["t"], yday) for c in l["calls"])]
         d48 = [l for l in self.leads if review.on(l["deadline"], yday) and not l["met48"] and not l["enrolled"] and not l["dropped"]]
-        refund = [l for l, j, _ in self.rows if objection_kind(j.get("objection")) == "Refund or cancel"]
         names = lambda ls: ", ".join(f'{e(l["name"] or l["phone"])} ({e(l["caller"])})' for l in ls[:25]) + (f" and {len(ls) - 25} more" if len(ls) > 25 else "")
         boxes = [("Follow-ups not kept", fu_missed), ("Missed calls from leads, not called back", unreturned),
                  ("48-hour deadline missed", d48)]
@@ -275,8 +274,6 @@ class TeamPDF:
         if long_no_plan:
             out.append(f'<div class="red"><b>Long talks that ended without a payment plan ({len(long_no_plan)}).</b> '
                        + ", ".join(f'{e(l["name"])} {round(d / 60)} min ({e(l["caller"])})' for l, d in long_no_plan) + ".</div>")
-        if refund:
-            out.append(f'<div class="red"><b>Refund or cancel asked ({len(refund)}): TL calls today.</b> {names(refund)}.</div>')
         idle = [c for c in self.callers if not self.stats[c]["dials"]]
         pts = []
         if idle:
@@ -287,8 +284,6 @@ class TeamPDF:
             pts.append(f"{len(fu_missed)} follow-ups were not kept. Are call-back times being set when the caller can keep them?")
         if d48:
             pts.append(f"{len(d48)} leads missed the 48-hour talk on {yday:%A}. Each caller names a time for them this morning.")
-        if refund:
-            pts.append(f"{len(refund)} leads asked about a refund or cancelling. Which TL calls each one today?")
         if pts:
             out.append("<h2>Points for the team leaders' huddle</h2><ol>" + "".join(f"<li>{e(p)}</li>" for p in pts) + "</ol>")
         return "".join(out)
@@ -413,23 +408,13 @@ class TeamPDF:
         sts = ["hot", "counsel", "connected", "callback", "notconnected", "cold"]
         pr = [[e(rt)] + [str(pipe[(rt, s)] or "") for s in sts] + [str(sum(pipe[(rt, s)] for s in sts))] for rt in routes]
         pt = table([("Payment route", "22%")] + [(morning.STATUS[s], "11%") for s in sts] + [("All", "12%")], pr, {i: "n" for i in range(1, 8)})
-        cal: dict[date, list] = {}
-        for l, j, _ in self.rows:
-            d = promised(j.get("payment"), self.day.year)
-            if d and d <= self.day + timedelta(days=7) and j["status"] in ("hot", "counsel"):
-                cal.setdefault(max(d, self.day - timedelta(days=30)), []).append((l, j))
-        cr = []
-        for d in sorted(cal):
-            label = f"{d:%a %d %b}" + (" (passed, not paid)" if d < self.day else "")
-            cr.append([f"<b>{e(label)}</b>", ", ".join(f'{e(l["name"] or l["phone"])} ({e(l["caller"])}; {e(route(j.get("payment")))})' for l, j in cal[d])])
         return ('<div class="page"><h1>7. Money and the payment pipeline</h1>'
                 f'<h2>Recovery against the {TARGET}% target (pool sheet MIS of {e(self.mis_as_of)})</h2>' + mt
                 + f'<p class="muted">Recovered = disbursed, one shot or instalments, as the MIS counts it; collected includes booking fees on pending and '
                   f'dropped leads. LeadSquared has {len(self.rows)} open leads for this team; records that differ from the pool sheet are listed in section 9.</p>'
                 + "<h2>Open leads by payment route and status</h2>" + pt
-                + '<p class="muted">Route read from each lead\'s payment plan as the readers wrote it.</p>'
-                + "<h2>Payment dates promised: overdue and the next 7 days</h2>"
-                + table([("Date", "16%"), ("Leads (caller; route)", "84%")], cr) + "</div>")
+                + '<p class="muted">Route read from each lead\'s payment plan as the readers wrote it. Leads with a payment date due '
+                  'are in section 2 (the payment-dates calendar was removed on 19 Nov: it repeated that list).</p></div>')
 
     def overview(self) -> str:
         rows = []
@@ -477,7 +462,10 @@ class TeamPDF:
     def cold_waiting_records(self) -> str:
         cold = [(l, j, p) for l, j, p in self.rows if p["group"] == 8]
         wait = sorted([(l, j) for l, j, p in self.rows if p["group"] == 9], key=lambda r: r[1].get("waiting_until") or "")
-        cr = [[lead_cell(l), e(p["why"] or j.get("last_talk") or "—"), e(j.get("objection") or "—"), e(j.get("next") or "WhatsApp first")]
+        # a refund or cancel request is handled in priority group 3; here it is only marked, not repeated (the user, 19 Nov)
+        cr = [[lead_cell(l), '<i>Asked about a refund or cancelling: see section 2, group 3.</i>', "", ""]
+              if objection_kind(j.get("objection")) == "Refund or cancel" else
+              [lead_cell(l), e(p["why"] or j.get("last_talk") or "—"), e(j.get("objection") or "—"), e(j.get("next") or "WhatsApp first")]
               for l, j, p in cold]
         wr = [[lead_cell(l), e(datetime.strptime(j["waiting_until"][:10], "%Y-%m-%d").strftime("%a %d %b")), e(j.get("last_talk") or "—")] for l, j in wait]
         recs = []

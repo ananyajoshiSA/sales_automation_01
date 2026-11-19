@@ -13,3 +13,7 @@ The user asked (19 Nov 2026) not to rebuild the PDFs now and to keep a list of c
 | 6 | 19 Nov | "Loan pending is not to be considered as enrolled." The Loan pending stage alone never counted. 9 leads count as enrolled only because a Note says "loan done" (7 of them at stage Loan pending, most with "UTR pending"); the user is checking them. | waiting for the user's check |
 | 7 | 19 Nov | Page 2, "What the list asked vs what happened": "Real talk or enrolled" split into two columns, "Enrolled" and "Real talk, not enrolled"; each lead counted once. | in code |
 | 8 | 19 Nov | Page 2, caller table: the "In one line" column removed (too terse to read); the table is numbers only and points to the feedback cards in section 5, which say the same in full. Readers no longer write the one-liner. | in code |
+| 9 | 19 Nov | "Payment dates promised" calendar (section 7) removed: it repeated priority group 1 almost lead for lead. | in code |
+| 10 | 19 Nov | Refund or cancel leads only in priority group 3: the red "Refund or cancel asked" box and its huddle point removed; in the Cold list such a lead is marked "see section 2, group 3" instead of repeating its details. | in code |
+| 11 | 19 Nov | 48-hour missed leads repeated (red box, page-2 table, tracker list); Wednesday's enrolled names (green box and feedback cards); numbers repeated (headline box and scorecard; caller table and feedback cards; team overview and tracker; checks and hour-by-hour; check-by on every priority row). Page numbers given to the user. | waiting for the user |
+
