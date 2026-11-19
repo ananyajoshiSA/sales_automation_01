@@ -212,10 +212,10 @@ class TeamPDF:
             if not ids:
                 continue
             c = Counter(res[k] for k in ids)
-            asked.append([e(morning.GROUPS[g]), str(len(ids)), str(c["Enrolled"] + c["Real talk"]), str(c["Short pick-up"]),
+            asked.append([e(morning.GROUPS[g]), str(len(ids)), str(c["Enrolled"]), str(c["Real talk"]), str(c["Short pick-up"]),
                           str(c["Not reached"]), f'<span class="bad">{c["Not called"]}</span>' if c["Not called"] else "0"])
-        ask = table([("On the list", "38%"), ("Leads", "10%"), ("Real talk or enrolled", "15%"), ("Short pick-up", "12%"),
-                     ("Not reached", "12%"), ("Not called", "13%")], asked, {i: "n" for i in range(1, 6)})
+        ask = table([("On the list", "34%"), ("Leads", "8%"), ("Enrolled", "10%"), ("Real talk, not enrolled", "13%"),
+                     ("Short pick-up", "11%"), ("Not reached", "11%"), ("Not called", "13%")], asked, {i: "n" for i in range(1, 7)})
 
         perf = []
         for c in self.callers:
@@ -248,7 +248,7 @@ class TeamPDF:
                 + f'<div class="green">{lead_line}</div><h2>Scorecard: {bd} vs {yd}</h2>' + sc
                 + f'<h2>What {self.yday:%A}\'s list asked vs what happened</h2>'
                 + f'<p class="muted">{self.yday:%A}\'s list was built from the LeadSquared read of {e(self.notes.get("prev_cut", ""))}; '
-                  'a lead counts as done with a real talk (2 min+) or an enrolment that day.</p>' + ask
+                  'each lead counts once: enrolled that day, else a real talk (2 min+), else a short pick-up, else dialled but not reached, else not called.</p>' + ask
                 + f'<h2>Team performance by caller ({yd})</h2>' + pt
                 + f'<h2>{self.yday:%A}\'s follow-ups, 48-hour and Hot leads that were not called or not reached ({len(miss)})</h2>' + mt
                 + self.missed() + "</div>")
