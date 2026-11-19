@@ -222,3 +222,9 @@ def test_iit_pitch_column(tmp_path):
     ws = load_workbook(books[0])["Ankita"]
     assert ws.cell(row=5, column=7).value == "IIT Pitch"
     assert [ws.cell(row=r, column=7).value for r in (6, 7)] == ["Pitched 16 Nov: declined, budget", "Not read yet"]
+
+
+def test_a_notes_tab_entry_saying_loan_done_enrols():
+    notes = [{"t": "2026-11-18 09:30:00", "text": "Loan done by Fibe"}, {"t": "2026-11-18 08:00:00", "text": "after loan done, send portal"}]
+    assert facts.note_loan_done(notes, ist("2026-11-18 20:00")) == datetime(2026, 11, 18, 9, 30, tzinfo=timezone.utc)
+    assert facts.note_loan_done(notes, ist("2026-11-18 14:00")) is None  # 09:30 UTC is 15:00 IST

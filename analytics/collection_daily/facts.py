@@ -8,6 +8,8 @@ Rules agreed with the user (17 Nov 2026):
 - **48 hours**: a lead allocated on day D needs one substantial conversation by the end of the calling day (20:00 IST)
   on D+2. A pick-up of any length is tracked too.
 - **Substantial conversation**: an answered call of 2 minutes or more.
+- **Enrolled** also when a Note on the Notes tab says the loan is done (the user's rule, 19 Nov 2026), from when it was
+  written; stage comments and activity notes are read by ``analytics.collection_cycle``.
 - **Follow-up**: a call-back time saved in a disposition form within 30 minutes after an answered call (a "call back
   now" default, due within 15 minutes of the form, is not one); graders add times agreed in transcripts and Notes.
 """
@@ -19,7 +21,7 @@ import os
 from datetime import datetime, timedelta
 
 from analytics.bootcamp_collections import _data, parse_tag
-from analytics.collection_cycle import cycle_leads, state
+from analytics.collection_cycle import cycle_leads, says_loan_done, state
 from analytics.collection_scorecard import hierarchy, load
 from integrations.timeutil import IST, utc
 
@@ -96,8 +98,15 @@ def lead_facts(lead: dict, acts: list[dict], start: datetime, cut: datetime) -> 
             "last_real": s["last_real"], "last_dial": last_dial, "enrolled": s["enrolled"], "dropped": s["dropped"], "stage": s["stage"]}
 
 
+def note_loan_done(notes: list[dict], cut: datetime) -> datetime | None:
+    times = [utc(n["t"]) for n in notes if utc(n["t"]) and utc(n["t"]) <= cut and says_loan_done(n.get("text"))]
+    return min(times) if times else None
+
+
 def collect(run_dir: str, cut: datetime) -> list[dict]:
     """Every collection lead of the run's weekends (both teams) assigned by ``cut``, with its facts."""
+    from analytics.collection_daily.timelines import load_notes  # timelines reads facts' output, not the other way
+    notes = load_notes(run_dir)
     out = []
     for d, day in weekends(run_dir):
         leads, hist, meta = load(d)
@@ -107,6 +116,8 @@ def collect(run_dir: str, cut: datetime) -> list[dict]:
             for l in cycle_leads(leads, hist, meta, day, side):
                 if l["assigned"] > cut:
                     continue
+                if (t := note_loan_done(notes.get(l["lead_id"], []), cut)) and not (l["enrolled_at"] and l["enrolled_at"] <= t):
+                    l = {**l, "enrolled_at": t}
                 acts = sorted((a for a in hist.get(l["lead_id"]) or [] if utc(a.get("CreatedOn"))), key=lambda a: a["CreatedOn"])
                 out.append({**l, "side": side, "bootcamp_day": day, "data_dir": d, "team_of": team.get(l["caller"]),
                             **lead_facts(l, acts, start, cut)})

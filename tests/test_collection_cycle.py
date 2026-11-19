@@ -83,3 +83,19 @@ def test_loan_done_counts_as_enrolled():
 
 def test_short_bootcamp_name():
     assert short_bootcamp("US Accounting Bootcamp Collection - 24th October'26") == "US Accounting 24 Oct"
+
+
+def note(t, text, code=103):
+    return {"EventCode": code, "CreatedOn": utc(t), "ActivityFields": {"ActivityEvent_Note": text}}
+
+
+def test_any_comment_saying_loan_done_counts_as_enrolled():
+    base = [owner("2026-10-26 11:00", "Seller", "Vedahi Rana")]
+    hist = {"a": base + [note("2026-10-29 15:00", "Loan done, UTR awaited")],
+            "b": base + [stage("2026-10-29 15:00", "Follow Up For Closure", "loan process done")],
+            "c": base + [note("2026-10-29 15:00", "will pay once loan done"), note("2026-10-29 16:00", "is the loan done?", 237)],
+            "d": base + [note("2026-10-29 15:00", "loan not done yet")]}
+    L = {x["lead_id"]: x for x in cycle_leads([lead(k) for k in hist], hist, META, "2026-10-24", "Mayur")}
+    assert state(L["a"], T("2026-10-29 16:00"))["enrolled"] and not state(L["a"], T("2026-10-29 14:00"))["enrolled"]
+    assert state(L["b"], T("2026-10-29 16:00"))["enrolled"]
+    assert not state(L["c"], T("2026-10-30 10:00"))["enrolled"] and not state(L["d"], T("2026-10-30 10:00"))["enrolled"]

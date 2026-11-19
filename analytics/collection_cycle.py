@@ -4,7 +4,8 @@ A cycle lead is a lead tagged for one of the cycle's bootcamps and held by one o
 the last team caller who owned it). It is assigned at its first owner change to a team member after the bootcamp
 started (or, without one, when its stage became "Booking fees received"), and must be dialled within 12 working
 hours (10:00–20:00 IST); a team member's dial before the owner change counts as on time. Enrolled = the stage reached Course
-Enrolled or Collections done, or Loan pending saved as "loan done" / "loan process done".
+Enrolled or Collections done, or any LeadSquared comment (stage comment, disposition or other activity note) says
+"loan done" / "loan process done"; the daily reports add the Notes tab (``analytics.collection_daily.facts``).
 
     python -m analytics.collection_cycle data/nov_w1 2026-10-24 Mayur "2026-10-28 20:00" out.json
 """
@@ -24,13 +25,31 @@ WORK_START, WORK_END = 10, 20
 WINDOW_HOURS = 12
 REAL_SECS = 120
 BOOKED = "booking fees received"
-# the user's rule (2 Nov 2026): a "Loan pending" stage saved as loan done / loan process done counts as enrolled
-LOAN_PENDING = "Loan pending"
+# the user's rule (2 Nov 2026): a stage saved as loan done / loan process done counts as enrolled
 LOAN_DONE = re.compile(r"\bloan\s+(process\s+)?done\b", re.I)
 
 
+# the user's rule widened (19 Nov 2026): any LSQ comment or Note saying loan done counts as enrolled, at the time it was
+# written; a question ("loan done?") or a condition ("once loan done", "after loan done") does not
+NOT_DONE_YET = re.compile(r"\b(if|once|after|when|until|till|before|whether)\s+(the\s+)?loan\s+(process\s+)?done\b|\bloan\s+(process\s+)?done\s*\?", re.I)
+
+
 def is_enrolment(stage: str, comment: str) -> bool:
-    return stage in COLLECTED or (stage == LOAN_PENDING and bool(LOAN_DONE.search(comment or "")))
+    return stage in COLLECTED or says_loan_done(comment)
+
+
+def says_loan_done(text: str | None) -> bool:
+    return bool(LOAN_DONE.search(text or "")) and not NOT_DONE_YET.search(text or "")
+
+
+def loan_done_at(acts: list[dict], start: datetime) -> datetime | None:
+    """When a comment on any of the lead's activities first said the loan is done (stage comments are read by
+    ``is_enrolment``; this reads disposition and other activity notes)."""
+    for a in acts:
+        t = utc(a.get("CreatedOn"))
+        if t and t >= start and a.get("EventCode") != 3002 and says_loan_done(_note_text(a)):
+            return t
+    return None
 
 
 def add_working_hours(t: datetime, hours: float) -> datetime:
@@ -104,7 +123,7 @@ def cycle_leads(leads: list[dict], hist: dict[str, list], meta: dict, bootcamp_d
             continue
         calls = [c | {"team": team_member(team, c["by"], side)} for c in (_call(a) | {"id": a.get("Id")} for a in acts
                  if a.get("EventCode") in (21, 22)) if c["t"] and c["t"] >= start and not BOT.search(c["by"])]
-        enrolled = next((t for t, s, c in stages if is_enrolment(s, c)), None)
+        enrolled = min((t for t in (next((t for t, s, c in stages if is_enrolment(s, c)), None), loan_done_at(acts, start)) if t), default=None)
         lost = next((t for t, s, _ in stages if s in LOST | DEFERRED), None)
         forms = [{"t": utc(a["CreatedOn"]), "status": (_fields(a).get("Status") or "").replace("\xa0", " "),
                   "due": utc(_fields(a).get("mx_Custom_1")), "note": _note_text(a)} for a in acts
