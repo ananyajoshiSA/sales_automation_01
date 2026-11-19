@@ -190,7 +190,7 @@ class TeamPDF:
                      + (" (" + ", ".join(f'{e(l["name"])} for {e(l["caller"])}' for l in enrolled) + ")" if enrolled else "")
                      + f'. {y["real"]} real talks from {y["dials"]} dials ({pct(y["answered"], y["dials"])}% answered); follow-ups kept '
                        f'{y["fu_kept"]} of {y["fu_due"]}; missed calls from leads, not called back {y["in_unreturned"]} of {y["in_missed"]}; '
-                       f'48-hour talks {y["d48_met"]} of {y["d48_due"]} due that day.')
+                       f'of the {y["d48_due"]} new leads whose 48 hours ended that day, {y["d48_met"]} had a real talk in time.')
 
         def m(s: Counter, k: str) -> str:
             return str(s[k])
@@ -201,7 +201,7 @@ class TeamPDF:
                  ("Talk time", f'{round(b["talk_secs"] / 60)} min', f'{round(y["talk_secs"] / 60)} min'),
                  ("Follow-ups kept (saved call-backs due that day)", f'{b["fu_kept"]} of {b["fu_due"]}', f'{y["fu_kept"]} of {y["fu_due"]}'),
                  ("Missed calls from leads, not called back", f'{b["in_unreturned"]} of {b["in_missed"]}', f'{y["in_unreturned"]} of {y["in_missed"]}'),
-                 ("48-hour talks (deadline that day)", f'{b["d48_met"]} of {b["d48_due"]}', f'{y["d48_met"]} of {y["d48_due"]}')]
+                 ("New leads whose 48 hours ended that day: real talk in time", f'{b["d48_met"]} of {b["d48_due"]}', f'{y["d48_met"]} of {y["d48_due"]}')]
         sc = table([("Measure", "46%"), (bd, "27%"), (yd, "27%")], [[e(a), e(c), f"<b>{e(d)}</b>"] for a, c, d in score])
 
         # what the list asked vs what happened
@@ -225,7 +225,7 @@ class TeamPDF:
                          f'{s["fu_kept"]}/{s["fu_due"]}', f'{s["in_unreturned"]}/{s["in_missed"]}', f'{s["d48_met"]}/{s["d48_due"]}',
                          str(s["enrolled"] or "—"), e(f.get("line", "—"))])
         pt = table([("Caller", "13%"), ("Dials", "5%"), ("Ans.", "5%"), ("Real talks", "6%"), ("Talk min", "6%"), ("First–last dial", "9%"),
-                    ("Follow-ups kept", "7%"), ("Missed calls not called back", "7%"), ("48-h talks", "6%"), ("Enrolled", "6%"), ("In one line", "30%")],
+                    ("Follow-ups kept", "7%"), ("Missed calls not called back", "7%"), ("48 hours ended: talked in time", "6%"), ("Enrolled", "6%"), ("In one line", "30%")],
                    perf, {i: "n" for i in range(1, 10)})
 
         # leads from the list that were not called or not reached

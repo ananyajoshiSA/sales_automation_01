@@ -63,7 +63,7 @@ def stats_line(s: Counter) -> str:
     ans = f"{round(100 * s['answered'] / s['dials'])}%" if s["dials"] else "—"
     return (f"{s['dials']} dials · {ans} answered · {s['real']} real talks (2 min+) · {round(s['talk_secs'] / 60)} min talk · "
             f"{hhmm(s['first'])}–{hhmm(s['last'])} · follow-ups kept {s['fu_kept']} of {s['fu_due']} · "
-            f"missed calls from leads, not called back {s['in_unreturned']} of {s['in_missed']} · 48-hour talks {s['d48_met']} of {s['d48_due']}"
+            f"missed calls from leads, not called back {s['in_unreturned']} of {s['in_missed']} · 48 hours ended for {s['d48_due']} new leads, {s['d48_met']} talked in time"
             + (f" · enrolled {s['enrolled']}" if s["enrolled"] else ""))
 
 
