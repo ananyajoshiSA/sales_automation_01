@@ -16,4 +16,9 @@ The user asked (19 Nov 2026) not to rebuild the PDFs now and to keep a list of c
 | 9 | 19 Nov | "Payment dates promised" calendar (section 7) removed: it repeated priority group 1 almost lead for lead. | in code |
 | 10 | 19 Nov | Refund or cancel leads only in priority group 3: the red "Refund or cancel asked" box and its huddle point removed; in the Cold list such a lead is marked "see section 2, group 3" instead of repeating its details. | in code |
 | 11 | 19 Nov | 48-hour missed leads repeated (red box, page-2 table, tracker list); Wednesday's enrolled names (green box and feedback cards); numbers repeated (headline box and scorecard; caller table and feedback cards; team overview and tracker; checks and hour-by-hour; check-by on every priority row). Page numbers given to the user. | waiting for the user |
+| 12 | 19 Nov | Green summary box (page 2) removed; its numbers are the scorecard's. Its one unrepeated part, the names enrolled that day, stays as one line under the scorecard. | in code |
+| 13 | 19 Nov | Follow-ups kept per caller: only in the caller table (page 2); removed from the team overview. | in code |
+| 14 | 19 Nov | Team leader's times only in "What you check, and when"; the hour-by-hour page shows callers only. Its one extra item (payment links and EMI sheets ready, 09:45) moved into the checks. | in code |
+| 15 | 19 Nov | Priority leads: no check-by column; the time is in each group's heading. | in code |
+| 16 | 19 Nov | 48-hour tracker: the per-caller table removed. Each caller's 48-hour score and "answered within 48 h" (the pick-up measure) are in the team overview; per-caller counts of leads given, overdue and due are not shown elsewhere (the lead list below shows every lead). | in code |
 

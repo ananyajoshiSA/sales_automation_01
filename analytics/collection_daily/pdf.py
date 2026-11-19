@@ -186,11 +186,9 @@ class TeamPDF:
         y, b = self.team_day(self.stats), self.team_day(self.stats_before)
         yd, bd = f"{self.yday:%a %d %b}", f"{self.yday - timedelta(days=1):%a %d %b}"
         enrolled = [l for l in self.leads if review.on(l.get("enrolled_at"), self.yday)]
-        lead_line = (f"<b>{self.yday:%A}: {len(enrolled)} enrolled</b>"
-                     + (" (" + ", ".join(f'{e(l["name"])} for {e(l["caller"])}' for l in enrolled) + ")" if enrolled else "")
-                     + f'. {y["real"]} real talks from {y["dials"]} dials ({pct(y["answered"], y["dials"])}% answered); follow-ups kept '
-                       f'{y["fu_kept"]} of {y["fu_due"]}; missed calls from leads, not called back {y["in_unreturned"]} of {y["in_missed"]}; '
-                       f'of the {y["d48_due"]} new leads whose 48 hours ended that day, {y["d48_met"]} had a real talk in time.')
+        # the green summary box is gone (the user, 19 Nov): its numbers are the scorecard's; only the names were its own
+        who = ('<p class="muted">Enrolled on ' + f'{self.yday:%A}: ' + ", ".join(f'{e(l["name"])} ({e(l["caller"])})' for l in enrolled) + ".</p>"
+               if enrolled else "")
 
         def m(s: Counter, k: str) -> str:
             return str(s[k])
@@ -247,7 +245,7 @@ class TeamPDF:
               + (f'<p class="muted">{len(miss) - 45} more not shown.</p>' if len(miss) > 45 else ""))
 
         return ('<div class="page">' + f'<h1>1. {self.yday:%A} review: what worked, what didn\'t, missed opportunities</h1>'
-                + f'<div class="green">{lead_line}</div><h2>Scorecard: {bd} vs {yd}</h2>' + sc
+                + f'<h2>Scorecard: {bd} vs {yd}</h2>' + sc + who
                 + f'<h2>What {self.yday:%A}\'s list asked vs what happened</h2>'
                 + f'<p class="muted">{self.yday:%A}\'s list was built from the LeadSquared read of {e(self.notes.get("prev_cut", ""))}; '
                   'each lead counts once: enrolled that day, else a real talk (2 min+), else a short pick-up, else dialled but not reached, else not called.</p>' + ask
@@ -306,23 +304,23 @@ class TeamPDF:
                 ("loan", "2 · Loan or finance in progress (Hot): the missing documents named and collected today; the finance partner "
                          "pushed if already submitted", "13:00"),
                 ("risk", "3 · Asked about a refund or cancelling: you call, keep the seat, offer instalments or a named later batch "
-                         "with the fee carried over", "You, by 12:00")]
+                         "with the fee carried over", "12:00 (you call)")]
         n = 0
         for key, title, role in spec:
             items = groups[key]
             if not items:
                 continue
-            rows.append(("grp", f"{title} ({len(items)})"))
+            rows.append(("grp", f"{title} ({len(items)}) · check by {role}"))
             for it in items:
                 l, j = it[0], it[1]
                 n += 1
                 when = f'{it[3]:%a %d %b}' + (" — overdue" if it[3] < self.day else "") if key == "pay" else ""
                 rows.append([str(n), lead_cell(l), e((j.get("last_talk") or "—") + (f' · Payment: {j["payment"]}' if j.get("payment") else "")),
-                             e((f"{when}: " if when else "") + (j.get("next") or "—")), f"<b>{e(role)}</b>"])
+                             e((f"{when}: " if when else "") + (j.get("next") or "—"))])
         intro = (f"<p>Every lead where money can move today. The caller makes the call; <b>you own the outcome</b>. "
                  "Payment dates are the ones written in each lead's payment plan.</p>")
         return ('<div class="page"><h1>2. Priority leads for today</h1>' + intro
-                + table([("#", "3%"), ("Lead", "24%"), ("Why this lead", "40%"), ("What the caller must do", "25%"), ("Check by", "8%")], rows)
+                + table([("#", "3%"), ("Lead", "25%"), ("Why this lead", "44%"), ("What the caller must do", "28%")], rows)
                 + "</div>")
 
     def checks(self) -> str:
@@ -330,7 +328,8 @@ class TeamPDF:
         unret = sum(1 for _, _, p in self.rows if "not called back" in p["why"])
         idle = [c for c in self.callers if not self.stats[c]["dials"]]
         morning_fu = sum(1 for _, _, p in self.rows if p["group"] == 1 and p["due"] and p["due"].astimezone(IST).hour < 15)
-        rows = [("10:00", "Attendance and dialler: every caller logged in and dialling." + (f" No calls yesterday: {', '.join(idle)}." if idle else ""),
+        rows = [("09:45", "Payment links, EMI sheets and the callers' lists ready.", "Missing → get them from finance before 10:00."),
+                ("10:00", "Attendance and dialler: every caller logged in and dialling." + (f" No calls yesterday: {', '.join(idle)}." if idle else ""),
                  "Absent → their follow-ups and 48-hour leads go to a caller present, with a note."),
                 ("10:30", f"Missed calls from leads called back first ({unret} on the lists).", "Not returned by 10:30 → call it yourself or reassign."),
                 ("12:00", "Payments promised for today done (priority group 1).", "Not paid → join the next call; fix the exact time today."),
@@ -362,19 +361,7 @@ class TeamPDF:
                 + (f'<p class="muted">No calls to collection leads on {self.yday:%A}: {e(", ".join(idle))}.</p>' if idle else "") + "</div>")
 
     def tracker(self) -> str:
-        rows = []
-        for c in self.callers:
-            mine = [l for l in self.leads if l["caller"] == c]
-            past = [l for l in mine if self.cut > l["deadline"]]
-            met, picked = sum(l["met48"] for l in past), sum(bool(l["first_pickup"] and l["first_pickup"] <= l["deadline"]) for l in past)
-            open_ = [l for l in mine if l["due48"] and not l["enrolled"] and not l["dropped"]]
-            due_today = sum(1 for l in open_ if l["deadline"].astimezone(IST).date() >= self.day)
-            sc = pct(met, len(past)) if past else None
-            rows.append([e(c), str(len(mine)), str(len(past)), str(met),
-                         (f'<span class="bad">{sc}%</span>' if sc is not None and sc < 90 else f"{sc}%") if sc is not None else "—",
-                         str(picked), str(len(open_) - due_today), str(due_today)])
-        t = table([("Caller", "22%"), ("Leads given", "10%"), ("48 hours over", "11%"), ("Real talk in 48 h", "11%"), ("Score", "9%"),
-                   ("Answered in 48 h", "11%"), ("Overdue, no real talk", "13%"), ("Due today or later", "13%")], rows, {i: "n" for i in range(1, 8)})
+        # the per-caller table is gone (the user, 19 Nov): its scores are in the team overview (section 4)
         lst = sorted([(l, j, p) for l, j, p in self.rows if l["due48"]], key=lambda r: (r[0]["deadline"], r[0]["caller"]))
         lr = [[lead_cell(l), f'{l["allocated"].astimezone(IST):%a %d %b %H:%M}',
                (f'<span class="bad">missed {l["deadline"].astimezone(IST):%a %d %b}</span>' if self.cut > l["deadline"]
@@ -382,7 +369,7 @@ class TeamPDF:
                f'{l["dials"]} / {l["dial_days"]}', e(morning.STATUS[j["status"]] + (f' · {j["last_talk"]}' if j.get("last_talk") not in (None, "—") else ""))]
               for l, j, p in lst]
         return ('<div class="page"><h1>6. 48-hour tracker</h1><p class="muted">One real talk (answered, 2 min+) by 20:00 IST two days after '
-                'the lead reaches the caller. Target 90%. Score counts only leads whose 48 hours are over.</p>' + t
+                'the lead reaches the caller. Target 90%. Each caller\'s score and pick-up rate are in the team overview (section 4).</p>'
                 + f'<h2>Leads still without a real talk ({len(lst)}), earliest deadline first</h2>'
                 + table([("Lead", "28%"), ("Given to caller", "14%"), ("48-hour deadline", "14%"), ("Calls / days", "9%"), ("Status · last contact", "35%")], lr)
                 + "</div>")
@@ -422,13 +409,13 @@ class TeamPDF:
             mine = [(l, j, p) for l, j, p in self.rows if l["caller"] == c]
             g = Counter(p["group"] for _, _, p in mine)
             past = [l for l in self.leads if l["caller"] == c and self.cut > l["deadline"]]
-            s = self.stats[c]
             iit = Counter(iit_kind(j.get("iit_pitch")) for _, j, _ in mine)
             rows.append([e(c), e(self.by_id_tl(c)[1]), str(len(mine))] + [str(g.get(k, 0) or "") for k in range(1, 10)]
-                        + [f'{pct(sum(l["met48"] for l in past), len(past))}%' if past else "—", f'{s["fu_kept"]}/{s["fu_due"]}',
+                        + [f'{pct(sum(l["met48"] for l in past), len(past))}%' if past else "—",
+                           f'{pct(sum(bool(l["first_pickup"] and l["first_pickup"] <= l["deadline"]) for l in past), len(past))}%' if past else "—",
                            str(sum(iit[k] for k in ("Interested", "Declined", "Pitched, undecided")))])
         head = ([("Caller", "12%"), ("TL", "9%"), ("Open", "5%")] + [(str(k), "4.3%") for k in range(1, 10)]
-                + [("48-h score", "7%"), ("Follow-ups kept yday", "8%"), ("IIT pitched", "7%")])
+                + [("48-h score: real talk", "7%"), ("48 h: answered at all", "8%"), ("IIT pitched", "7%")])
         key = " · ".join(f"{k} {morning.GROUP_COLS[k]}" for k in morning.GROUPS)
         return ('<div class="page"><h2>4. Team overview</h2>' + table(head, rows, {i: "n" for i in range(2, 15)})
                 + f'<p class="muted">Groups: {e(key)}.</p></div>')
@@ -491,7 +478,7 @@ class TeamPDF:
 
     def routine(self) -> str:
         day = [("09:45", "Log in; test your line with one call.", "Lists printed; payment links and EMI sheets ready."),
-               ("10:00", "Huddle: read out your three for today.", "Attendance; reassign absentees' follow-ups and 48-hour leads."),
+               ("10:00", "Huddle: read out your three for today.", ""),
                ("10:00–10:30", "Return every lead's call first.", "Check by 10:30."),
                ("10:30–12:00", "Follow-ups at their times; payments promised today.", "12:00: payments promised today done?"),
                ("12:00–13:30", "48-hour leads: first real talk; two dials, WhatsApp if unanswered.", "13:00: every 48-hour lead dialled twice?"),
@@ -507,7 +494,8 @@ class TeamPDF:
                  "Anything the lead says on WhatsApp or email goes in a LeadSquared Note with the date and the channel.",
                  "Paid on the call? Move the lead to Course Enrolled and tell the team leader."]
         return ('<div class="page"><h1>10. The day, hour by hour</h1>'
-                + table([("Time", "13%"), ("What callers do", "47%"), ("What the team leader does", "40%")], [[f"<b>{a}</b>", e(b), e(c)] for a, b, c in day])
+                + table([("Time", "15%"), ("What callers do", "85%")], [[f"<b>{a}</b>", e(b)] for a, b, _ in day])
+                + '<p class="muted">The team leader\'s checks and times are in section 3.</p>'
                 + "<h1>On every call</h1><ol>" + "".join(f"<li>{e(r)}</li>" for r in rules) + "</ol></div>")
 
     def html(self) -> str:
