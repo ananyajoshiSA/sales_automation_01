@@ -219,14 +219,16 @@ class TeamPDF:
 
         perf = []
         for c in self.callers:
-            s, f = self.stats[c], self.feedback.get(c, {})
+            s = self.stats[c]
             perf.append([e(c), str(s["dials"]), f'{pct(s["answered"], s["dials"])}%' if s["dials"] else "—", str(s["real"]),
                          str(round(s["talk_secs"] / 60)), f'{review.hhmm(s["first"])}–{review.hhmm(s["last"])}' if s["dials"] else "—",
                          f'{s["fu_kept"]}/{s["fu_due"]}', f'{s["in_unreturned"]}/{s["in_missed"]}', f'{s["d48_met"]}/{s["d48_due"]}',
-                         str(s["enrolled"] or "—"), e(f.get("line", "—"))])
-        pt = table([("Caller", "13%"), ("Dials", "5%"), ("Ans.", "5%"), ("Real talks", "6%"), ("Talk min", "6%"), ("First–last dial", "9%"),
-                    ("Follow-ups kept", "7%"), ("Missed calls not called back", "7%"), ("48 hours ended: talked in time", "6%"), ("Enrolled", "6%"), ("In one line", "30%")],
+                         str(s["enrolled"] or "—")])
+        # numbers only: the readers' one-liner here was too terse to read (the user, 19 Nov); the feedback cards say it in full
+        pt = table([("Caller", "18%"), ("Dials", "7%"), ("Answered", "8%"), ("Real talks", "8%"), ("Talk min", "8%"), ("First–last dial", "12%"),
+                    ("Follow-ups kept", "9%"), ("Missed calls not called back", "11%"), ("48 hours ended: talked in time", "11%"), ("Enrolled", "8%")],
                    perf, {i: "n" for i in range(1, 10)})
+        pt += '<p class="muted">What went well, what to fix and each caller\'s three leads for today: section 5.</p>'
 
         # leads from the list that were not called or not reached
         order = {"Not called": 0, "Not reached": 1}

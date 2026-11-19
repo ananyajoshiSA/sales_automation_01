@@ -17,11 +17,10 @@ Write, for each caller:
 - `today` — exactly three short items (≤ 8 words each), each a named lead with a time or a concrete action from the
   next-day list or the day's calls ("Ravi 11:00: collect bank statement", "Return Meena's call first",
   "Payment mode and date on every talk"). At least two must name a lead.
-- `line` — ≤ 10 words for the team table ("Ravi and Meena's documents today").
 
 Rules: no lead phone numbers; first names or the name as written are fine (the PDF is internal). Never he/she/his/her
 for a lead or caller: use the name or "the lead". Transcripts have no speaker labels: say what the call was about, not
 who said what. Use the day's numbers line as given; do not recount.
 
-Output: one JSON file `{"<Caller name exactly as in the CALLER line>": {"line", "went_well", "fix", "today": [3]}}` for
+Output: one JSON file `{"<Caller name exactly as in the CALLER line>": {"went_well", "fix", "today": [3]}}` for
 every caller in the batch. Reply with one line only.
