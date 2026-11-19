@@ -1,0 +1,565 @@
+"""The daily team PDF for the AD and team leaders of one bootcamp collection team (Mayur's or Anmol's): the previous
+day's review, the priority leads and checks for today, each caller's feedback, the 48-hour tracker, money against the
+85% target, the payment pipeline, objections and the IIT add-on, leads going cold, records to fix, and the day's
+routine. Layout agreed with the user on 19 Nov 2026 from the sales team's call-plan PDF; callers keep the Excel.
+
+Inputs: a run folder (facts, judgements), the previous day's plan (``plan_<day>.json`` from the morning build), the
+caller feedback the readers wrote (``<run_dir>/feedback/out*.json``, see docs/collection_feedback_brief.md) and the
+Bootcamp pool sheet downloaded into the run folder (``bootcamp_pool.xlsx``) for money.
+
+Groups of payment route, objection and IIT answer are read from the readers' own written fields (status, payment,
+objection, iit_pitch); the PDF says so where it counts them.
+
+    python -m analytics.collection_daily.pdf <run_dir> <day YYYY-MM-DD> <previous plan.json> <out_dir>
+"""
+
+from __future__ import annotations
+
+import glob
+import json
+import os
+import re
+import sys
+from collections import Counter
+from datetime import date, datetime, timedelta
+
+from analytics.collection_daily import facts, morning, review
+from analytics.collection_daily.__main__ import judged_on
+from analytics.collection_reports import CSS, e, lakh, pct, write_pdf
+from analytics.collections.pool_mis import load_mis, load_students
+from integrations.timeutil import IST
+
+TARGET = 85
+TEAM_ADS = {"Mayur": "Mayur's team (Elite Changemakers)", "Puja / Anmol": "Anmol's team (Puja Malik)"}
+
+EXTRA_CSS = """
+.band { background:#1F4E46; color:#fff; border-radius:7px; padding:14px 18px; margin-bottom:10px; }
+.band small { letter-spacing:1px; font-size:8px; text-transform:uppercase; opacity:.85; } .band h1 { color:#fff; font-size:20px; margin:4px 0; }
+.band p { margin:0; font-size:9px; opacity:.95; }
+.tiles6 { display:grid; grid-template-columns: repeat(3,1fr); gap:6px; margin:6px 0 10px; }
+.tiles6 .tile b { font-size:18px; }
+.red { border-left:4px solid #a3390b; background:#FBEDEA; padding:5px 9px; margin:4px 0; }
+.amber { border-left:4px solid #c08a12; background:#FFF6E0; padding:5px 9px; margin:4px 0; }
+.green { border-left:4px solid #1F4E46; background:#EEF4F2; padding:5px 9px; margin:4px 0; }
+.card { border:1px solid #d9d6cf; border-radius:5px; padding:6px 9px; margin:5px 0; page-break-inside: avoid; }
+.card h4 { margin:0 0 2px; font-size:10.5px; color:#1F4E46; } .card .nums { color:#52514e; font-size:7.8px; margin-bottom:3px; }
+.card ol { margin:2px 0 0 16px; padding:0; }
+tr.grp td { background:#1F4E46; color:#fff; font-weight:bold; }
+"""
+
+DATE = re.compile(r"(?<!since )\b(?:(?:Mon|Tue|Wed|Thu|Fri|Sat|Sun)\w*\s+)?(\d{1,2})\s+(Nov|Dec|Jan)\b", re.I)
+ROUTES = [("Loan / finance", re.compile(r"loan|financ|nbfc|bajaj|eduvanz|shopse|credence|propelld|fibe|document emi|e-?mandate|paper", re.I)),
+          ("Card EMI", re.compile(r"card", re.I)), ("One shot", re.compile(r"one[- ]?(shot|time)|full payment|lump", re.I)),
+          ("Instalments", re.compile(r"instal|install", re.I))]
+OBJECTIONS = [("Refund or cancel", re.compile(r"refund|cancel|drop|withdraw", re.I)),
+              ("No card or loan route", re.compile(r"card|credit|cibil|loan|co-?applicant|financ|eligib|limit", re.I)),
+              ("Money or price", re.compile(r"price|fee|expens|budget|cost|afford|fund|money|income|salary|job|cash", re.I)),
+              ("Wants later or no time", re.compile(r"later|next batch|defer|decemb|januar|time|busy|hold|postpone|exam", re.I)),
+              ("Family decides", re.compile(r"family|husband|wife|parent|father|mother|brother|spouse", re.I)),
+              ("Doubts about the course", re.compile(r"doubt|value|quality|result|placement|course|trust|unclear|review", re.I))]
+
+
+def route(payment: str | None) -> str:
+    p = payment or ""
+    if not p.strip(" —-") or re.match(r"\s*undecided", p, re.I):
+        return "Not decided"
+    return next((name for name, rx in ROUTES if rx.search(p)), "Not decided")
+
+
+def promised(payment: str | None, year: int) -> date | None:
+    """The first date written in the reader's payment field (a "since" date is not a promise)."""
+    m = DATE.search(payment or "")
+    if not m:
+        return None
+    mon = {"nov": 11, "dec": 12, "jan": 1}[m.group(2).lower()]
+    try:
+        return date(year + (mon == 1), mon, int(m.group(1)))
+    except ValueError:  # "31 Nov": not a date, so not a promise the list can hold anyone to
+        return None
+
+
+def objection_kind(text: str | None) -> str:
+    return next((name for name, rx in OBJECTIONS if rx.search(text or "")), "Other")
+
+
+def iit_kind(text: str | None) -> str:
+    t = (text or "").lower()
+    if not t or t.startswith("not read"):
+        return "Not read yet"
+    if t.startswith("not pitched"):
+        return "Not pitched"
+    if re.search(r"declin|not interested|refus|no interest|not now|wants base|only the base", t):
+        return "Declined"
+    if re.search(r"interest|will add|added|agreed|keen|wants it|yes", t):
+        return "Interested"
+    return "Pitched, undecided"
+
+
+def table(head: list[tuple[str, str]], rows: list[list], cls: dict[int, str] | None = None) -> str:
+    """``head``: (label, width) pairs; ``rows``: cells (already escaped HTML) or ("grp", text) separator rows."""
+    h = "".join(f'<th style="width:{w}"{" class=n" if (cls or {}).get(i) == "n" else ""}>{e(t)}</th>' for i, (t, w) in enumerate(head))
+    body = []
+    for r in rows:
+        if r and r[0] == "grp":
+            body.append(f'<tr class="grp"><td colspan="{len(head)}">{e(r[1])}</td></tr>')
+            continue
+        body.append("<tr>" + "".join(f'<td{" class=n" if (cls or {}).get(i) == "n" else ""}>{c}</td>' for i, c in enumerate(r)) + "</tr>")
+    return f"<table><tr>{h}</tr>{''.join(body)}</table>"
+
+
+def lead_cell(l: dict) -> str:
+    return f'<b>{e(l["name"] or "—")}</b> <span class="ph">{e(l["phone"])}</span><br><span class="muted">{e(l["caller"])} · {e(l["bootcamp"])}</span>'
+
+
+def day_result(l: dict, day: date) -> str:
+    calls = [c for c in l["calls"] if review.on(c["t"], day)]
+    if review.on(l.get("enrolled_at"), day):
+        return "Enrolled"
+    if any(c["answered"] and c["dur"] >= facts.REAL_SECS for c in calls):
+        return "Real talk"
+    if any(c["answered"] for c in calls):
+        return "Short pick-up"
+    return "Not reached" if any(c["out"] for c in calls) else "Not called"
+
+
+class TeamPDF:
+    def __init__(self, side: str, leads: list[dict], rows: list[tuple], prev: dict, cut: datetime, day: date,
+                 feedback: dict, mis: tuple[str, list[dict]], students: dict, notes: dict):
+        self.side, self.team = side, TEAM_ADS[side]
+        self.leads = [l for l in leads if l["side"] == side]
+        self.by_id = {l["lead_id"]: l for l in self.leads}
+        self.rows = [r for r in rows if r[0]["side"] == side]
+        self.prev = {k: v for k, v in prev.get("leads", {}).items() if k in self.by_id}
+        self.cut, self.day, self.yday = cut, day, day - timedelta(days=1)
+        self.feedback, (self.mis_as_of, mis_rows), self.students, self.notes = feedback, mis, students, notes
+        self.mis = [r for r in mis_rows if r["side"].lower() in side.lower()]
+        self.stats = review.day_stats(self.leads, self.yday)
+        self.stats_before = review.day_stats(self.leads, self.yday - timedelta(days=1))
+        self.ads = sorted({l["ad"] for l in self.leads})
+        self.callers = sorted({l["caller"] for l in self.leads}, key=lambda c: (self.by_id_tl(c), c))
+
+    def by_id_tl(self, caller: str) -> tuple:
+        l = next(l for l in self.leads if l["caller"] == caller)
+        return (l["ad"], l["tl"])
+
+    # -- shared numbers -----------------------------------------------------------------------------------------
+    def team_day(self, stats: dict) -> Counter:
+        t = Counter()
+        for s in stats.values():
+            t.update(s)
+        t["dialled"] = sum(1 for s in stats.values() if s["dials"])
+        return t
+
+    def score48(self) -> tuple[int, int]:
+        past = [l for l in self.leads if self.cut > l["deadline"]]
+        return sum(l["met48"] for l in past), len(past)
+
+    # -- pages --------------------------------------------------------------------------------------------------
+    def cover(self) -> str:
+        rec, n = sum(r["recovered"] for r in self.mis), sum(r["all_teams"] for r in self.mis)
+        y = self.team_day(self.stats)
+        met, past = self.score48()
+        g = Counter(p["group"] for _, _, p in self.rows)
+        enrolled = [l for l in self.leads if review.on(l.get("enrolled_at"), self.yday)]
+        tiles = [(f"{rec} of {n}", f"leads recovered this month ({pct(rec, n)}%; target {TARGET}%) · pool sheet MIS of {self.mis_as_of}"),
+                 (lakh(sum(r["recovered_amount"] for r in self.mis)), f"collected so far · {lakh(sum(r['pending_amount'] for r in self.mis))} still pending (MIS)"),
+                 (str(len(enrolled)), f"enrolled on {self.yday:%A} (LeadSquared stage)"),
+                 (f"{y['real']} of {y['dials']}", f"real talks (2 min+) of dials on {self.yday:%A}"),
+                 (f"{pct(met, past)}%", f"48-hour score: real talk within 48 h, {met} of {past} leads past their deadline (target 90%)"),
+                 (f"{len(self.rows)}", f"open leads to call today · {g[1]} follow-ups first, {g[2]} on the 48-hour clock")]
+        contents = [f"{self.yday:%A} review: what worked, what didn't, missed opportunities", "Priority leads for today",
+                    "What you check, and when", "Team overview", "Feedback to give each caller", "48-hour tracker",
+                    "Money and the payment pipeline", "Objections and the IIT add-on", "Leads going cold, waiting list, records to fix",
+                    "The day, hour by hour · on every call"]
+        return ('<div class="page"><div class="band"><small>Bootcamp collections · ' + e(self.team) + " · for "
+                + e(", ".join(self.ads)) + f' (AD) and the team leaders</small><h1>Call plan for {self.day:%A %d %B %Y}</h1>'
+                f'<p>A review of {self.yday:%A} first, then today\'s priority leads and checks, each caller\'s feedback, the 48-hour '
+                'tracker, money against the target, and the routine. Callers work from the Excel call list.</p></div>'
+                '<div class="tiles6">' + "".join(f'<div class="tile"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in tiles) + "</div>"
+                "<h2>Contents</h2><ol>" + "".join(f"<li>{e(c)}</li>" for c in contents) + "</ol>"
+                f'<p class="muted">Data: LeadSquared read {self.cut.astimezone(IST):%a %d %b %H:%M} IST (calls, stage comments, disposition notes and '
+                f'call-back times, comment fields, Notes). {self.notes.get("transcripts", "")} Bootcamp pool sheet MIS of {self.mis_as_of}, '
+                f'downloaded {self.notes.get("pool_read", "")} IST. Only calls to November bootcamp collection leads are counted. '
+                'Statuses, payment plans, objections and the IIT answer are read from each lead\'s calls, transcripts, comments and Notes.</p></div>')
+
+    def review_page(self) -> str:
+        y, b = self.team_day(self.stats), self.team_day(self.stats_before)
+        yd, bd = f"{self.yday:%a %d %b}", f"{self.yday - timedelta(days=1):%a %d %b}"
+        enrolled = [l for l in self.leads if review.on(l.get("enrolled_at"), self.yday)]
+        lead_line = (f"<b>{self.yday:%A}: {len(enrolled)} enrolled</b>"
+                     + (" (" + ", ".join(f'{e(l["name"])} for {e(l["caller"])}' for l in enrolled) + ")" if enrolled else "")
+                     + f'. {y["real"]} real talks from {y["dials"]} dials ({pct(y["answered"], y["dials"])}% answered); follow-ups kept '
+                       f'{y["fu_kept"]} of {y["fu_due"]}; leads\' calls not returned {y["in_unreturned"]} of {y["in_missed"]}; '
+                       f'48-hour talks {y["d48_met"]} of {y["d48_due"]} due that day.')
+
+        def m(s: Counter, k: str) -> str:
+            return str(s[k])
+        score = [("Enrolled (LeadSquared stage)", m(b, "enrolled"), m(y, "enrolled")),
+                 ("Callers who dialled", f'{b["dialled"]} of {len(self.callers)}', f'{y["dialled"]} of {len(self.callers)}'),
+                 ("Dials", m(b, "dials"), m(y, "dials")), ("Answer rate", f'{pct(b["answered"], b["dials"])}%', f'{pct(y["answered"], y["dials"])}%'),
+                 ("Real talks (2 min+)", m(b, "real"), m(y, "real")),
+                 ("Talk time", f'{round(b["talk_secs"] / 60)} min', f'{round(y["talk_secs"] / 60)} min'),
+                 ("Follow-ups kept (saved call-backs due that day)", f'{b["fu_kept"]} of {b["fu_due"]}', f'{y["fu_kept"]} of {y["fu_due"]}'),
+                 ("Leads' calls not returned", f'{b["in_unreturned"]} of {b["in_missed"]}', f'{y["in_unreturned"]} of {y["in_missed"]}'),
+                 ("48-hour talks (deadline that day)", f'{b["d48_met"]} of {b["d48_due"]}', f'{y["d48_met"]} of {y["d48_due"]}')]
+        sc = table([("Measure", "46%"), (bd, "27%"), (yd, "27%")], [[e(a), e(c), f"<b>{e(d)}</b>"] for a, c, d in score])
+
+        # what the list asked vs what happened
+        res = {k: day_result(self.by_id[k], self.yday) for k in self.prev}
+        asked = []
+        for g in (1, 2, 3, 4):
+            ids = [k for k, v in self.prev.items() if v["group"] == g]
+            if not ids:
+                continue
+            c = Counter(res[k] for k in ids)
+            asked.append([e(morning.GROUPS[g]), str(len(ids)), str(c["Enrolled"] + c["Real talk"]), str(c["Short pick-up"]),
+                          str(c["Not reached"]), f'<span class="bad">{c["Not called"]}</span>' if c["Not called"] else "0"])
+        ask = table([("On the list", "38%"), ("Leads", "10%"), ("Real talk or enrolled", "15%"), ("Short pick-up", "12%"),
+                     ("Not reached", "12%"), ("Not called", "13%")], asked, {i: "n" for i in range(1, 6)})
+
+        perf = []
+        for c in self.callers:
+            s, f = self.stats[c], self.feedback.get(c, {})
+            perf.append([e(c), str(s["dials"]), f'{pct(s["answered"], s["dials"])}%' if s["dials"] else "—", str(s["real"]),
+                         str(round(s["talk_secs"] / 60)), f'{review.hhmm(s["first"])}–{review.hhmm(s["last"])}' if s["dials"] else "—",
+                         f'{s["fu_kept"]}/{s["fu_due"]}', f'{s["in_unreturned"]}/{s["in_missed"]}', f'{s["d48_met"]}/{s["d48_due"]}',
+                         str(s["enrolled"] or "—"), e(f.get("line", "—"))])
+        pt = table([("Caller", "13%"), ("Dials", "5%"), ("Ans.", "5%"), ("Real talks", "6%"), ("Talk min", "6%"), ("First–last dial", "9%"),
+                    ("Follow-ups kept", "7%"), ("Calls not returned", "7%"), ("48-h talks", "6%"), ("Enrolled", "6%"), ("In one line", "30%")],
+                   perf, {i: "n" for i in range(1, 10)})
+
+        # leads from the list that were not called or not reached
+        order = {"Not called": 0, "Not reached": 1}
+        now_open = {l["lead_id"] for l, _, _ in self.rows}  # a lead closed since is no longer anyone's job
+        miss = sorted([(k, v) for k, v in self.prev.items() if v["group"] <= 3 and res[k] in order and k in now_open],
+                      key=lambda kv: (order[res[kv[0]]], kv[1]["group"], kv[1]["caller"]))
+        now = {l["lead_id"]: (j, p) for l, j, p in self.rows}
+        mrows = []
+        for k, v in miss[:45]:
+            l = self.by_id[k]
+            j, p = now.get(k, ({}, {}))
+            mrows.append([lead_cell(l), e(v["why"] or morning.GROUPS[v["group"]].split(":")[0]),
+                          f'<span class="bad">{res[k]}</span>' if res[k] == "Not called" else res[k],
+                          e(morning.STATUS.get(j.get("status"), "Closed") + (f' · {j.get("next")}' if j.get("next") else ""))])
+        mt = (table([("Lead", "30%"), (f"On {self.yday:%A}'s list as", "24%"), ("Result", "10%"), ("Now · next step", "36%")], mrows)
+              + (f'<p class="muted">{len(miss) - 45} more not shown.</p>' if len(miss) > 45 else ""))
+
+        return ('<div class="page">' + f'<h1>1. {self.yday:%A} review: what worked, what didn\'t, missed opportunities</h1>'
+                + f'<div class="green">{lead_line}</div><h2>Scorecard: {bd} vs {yd}</h2>' + sc
+                + f'<h2>What {self.yday:%A}\'s list asked vs what happened</h2>'
+                + f'<p class="muted">{self.yday:%A}\'s list was built from the LeadSquared read of {e(self.notes.get("prev_cut", ""))}; '
+                  'a lead counts as done with a real talk (2 min+) or an enrolment that day.</p>' + ask
+                + f'<h2>Team performance by caller ({yd})</h2>' + pt
+                + f'<h2>{self.yday:%A}\'s follow-ups, 48-hour and Hot leads that were not called or not reached ({len(miss)})</h2>' + mt
+                + self.missed() + "</div>")
+
+    def missed(self) -> str:
+        yday, rows = self.yday, {l["lead_id"]: (j, p) for l, j, p in self.rows}
+        fu_missed = [l for l in self.leads if any(review.on(f["due"], yday) and f["kept"] is False for f in l["follow_ups"])]
+        unreturned = [l for l in self.leads if (ms := [c["t"] for c in l["calls"] if not c["out"] and not c["answered"] and review.on(c["t"], yday)])
+                      and not any(c["out"] and c["t"] > ms[-1] for c in l["calls"])]
+        long_no_plan = [(l, max(c["dur"] for c in l["calls"] if c["answered"] and review.on(c["t"], yday)))
+                        for l in self.leads if l["lead_id"] in rows and rows[l["lead_id"]][0].get("status") == "connected"
+                        and any(c["answered"] and c["dur"] >= 300 and review.on(c["t"], yday) for c in l["calls"])]
+        d48 = [l for l in self.leads if review.on(l["deadline"], yday) and not l["met48"] and not l["enrolled"] and not l["dropped"]]
+        refund = [l for l, j, _ in self.rows if objection_kind(j.get("objection")) == "Refund or cancel"]
+        names = lambda ls: ", ".join(f'{e(l["name"] or l["phone"])} ({e(l["caller"])})' for l in ls[:25]) + (f" and {len(ls) - 25} more" if len(ls) > 25 else "")
+        boxes = [("Follow-ups not kept", fu_missed), ("Leads who rang us and were not called back", unreturned),
+                 ("48-hour deadline missed", d48)]
+        out = ["<h2>Missed opportunities</h2>"]
+        for title, ls in boxes:
+            if ls:
+                out.append(f'<div class="red"><b>{title} ({len(ls)}).</b> {names(ls)}.</div>')
+        if long_no_plan:
+            out.append(f'<div class="red"><b>Long talks that ended without a payment plan ({len(long_no_plan)}).</b> '
+                       + ", ".join(f'{e(l["name"])} {round(d / 60)} min ({e(l["caller"])})' for l, d in long_no_plan) + ".</div>")
+        if refund:
+            out.append(f'<div class="red"><b>Refund or cancel asked ({len(refund)}): TL calls today.</b> {names(refund)}.</div>')
+        idle = [c for c in self.callers if not self.stats[c]["dials"]]
+        pts = []
+        if idle:
+            pts.append(f"{', '.join(idle)} made no calls to collection leads on {yday:%A}. Who is in today, and who covers their follow-ups?")
+        if unreturned:
+            pts.append(f"{len(unreturned)} leads rang us and were not called back. Who returns them by 10:30?")
+        if fu_missed:
+            pts.append(f"{len(fu_missed)} follow-ups were not kept. Are call-back times being set when the caller can keep them?")
+        if d48:
+            pts.append(f"{len(d48)} leads missed the 48-hour talk on {yday:%A}. Each caller names a time for them this morning.")
+        if refund:
+            pts.append(f"{len(refund)} leads asked about a refund or cancelling. Which TL calls each one today?")
+        if pts:
+            out.append("<h2>Points for the team leaders' huddle</h2><ol>" + "".join(f"<li>{e(p)}</li>" for p in pts) + "</ol>")
+        return "".join(out)
+
+    def priority(self) -> str:
+        groups = {"pay": [], "loan": [], "risk": []}
+        soon = self.day + timedelta(days=1)
+        for l, j, p in self.rows:
+            if objection_kind(j.get("objection")) == "Refund or cancel":
+                groups["risk"].append((l, j, p))
+                continue
+            d = promised(j.get("payment"), self.day.year)
+            if j["status"] in ("hot", "counsel") and d and d <= soon:
+                groups["pay"].append((l, j, p, d))
+            elif j["status"] == "hot" and route(j.get("payment")) == "Loan / finance":
+                groups["loan"].append((l, j, p))
+        rows = []
+        spec = [("pay", f"1 · Payment promised by {soon:%a %d %b} or already overdue: the caller sends the link while the lead is on the "
+                        "line and stays on until it goes through", "12:00"),
+                ("loan", "2 · Loan or finance in progress (Hot): the missing documents named and collected today; the finance partner "
+                         "pushed if already submitted", "13:00"),
+                ("risk", "3 · Asked about a refund or cancelling: you call, keep the seat, offer instalments or a named later batch "
+                         "with the fee carried over", "You, by 12:00")]
+        n = 0
+        for key, title, role in spec:
+            items = groups[key]
+            if not items:
+                continue
+            rows.append(("grp", f"{title} ({len(items)})"))
+            for it in items:
+                l, j = it[0], it[1]
+                n += 1
+                when = f'{it[3]:%a %d %b}' + (" — overdue" if it[3] < self.day else "") if key == "pay" else ""
+                rows.append([str(n), lead_cell(l), e((j.get("last_talk") or "—") + (f' · Payment: {j["payment"]}' if j.get("payment") else "")),
+                             e((f"{when}: " if when else "") + (j.get("next") or "—")), f"<b>{e(role)}</b>"])
+        intro = (f"<p>Every lead where money can move today. The caller makes the call; <b>you own the outcome</b>. "
+                 "Payment dates are the ones written in each lead's payment plan.</p>")
+        return ('<div class="page"><h1>2. Priority leads for today</h1>' + intro
+                + table([("#", "3%"), ("Lead", "24%"), ("Why this lead", "40%"), ("What the caller must do", "25%"), ("Check by", "8%")], rows)
+                + "</div>")
+
+    def checks(self) -> str:
+        g = Counter(p["group"] for _, _, p in self.rows)
+        unret = sum(1 for _, _, p in self.rows if "not returned" in p["why"])
+        idle = [c for c in self.callers if not self.stats[c]["dials"]]
+        morning_fu = sum(1 for _, _, p in self.rows if p["group"] == 1 and p["due"] and p["due"].astimezone(IST).hour < 15)
+        rows = [("10:00", "Attendance and dialler: every caller logged in and dialling." + (f" No calls yesterday: {', '.join(idle)}." if idle else ""),
+                 "Absent → their follow-ups and 48-hour leads go to a caller present, with a note."),
+                ("10:30", f"Leads' calls returned first ({unret} on the lists).", "Not returned by 10:30 → call it yourself or reassign."),
+                ("12:00", "Payments promised for today done (priority group 1).", "Not paid → join the next call; fix the exact time today."),
+                ("13:00", f"Every 48-hour lead dialled at least twice ({g[2]} on the lists).", "Not reached → WhatsApp and a third dial after 16:00."),
+                ("15:00", f"Morning follow-ups kept ({morning_fu} booked before 15:00).", "Missed → call within the hour and set a new time with the lead."),
+                ("17:00", "Hot leads with no talk today; counselling leads spoken to.", "Untouched → caller calls before 19:00; you sit on the call."),
+                ("19:30", "A disposition and next call-back time saved after every talk; WhatsApp replies written as Notes with date and channel.",
+                 "Missing → fill before 20:00, so tomorrow's list is right."),
+                ("20:00", "Day close: payments received and stages moved to Course Enrolled.", "Post the count with names.")]
+        return ('<div class="page"><h1>3. What you check, and when</h1>'
+                + table([("Time", "8%"), ("Check", "50%"), ("If it fails", "42%")], [[f"<b>{a}</b>", e(b), e(c)] for a, b, c in rows])
+                + '<div class="green">10:00 huddle (5 minutes): each caller reads out their three for today (section 5) and the time they will call them.</div></div>')
+
+    def feedback_page(self) -> str:
+        cards = []
+        for c in self.callers:
+            s, f = self.stats[c], self.feedback.get(c)
+            if not s["dials"] and not f:
+                continue
+            today = "".join(f"<li>{e(x)}</li>" for x in (f or {}).get("today", []))
+            cards.append(f'<div class="card"><h4>{e(c)} <span class="muted">· TL {e(self.by_id_tl(c)[1])}</span></h4>'
+                         f'<div class="nums">{self.yday:%a}: {e(review.stats_line(s))}</div>'
+                         + (f'<b>Went well:</b> {e(f.get("went_well", "—"))}<br><b>Fix:</b> {e(f.get("fix", "—"))}'
+                            f'<br><b>Their three for today:</b><ol>{today}</ol>' if f else '<span class="muted">No feedback written.</span>') + "</div>")
+        idle = [c for c in self.callers if not self.stats[c]["dials"] and not self.feedback.get(c)]
+        return ('<div class="page"><h1>5. Feedback to give each caller</h1>'
+                f'<p class="muted">From {self.yday:%A}\'s calls, transcripts, comments and Notes on collection leads. Give it at the huddle, '
+                'one caller at a time, two minutes each.</p>' + "".join(cards)
+                + (f'<p class="muted">No calls to collection leads on {self.yday:%A}: {e(", ".join(idle))}.</p>' if idle else "") + "</div>")
+
+    def tracker(self) -> str:
+        rows = []
+        for c in self.callers:
+            mine = [l for l in self.leads if l["caller"] == c]
+            past = [l for l in mine if self.cut > l["deadline"]]
+            met, picked = sum(l["met48"] for l in past), sum(bool(l["first_pickup"] and l["first_pickup"] <= l["deadline"]) for l in past)
+            open_ = [l for l in mine if l["due48"] and not l["enrolled"] and not l["dropped"]]
+            due_today = sum(1 for l in open_ if l["deadline"].astimezone(IST).date() >= self.day)
+            sc = pct(met, len(past)) if past else None
+            rows.append([e(c), str(len(mine)), str(len(past)), str(met),
+                         (f'<span class="bad">{sc}%</span>' if sc is not None and sc < 90 else f"{sc}%") if sc is not None else "—",
+                         str(picked), str(len(open_) - due_today), str(due_today)])
+        t = table([("Caller", "22%"), ("Leads given", "10%"), ("48 hours over", "11%"), ("Real talk in 48 h", "11%"), ("Score", "9%"),
+                   ("Answered in 48 h", "11%"), ("Overdue, no real talk", "13%"), ("Due today or later", "13%")], rows, {i: "n" for i in range(1, 8)})
+        lst = sorted([(l, j, p) for l, j, p in self.rows if l["due48"]], key=lambda r: (r[0]["deadline"], r[0]["caller"]))
+        lr = [[lead_cell(l), f'{l["allocated"].astimezone(IST):%a %d %b %H:%M}',
+               (f'<span class="bad">missed {l["deadline"].astimezone(IST):%a %d %b}</span>' if self.cut > l["deadline"]
+                else f'{l["deadline"].astimezone(IST):%a %d %b %H:%M}'),
+               f'{l["dials"]} / {l["dial_days"]}', e(morning.STATUS[j["status"]] + (f' · {j["last_talk"]}' if j.get("last_talk") not in (None, "—") else ""))]
+              for l, j, p in lst]
+        return ('<div class="page"><h1>6. 48-hour tracker</h1><p class="muted">One real talk (answered, 2 min+) by 20:00 IST two days after '
+                'the lead reaches the caller. Target 90%. Score counts only leads whose 48 hours are over.</p>' + t
+                + f'<h2>Leads still without a real talk ({len(lst)}), earliest deadline first</h2>'
+                + table([("Lead", "28%"), ("Given to caller", "14%"), ("48-hour deadline", "14%"), ("Calls / days", "9%"), ("Status · last contact", "35%")], lr)
+                + "</div>")
+
+    def money(self) -> str:
+        rows, tot = [], Counter()
+        for r in sorted(self.mis, key=lambda r: (r["day"] or "", r["course"])):
+            n = r["all_teams"]
+            need = max(0, -(-TARGET * n // 100) - r["recovered"])
+            tot.update({"n": n, "rec": r["recovered"], "pen": r["pending"], "drop": r["dropped"], "need": need})
+            tot["ra"] += r["recovered_amount"]
+            tot["pa"] += r["pending_amount"]
+            p = pct(r["recovered"], n)
+            rows.append([e(f'{r["course"]} · {datetime.strptime(r["day"], "%Y-%m-%d"):%d %b}' if r["day"] else r["name"]), str(n), str(r["recovered"]),
+                         f'<span class="bad">{p}%</span>' if p < TARGET else f"{p}%", str(r["pending"]), str(r["dropped"]), str(need),
+                         lakh(r["recovered_amount"]), lakh(r["pending_amount"])])
+        rows.append([f"<b>Month so far</b>", f'<b>{tot["n"]}</b>', f'<b>{tot["rec"]}</b>', f'<b>{pct(tot["rec"], tot["n"])}%</b>', f'<b>{tot["pen"]}</b>',
+                     f'<b>{tot["drop"]}</b>', f'<b>{tot["need"]}</b>', f'<b>{lakh(tot["ra"])}</b>', f'<b>{lakh(tot["pa"])}</b>'])
+        mt = table([("Bootcamp", "26%"), ("Leads", "7%"), ("Recovered", "9%"), ("Recovery", "8%"), ("Pending", "8%"), ("Dropped", "8%"),
+                    (f"More needed for {TARGET}%", "10%"), ("Collected", "12%"), ("Pending amount", "12%")], rows, {i: "n" for i in range(1, 9)})
+        pipe = Counter((route(j.get("payment")), j["status"]) for _, j, _ in self.rows)
+        routes = ["Loan / finance", "Card EMI", "One shot", "Instalments", "Not decided"]
+        sts = ["hot", "counsel", "connected", "callback", "notconnected", "cold"]
+        pr = [[e(rt)] + [str(pipe[(rt, s)] or "") for s in sts] + [str(sum(pipe[(rt, s)] for s in sts))] for rt in routes]
+        pt = table([("Payment route", "22%")] + [(morning.STATUS[s], "11%") for s in sts] + [("All", "12%")], pr, {i: "n" for i in range(1, 8)})
+        cal: dict[date, list] = {}
+        for l, j, _ in self.rows:
+            d = promised(j.get("payment"), self.day.year)
+            if d and d <= self.day + timedelta(days=7) and j["status"] in ("hot", "counsel"):
+                cal.setdefault(max(d, self.day - timedelta(days=30)), []).append((l, j))
+        cr = []
+        for d in sorted(cal):
+            label = f"{d:%a %d %b}" + (" (passed, not paid)" if d < self.day else "")
+            cr.append([f"<b>{e(label)}</b>", ", ".join(f'{e(l["name"] or l["phone"])} ({e(l["caller"])}; {e(route(j.get("payment")))})' for l, j in cal[d])])
+        return ('<div class="page"><h1>7. Money and the payment pipeline</h1>'
+                f'<h2>Recovery against the {TARGET}% target (pool sheet MIS of {e(self.mis_as_of)})</h2>' + mt
+                + f'<p class="muted">Recovered = disbursed, one shot or instalments, as the MIS counts it; collected includes booking fees on pending and '
+                  f'dropped leads. LeadSquared has {len(self.rows)} open leads for this team; records that differ from the pool sheet are listed in section 9.</p>'
+                + "<h2>Open leads by payment route and status</h2>" + pt
+                + '<p class="muted">Route read from each lead\'s payment plan as the readers wrote it.</p>'
+                + "<h2>Payment dates promised: overdue and the next 7 days</h2>"
+                + table([("Date", "16%"), ("Leads (caller; route)", "84%")], cr) + "</div>")
+
+    def overview(self) -> str:
+        rows = []
+        for c in self.callers:
+            mine = [(l, j, p) for l, j, p in self.rows if l["caller"] == c]
+            g = Counter(p["group"] for _, _, p in mine)
+            past = [l for l in self.leads if l["caller"] == c and self.cut > l["deadline"]]
+            s = self.stats[c]
+            iit = Counter(iit_kind(j.get("iit_pitch")) for _, j, _ in mine)
+            rows.append([e(c), e(self.by_id_tl(c)[1]), str(len(mine))] + [str(g.get(k, 0) or "") for k in range(1, 10)]
+                        + [f'{pct(sum(l["met48"] for l in past), len(past))}%' if past else "—", f'{s["fu_kept"]}/{s["fu_due"]}',
+                           str(sum(iit[k] for k in ("Interested", "Declined", "Pitched, undecided")))])
+        head = ([("Caller", "12%"), ("TL", "9%"), ("Open", "5%")] + [(str(k), "4.3%") for k in range(1, 10)]
+                + [("48-h score", "7%"), ("Follow-ups kept yday", "8%"), ("IIT pitched", "7%")])
+        key = " · ".join(f"{k} {morning.GROUP_COLS[k]}" for k in morning.GROUPS)
+        return ('<div class="page"><h2>4. Team overview</h2>' + table(head, rows, {i: "n" for i in range(2, 15)})
+                + f'<p class="muted">Groups: {e(key)}.</p></div>')
+
+    def objections(self) -> str:
+        obj: dict[str, list] = {}
+        for l, j, _ in self.rows:
+            if j.get("objection") and j["status"] in ("counsel", "cold"):
+                obj.setdefault(objection_kind(j["objection"]), []).append(l)
+        orow = [[f"<b>{e(k)}</b>", str(len(v)), e(", ".join(f"{c} {n}" for c, n in Counter(l["caller"] for l in v).most_common(4)))]
+                for k, v in sorted(obj.items(), key=lambda kv: -len(kv[1]))]
+        kinds = ["Interested", "Pitched, undecided", "Declined", "Not pitched", "Not read yet"]
+        irow = []
+        for c in self.callers:
+            k = Counter(iit_kind(j.get("iit_pitch")) for l, j, _ in self.rows if l["caller"] == c)
+            if sum(k.values()):
+                irow.append([e(c)] + [str(k[x] or "") for x in kinds])
+        tot = Counter(iit_kind(j.get("iit_pitch")) for _, j, _ in self.rows)
+        irow.append(["<b>Team</b>"] + [f"<b>{tot[x]}</b>" for x in kinds])
+        interested = [(l, j) for l, j, _ in self.rows if iit_kind(j.get("iit_pitch")) == "Interested"]
+        return ('<div class="page"><h1>8. Objections and the IIT add-on</h1>'
+                "<h2>What is stopping the To be counselled and Cold leads</h2>"
+                + table([("Objection", "30%"), ("Leads", "10%"), ("Callers with the most", "60%")], orow, {1: "n"})
+                + '<p class="muted">Grouped from the objection the readers wrote for each lead; a lead counts once, under its first matching group.</p>'
+                + "<h2>IIT add-on: pitched or not, by caller (open leads)</h2>"
+                + table([("Caller", "30%")] + [(k, "14%") for k in kinds], irow, {i: "n" for i in range(1, 6)})
+                + (f"<h2>Interested in the IIT add-on ({len(interested)})</h2>"
+                   + table([("Lead", "30%"), ("What was said", "70%")], [[lead_cell(l), e(j["iit_pitch"])] for l, j in interested]) if interested else "")
+                + "</div>")
+
+    def cold_waiting_records(self) -> str:
+        cold = [(l, j, p) for l, j, p in self.rows if p["group"] == 8]
+        wait = sorted([(l, j) for l, j, p in self.rows if p["group"] == 9], key=lambda r: r[1].get("waiting_until") or "")
+        cr = [[lead_cell(l), e(p["why"] or j.get("last_talk") or "—"), e(j.get("objection") or "—"), e(j.get("next") or "WhatsApp first")]
+              for l, j, p in cold]
+        wr = [[lead_cell(l), e(datetime.strptime(j["waiting_until"][:10], "%Y-%m-%d").strftime("%a %d %b")), e(j.get("last_talk") or "—")] for l, j in wait]
+        recs = []
+        for l in self.leads:
+            s = self.students.get(re.sub(r"\D", "", l["phone"])[-10:])
+            if not s:
+                continue
+            done = (s.get("status") or "").lower().startswith(("recovered", "disbursed", "one shot", "instal")) or (s.get("outcome") or "").lower() in ("recovered",)
+            if done and not l["enrolled"] and not l["dropped"]:
+                recs.append([lead_cell(l), e(f'Pool sheet: {s.get("status") or s.get("outcome")}'), "LeadSquared stage not Course Enrolled: move the stage."])
+            elif l["enrolled"] and not done and (s.get("status") or "").lower() in ("pending", ""):
+                recs.append([lead_cell(l), "LeadSquared: Course Enrolled", e(f'Pool sheet: {s.get("status") or "pending"}: update the sheet with the payment.')])
+        missing = [l for l in self.leads if not l["enrolled"] and not l["dropped"] and not self.students.get(re.sub(r"\D", "", l["phone"])[-10:])]
+        return ('<div class="page"><h2>9. Leads going cold, waiting list, records to fix</h2>'
+                + f"<h2>Cold ({len(cold)}): WhatsApp first, then one call</h2>"
+                + table([("Lead", "28%"), ("Why cold", "30%"), ("Objection", "20%"), ("Next step", "22%")], cr)
+                + f"<h2>Waiting until an agreed date ({len(wait)}): do not call before it</h2>"
+                + table([("Lead", "30%"), ("Until", "12%"), ("Last talk", "58%")], wr)
+                + f"<h2>Records to fix ({len(recs)})</h2>"
+                + (table([("Lead", "30%"), ("Found", "30%"), ("Fix", "40%")], recs) if recs else "<p>LeadSquared stages and the pool sheet agree for this team.</p>")
+                + (f'<p class="muted">{len(missing)} open LeadSquared leads are not in the pool sheet\'s November list for this team (matched by phone).</p>'
+                   if missing else "") + "</div>")
+
+    def routine(self) -> str:
+        day = [("09:45", "Log in; test your line with one call.", "Lists printed; payment links and EMI sheets ready."),
+               ("10:00", "Huddle: read out your three for today.", "Attendance; reassign absentees' follow-ups and 48-hour leads."),
+               ("10:00–10:30", "Return every lead's call first.", "Check by 10:30."),
+               ("10:30–12:00", "Follow-ups at their times; payments promised today.", "12:00: payments promised today done?"),
+               ("12:00–13:30", "48-hour leads: first real talk; two dials, WhatsApp if unanswered.", "13:00: every 48-hour lead dialled twice?"),
+               ("14:30–16:30", "Hot: payment mode and date on every talk; loan documents.", "15:00: morning follow-ups kept?"),
+               ("16:30–18:00", "To be counselled; call-back requests; connected leads.", "17:00: Hot leads untouched today?"),
+               ("18:00–20:00", "Evening follow-ups; second round on unreached 48-hour leads; cold leads on WhatsApp.", "19:30: dispositions and call-backs saved; 20:00 day close.")]
+        rules = ["Check the lead's last talk and Notes before dialling; never ask again what the lead already told us.",
+                 "Confirm the payment route and the date: one shot, card EMI, loan or instalments, and the day it will be paid.",
+                 "For a loan, name the missing documents and the day they will be sent.",
+                 "Pitch the IIT add-on where it fits; note the answer.",
+                 "A refund or cancel question goes to your team leader the same day.",
+                 "Save the disposition and the next call-back time before the next dial.",
+                 "Anything the lead says on WhatsApp or email goes in a LeadSquared Note with the date and the channel.",
+                 "Paid on the call? Move the lead to Course Enrolled and tell the team leader."]
+        return ('<div class="page"><h1>10. The day, hour by hour</h1>'
+                + table([("Time", "13%"), ("What callers do", "47%"), ("What the team leader does", "40%")], [[f"<b>{a}</b>", e(b), e(c)] for a, b, c in day])
+                + "<h1>On every call</h1><ol>" + "".join(f"<li>{e(r)}</li>" for r in rules) + "</ol></div>")
+
+    def html(self) -> str:
+        def join(*parts: str) -> str:  # short sections share a page
+            inner = [p.removeprefix('<div class="page">').removesuffix("</div>") for p in parts]
+            return '<div class="page">' + "".join(inner) + "</div>"
+        pages = [self.cover(), self.review_page(), self.priority(), join(self.checks(), self.overview()), self.feedback_page(),
+                 self.tracker(), self.money(), join(self.objections(), self.cold_waiting_records()), self.routine()]
+        return (f'<!doctype html><html><head><meta charset="utf-8"><title>{e(self.team)} call plan</title>'
+                f'<style>{CSS}{EXTRA_CSS}</style></head><body>{"".join(pages)}</body></html>')
+
+
+def load_feedback(run_dir: str) -> dict:
+    out = {}
+    for f in sorted(glob.glob(os.path.join(run_dir, "feedback", "out*.json"))):
+        out.update(json.load(open(f)))
+    return out
+
+
+def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_note: str = "") -> list[str]:
+    cut = facts.read_at(run_dir)
+    leads = facts.collect(run_dir, cut)
+    judged = judged_on(os.path.join(run_dir, "judgements.json"), cut.astimezone(IST).date())
+    rows = morning.plan(leads, judged, day, cut)
+    prev = json.load(open(prev_plan))
+    pool = os.path.join(run_dir, "bootcamp_pool.xlsx")
+    _, as_of, mis = load_mis(pool, f"{day:%B %Y}")
+    notes = {"transcripts": transcripts_note, "pool_read": datetime.fromtimestamp(os.path.getmtime(pool), IST).strftime("%d %b %H:%M"),
+             "prev_cut": datetime.fromisoformat(prev["cut"]).astimezone(IST).strftime("%a %d %b %H:%M IST")}
+    feedback = load_feedback(run_dir)
+    os.makedirs(out_dir, exist_ok=True)
+    paths = []
+    for side, team in TEAM_ADS.items():
+        students = load_students(pool, f"{day:%B %Y}", side)
+        doc = TeamPDF(side, leads, rows, prev, cut, day, feedback, (as_of, mis), students, notes).html()
+        path = os.path.join(out_dir, f"Bootcamp collections plan - {team.split(' (')[0]} - {day:%a %d %b %Y}.pdf")
+        write_pdf(doc, path)
+        paths.append(path)
+    return paths
+
+
+if __name__ == "__main__":
+    run_dir, day, prev_plan, out_dir = sys.argv[1:5]
+    for p in build(run_dir, date.fromisoformat(day), prev_plan, out_dir, sys.argv[5] if len(sys.argv) > 5 else ""):
+        print(p)

@@ -83,3 +83,22 @@ without `--since`; a grade made before the field existed shows "Not read yet".
 **A refresh during the day:** copy the previous run's `judgements.json` into the new run folder, run `prepare` with
 `--since` set to the previous read time so only leads with new activity get a timeline, grade those, `merge` under
 today's date and build again.
+
+## The team PDF for the AD and team leaders (agreed 19 Nov 2026)
+
+One PDF per team, built after the morning lists, from the same run: the previous day's review (scorecard, what the list
+asked vs what happened, each caller's numbers, leads not called or not reached, missed opportunities, points for the
+huddle), priority leads for today (payment promised, loans in progress, refund or cancel risk), the TL's checks by time,
+the team overview, each caller's feedback card (went well, fix, their three for today), the 48-hour tracker, money
+against the 85% target from the pool sheet MIS and the payment pipeline, objections and the IIT add-on, cold and
+waiting leads, records to fix, and the day's routine.
+
+1. Download the pool sheet into the run folder as `bootcamp_pool.xlsx` (`integrations.gsheets.download_xlsx`).
+2. Write the caller day files and have readers write the feedback with `docs/collection_feedback_brief.md`
+   (`analytics.collection_daily.review.digests`, outputs `<run_dir>/feedback/out<n>.json`).
+3. Build, passing the previous day's plan and a one-line transcript note:
+
+```bash
+.venv/bin/python -m analytics.collection_daily.pdf $D 2026-11-19 exports/collection_daily/plan_2026-11-18.json exports/collection_daily "Salesa transcripts: …"
+```
+
