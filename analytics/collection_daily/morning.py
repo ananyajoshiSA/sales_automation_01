@@ -2,7 +2,7 @@
 summary and a 48-hour tracker for the team leaders, and the plan saved for the evening update.
 
 Order of work (agreed 17 Nov 2026): 1 follow-ups due today and anything carried over (a follow-up not kept, the lead's
-own call not returned), 2 the 48-hour clock (no substantial conversation yet; due today or later, or missed yesterday),
+missed call not called back), 2 the 48-hour clock (no substantial conversation yet; due today or later, or missed yesterday),
 3 Hot, 4 To be counselled, 5 Call-back requested, 6 Connected – payment not discussed, 7 Not connected (48 hours missed
 before yesterday), 8 Cold. Leads that asked us to wait until a later date are listed last and not called before it. Each lead appears once, in its first group.
 """
@@ -66,7 +66,7 @@ def place(lead: dict, j: dict, day: date) -> dict:
     if missed:
         why.append(f"Follow-up of {hm(missed[-1]['due'])} not kept")
     if lead["unreturned_calls"]:
-        why.append(f"Lead called {hm(lead['unreturned_calls'][-1])}, not returned")
+        why.append(f"Missed call from lead {hm(lead['unreturned_calls'][-1])}, not called back")
     if waiting and not lead["unreturned_calls"]:
         return {"group": 9, "due": None, "why": f"Asked to wait until {date.fromisoformat(j['waiting_until'][:10]):%a %d %b}"}
     if why:

@@ -153,7 +153,7 @@ def header(l: dict, cut: datetime, fields: dict) -> str:
             f"LSQ stage at cut {l['stage'] or l['stage_now']}\n"
             f"facts at cut {cut.astimezone(IST):%Y-%m-%d %H:%M}: dials {l['dials']} on {l['dial_days']} days · real talks (answered 120s+) "
             f"{l['real_talks']} · first pick-up {ist(l['first_pickup'])} · first real talk {ist(l['first_real'])} · last real talk {ist(l['last_real'])}\n"
-            f"call-backs saved in LSQ: {fu} · lead's calls not returned: {len(l['unreturned_calls'])}\n"
+            f"call-backs saved in LSQ: {fu} · missed calls from the lead, not called back: {len(l['unreturned_calls'])}\n"
             + (f"LEAD COMMENT FIELDS (LSQ): {fields}\n" if fields else ""))
 
 

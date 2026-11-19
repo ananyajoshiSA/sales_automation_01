@@ -22,7 +22,7 @@ def on(t: datetime | None, day: date) -> bool:
 
 def day_stats(leads: list[dict], day: date) -> dict[str, Counter]:
     """caller -> counts for ``day``: dials, answered, real, talk_secs, first/last dial (minutes after midnight), follow-ups
-    due and kept, leads' calls missed and not returned, 48-hour deadlines due and met, enrolments."""
+    due and kept, missed calls from leads and those not called back, 48-hour deadlines due and met, enrolments."""
     callers = {l["caller"] for l in leads}
     out: dict[str, Counter] = {c: Counter() for c in callers}
     for l in leads:
@@ -63,7 +63,7 @@ def stats_line(s: Counter) -> str:
     ans = f"{round(100 * s['answered'] / s['dials'])}%" if s["dials"] else "—"
     return (f"{s['dials']} dials · {ans} answered · {s['real']} real talks (2 min+) · {round(s['talk_secs'] / 60)} min talk · "
             f"{hhmm(s['first'])}–{hhmm(s['last'])} · follow-ups kept {s['fu_kept']} of {s['fu_due']} · "
-            f"leads' calls not returned {s['in_unreturned']} of {s['in_missed']} · 48-hour talks {s['d48_met']} of {s['d48_due']}"
+            f"missed calls from leads, not called back {s['in_unreturned']} of {s['in_missed']} · 48-hour talks {s['d48_met']} of {s['d48_due']}"
             + (f" · enrolled {s['enrolled']}" if s["enrolled"] else ""))
 
 

@@ -189,7 +189,7 @@ class TeamPDF:
         lead_line = (f"<b>{self.yday:%A}: {len(enrolled)} enrolled</b>"
                      + (" (" + ", ".join(f'{e(l["name"])} for {e(l["caller"])}' for l in enrolled) + ")" if enrolled else "")
                      + f'. {y["real"]} real talks from {y["dials"]} dials ({pct(y["answered"], y["dials"])}% answered); follow-ups kept '
-                       f'{y["fu_kept"]} of {y["fu_due"]}; leads\' calls not returned {y["in_unreturned"]} of {y["in_missed"]}; '
+                       f'{y["fu_kept"]} of {y["fu_due"]}; missed calls from leads, not called back {y["in_unreturned"]} of {y["in_missed"]}; '
                        f'48-hour talks {y["d48_met"]} of {y["d48_due"]} due that day.')
 
         def m(s: Counter, k: str) -> str:
@@ -200,7 +200,7 @@ class TeamPDF:
                  ("Real talks (2 min+)", m(b, "real"), m(y, "real")),
                  ("Talk time", f'{round(b["talk_secs"] / 60)} min', f'{round(y["talk_secs"] / 60)} min'),
                  ("Follow-ups kept (saved call-backs due that day)", f'{b["fu_kept"]} of {b["fu_due"]}', f'{y["fu_kept"]} of {y["fu_due"]}'),
-                 ("Leads' calls not returned", f'{b["in_unreturned"]} of {b["in_missed"]}', f'{y["in_unreturned"]} of {y["in_missed"]}'),
+                 ("Missed calls from leads, not called back", f'{b["in_unreturned"]} of {b["in_missed"]}', f'{y["in_unreturned"]} of {y["in_missed"]}'),
                  ("48-hour talks (deadline that day)", f'{b["d48_met"]} of {b["d48_due"]}', f'{y["d48_met"]} of {y["d48_due"]}')]
         sc = table([("Measure", "46%"), (bd, "27%"), (yd, "27%")], [[e(a), e(c), f"<b>{e(d)}</b>"] for a, c, d in score])
 
@@ -225,7 +225,7 @@ class TeamPDF:
                          f'{s["fu_kept"]}/{s["fu_due"]}', f'{s["in_unreturned"]}/{s["in_missed"]}', f'{s["d48_met"]}/{s["d48_due"]}',
                          str(s["enrolled"] or "—"), e(f.get("line", "—"))])
         pt = table([("Caller", "13%"), ("Dials", "5%"), ("Ans.", "5%"), ("Real talks", "6%"), ("Talk min", "6%"), ("First–last dial", "9%"),
-                    ("Follow-ups kept", "7%"), ("Calls not returned", "7%"), ("48-h talks", "6%"), ("Enrolled", "6%"), ("In one line", "30%")],
+                    ("Follow-ups kept", "7%"), ("Missed calls not called back", "7%"), ("48-h talks", "6%"), ("Enrolled", "6%"), ("In one line", "30%")],
                    perf, {i: "n" for i in range(1, 10)})
 
         # leads from the list that were not called or not reached
@@ -264,7 +264,7 @@ class TeamPDF:
         d48 = [l for l in self.leads if review.on(l["deadline"], yday) and not l["met48"] and not l["enrolled"] and not l["dropped"]]
         refund = [l for l, j, _ in self.rows if objection_kind(j.get("objection")) == "Refund or cancel"]
         names = lambda ls: ", ".join(f'{e(l["name"] or l["phone"])} ({e(l["caller"])})' for l in ls[:25]) + (f" and {len(ls) - 25} more" if len(ls) > 25 else "")
-        boxes = [("Follow-ups not kept", fu_missed), ("Leads who rang us and were not called back", unreturned),
+        boxes = [("Follow-ups not kept", fu_missed), ("Missed calls from leads, not called back", unreturned),
                  ("48-hour deadline missed", d48)]
         out = ["<h2>Missed opportunities</h2>"]
         for title, ls in boxes:
@@ -280,7 +280,7 @@ class TeamPDF:
         if idle:
             pts.append(f"{', '.join(idle)} made no calls to collection leads on {yday:%A}. Who is in today, and who covers their follow-ups?")
         if unreturned:
-            pts.append(f"{len(unreturned)} leads rang us and were not called back. Who returns them by 10:30?")
+            pts.append(f"{len(unreturned)} missed calls from leads were not called back. Who calls them back by 10:30?")
         if fu_missed:
             pts.append(f"{len(fu_missed)} follow-ups were not kept. Are call-back times being set when the caller can keep them?")
         if d48:
@@ -330,12 +330,12 @@ class TeamPDF:
 
     def checks(self) -> str:
         g = Counter(p["group"] for _, _, p in self.rows)
-        unret = sum(1 for _, _, p in self.rows if "not returned" in p["why"])
+        unret = sum(1 for _, _, p in self.rows if "not called back" in p["why"])
         idle = [c for c in self.callers if not self.stats[c]["dials"]]
         morning_fu = sum(1 for _, _, p in self.rows if p["group"] == 1 and p["due"] and p["due"].astimezone(IST).hour < 15)
         rows = [("10:00", "Attendance and dialler: every caller logged in and dialling." + (f" No calls yesterday: {', '.join(idle)}." if idle else ""),
                  "Absent → their follow-ups and 48-hour leads go to a caller present, with a note."),
-                ("10:30", f"Leads' calls returned first ({unret} on the lists).", "Not returned by 10:30 → call it yourself or reassign."),
+                ("10:30", f"Missed calls from leads called back first ({unret} on the lists).", "Not returned by 10:30 → call it yourself or reassign."),
                 ("12:00", "Payments promised for today done (priority group 1).", "Not paid → join the next call; fix the exact time today."),
                 ("13:00", f"Every 48-hour lead dialled at least twice ({g[2]} on the lists).", "Not reached → WhatsApp and a third dial after 16:00."),
                 ("15:00", f"Morning follow-ups kept ({morning_fu} booked before 15:00).", "Missed → call within the hour and set a new time with the lead."),
