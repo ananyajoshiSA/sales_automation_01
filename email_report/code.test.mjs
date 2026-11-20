@@ -202,7 +202,7 @@ const TEST = { ...LIVE, DELIVERY_MODE: 'test' };
 test('nothing is emailed until delivery is switched on', () => {
   const run = load({ ALLOWED_DOMAINS: 'example.in', RECIPIENTS: 'a@example.in', UPLOAD_TOKEN: TOKEN });
   assert.deepEqual([run.send().ok, run.send().status], [true, 'off']);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0, multi: true, zip: true, list: '', lists: [] });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'off', mode: 'off', recipients: 0, multi: true, zip: true, attention: true, list: '', lists: [] });
   assert.equal(run.sent.length, 0);
 });
 
@@ -230,9 +230,9 @@ test('unsafe settings stop delivery with a plain reason', () => {
 });
 
 test('check reports mode and recipient count, and sends nothing', () => {
-  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, zip: true, list: '', lists: [] });
+  assert.deepEqual(load(LIVE).post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, zip: true, attention: true, list: '', lists: [] });
   const run = load(TEST);
-  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1, multi: true, zip: true, list: '', lists: [] });
+  assert.deepEqual(run.post({ token: TOKEN, action: 'check' }), { ok: true, status: 'ready', mode: 'test', recipients: 1, multi: true, zip: true, attention: true, list: '', lists: [] });
   assert.equal(run.sent.length, 0);
 });
 
@@ -375,6 +375,39 @@ test('a set of files goes out together in one email and counts once', () => {
   assert.equal(Object.entries(run.user.data).filter(([k]) => k.startsWith('count:'))[0][1], '1');
 });
 
+test('an attention note opens the email and flags the subject; without one the email is unchanged', () => {
+  const run = load(LIVE);
+  const note = 'LATE: this is the audit of 18 Nov, sent on 20 Nov.\r\n\r\n40 rows are UNDER REVIEW:\tdon\'t act on them yet.';
+  const r = sendMany(run, Object.keys(FILES), { attention: note });
+  assert.equal(r.status, 'sent');
+  assert.match(r.detail, /with the attention note/);
+  const m = run.sent[0];
+  assert.match(m.subject, /^\u26a0 NEEDS ATTENTION: Reports: 3 files, \d+ \w{3} \d{4}$/);
+  assert.ok(m.body.startsWith('\u26a0 PLEASE READ BEFORE USING THESE REPORTS\nLATE: this is the audit of 18 Nov, sent on 20 Nov.\n'
+    + '40 rows are UNDER REVIEW: don\'t act on them yet.\n'), m.body);
+  assert.match(m.body, /These 3 reports are attached:/);
+
+  const plain = load(LIVE);
+  sendMany(plain, Object.keys(FILES), { attention: '  \n ' });
+  assert.match(plain.sent[0].subject, /^Reports: 3 files/);
+  assert.ok(plain.sent[0].body.startsWith('Hello,'));
+
+  const test = load(TEST);
+  test.send(PDF, { attention: 'Check the dates.' });
+  assert.match(test.sent[0].subject, /^\[TEST\] \u26a0 NEEDS ATTENTION: Report: /);
+  assert.ok(test.sent[0].body.startsWith('TEST EMAIL'));
+  assert.match(test.sent[0].body, /\u26a0 PLEASE READ BEFORE USING THIS REPORT\nCheck the dates\./);
+});
+
+test('an attention note over 600 characters sends nothing', () => {
+  const run = load(LIVE);
+  const r = run.send(PDF, { attention: 'x'.repeat(601) });
+  assert.deepEqual([r.ok, r.status], [false, 'rejected']);
+  assert.match(r.detail, /over 600 characters/);
+  assert.equal(run.sent.length, 0);
+  assert.equal(run.send(PDF, { attention: 'x'.repeat(600) }).status, 'sent');
+});
+
 test('files already emailed are left out of a set; a set all sent before is a duplicate unless resent', () => {
   const run = load(LIVE);
   run.send(PDF);
@@ -445,7 +478,7 @@ const LISTS = { ...LIVE, LIST_ELITE: 'lead1@example.in, tl@example.in', LIST_DEE
 test('a named list sends to that list only; no list sends to RECIPIENTS', () => {
   const run = load(LISTS);
   assert.deepEqual(run.post({ token: TOKEN, action: 'check', list: 'Elite' }),
-    { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, zip: true, list: 'elite', lists: ['deepanshi', 'elite'] });
+    { ok: true, status: 'ready', mode: 'live', recipients: 2, multi: true, zip: true, attention: true, list: 'elite', lists: ['deepanshi', 'elite'] });
   const r = run.send(PDF, { list: 'elite' });
   assert.equal(r.status, 'sent');
   assert.match(r.detail, /list elite/);

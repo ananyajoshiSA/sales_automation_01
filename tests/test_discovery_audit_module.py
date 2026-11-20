@@ -222,3 +222,62 @@ def test_every_tab_with_a_lead_shows_its_number_so_a_search_finds_it(tmp_path, m
         ws = wb[tab]
         col = [c.value for c in ws[1]].index("Mobile Number")
         assert number in [r[col] for r in ws.iter_rows(min_row=2, values_only=True)], tab
+
+
+def test_under_review_leads_are_marked_everywhere_and_the_email_gets_a_note(tmp_path, monkeypatch):
+    import openpyxl
+    from analytics.discovery_audit_module import hold
+    pages = {}
+    monkeypatch.setattr(report, "print_pdf", lambda doc, html, pdf: (pages.__setitem__(pdf, doc), open(pdf, "wb").write(b"%PDF-1.4")))
+    hist = lambda utc: [stage(utc, "Discovery Call Done")]
+    batch = [find.pick({**LEAD, "ProspectID": f"lead-00{i}0-batch"}, hist(f"2026-11-13 07:3{i}:00"), [], DAY) for i in range(3)]
+    alone = find.pick({**LEAD, "ProspectID": "lead-0099-alone"}, hist("2026-11-13 04:00:00"), [], DAY)
+    held = {reading.lead_key(x): "moved in one batch by Caller X, 13:00-13:05" for x in batch}
+    late = hold.late_note(DAY, "2026-11-15")
+    out = report.build(DAY, batch + [alone], str(tmp_path / "f"), str(tmp_path / "out"), str(tmp_path / "h.jsonl"), held, late)
+    assert out["under_review"] == 3 and out["late"]
+    assert out["attention"] == ("LATE: this is the audit of 13 Nov, sent on 15 Nov because an earlier daily run did not finish.\n"
+                                "UNDER REVIEW: 3 leads (moved in one batch by Caller X, 13:00-13:05). Don't act on these rows yet; "
+                                "a corrected copy will follow if the decision changes them. Everything else is final.")
+    ws = openpyxl.load_workbook(out["xlsx"])["Moved without a call"]
+    head = [c.value for c in ws[1]]
+    rows = [dict(zip(head, r)) for r in ws.iter_rows(min_row=2, values_only=True)]
+    review = [r for r in rows if r["Review status"].startswith("UNDER REVIEW")]
+    assert len(review) == 3 and all(r["What to do"] == hold.DONT_ACT for r in review)
+    final = [r for r in rows if r["Review status"] == "Final"]
+    assert len(final) == 1 and final[0]["What to do"] != hold.DONT_ACT
+    assert ws.cell(2 + rows.index(review[0]), 1).fill.fgColor.rgb.endswith("FFF4D6")
+    summary = openpyxl.load_workbook(out["xlsx"])["Summary"]
+    assert summary.cell(3, 1).value.startswith("LATE:") and summary.cell(4, 1).value.startswith("UNDER REVIEW: 3 leads")
+    doc = pages[out["summary_pdf"]]
+    assert "class=rev" in doc and "Under review: 3 leads" in doc and "UNDER REVIEW (don&#39;t act yet)" in doc
+    assert "1 lead was moved without a call first" in doc and "3 more moved without a call are under review" in doc
+    plain = report.build(DAY, [alone], str(tmp_path / "g"), str(tmp_path / "out2"), str(tmp_path / "h2.jsonl"))
+    assert plain["attention"] == "" and plain["under_review"] == 0
+    assert "class=rev" not in pages[plain["summary_pdf"]]
+
+
+def test_hold_by_window_or_key_then_clear_and_the_note_is_rewritten_every_build(tmp_path, monkeypatch, capsys):
+    import pytest
+    from analytics.discovery_audit_module import __main__ as cli, hold
+    monkeypatch.setattr(cli, "BASE", str(tmp_path))
+    hist = lambda utc: [stage(utc, "Discovery Call Done")]
+    batch = [find.pick({**LEAD, "ProspectID": f"lead-00{i}0-batch"}, hist(f"2026-11-13 07:3{i}:00"), [], DAY) for i in range(3)]
+    other = find.pick({**LEAD, "ProspectID": "lead-0099-other"}, hist("2026-11-13 09:00:00"), [], DAY)
+    (tmp_path / DAY).mkdir()
+    (tmp_path / DAY / "leads.json").write_text(json.dumps(batch + [other]))
+    f = str(tmp_path / DAY)
+    cli.main(["hold", DAY, "--reason", "batch move by X", "--moved-between", "13:00-13:01"])  # 07:30 and 07:31 UTC
+    assert sorted(hold.load(f)) == sorted(reading.lead_key(x) for x in batch[:2])
+    cli.main(["hold", DAY, reading.lead_key(other), "--reason", "  odd   stage   history "])
+    assert hold.load(f)[reading.lead_key(other)] == "odd stage history"
+    for bad in (["--reason", "x"], ["nope_key", "--reason", "x"], [reading.lead_key(other)], ["--reason", "x", "--moved-between", "1pm"]):
+        with pytest.raises(SystemExit):
+            cli.main(["hold", DAY, *bad])
+    cli.main(["hold", DAY, reading.lead_key(other), "--clear"])
+    assert len(hold.load(f)) == 2
+    cli.main(["hold", DAY, "--clear"])
+    assert hold.load(f) == {} and not (tmp_path / DAY / hold.FILE).exists()
+    assert hold.write_note(f, "") and (tmp_path / DAY / hold.NOTE).read_text() == ""
+    assert hold.late_note(DAY, "2026-11-14") == "" and "LATE" in hold.late_note(DAY, "2026-11-16")
+    assert len(hold.attention("", [("r" * 200, 5)] * 4)) <= 600

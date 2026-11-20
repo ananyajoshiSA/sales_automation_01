@@ -179,6 +179,15 @@ The request names the list, never addresses; an unknown list, or a mailer older 
 nothing. The Elite daily plan's `--mail` uses `LIST_ELITE` (`--mail-list`, default `elite`). Each list has its
 own sent log, so the same report can go to two lists. In test mode every email still goes only to `TEST_RECIPIENT`.
 
+### A warning at the top, only when a report needs care (20 Nov 2026)
+
+`--attention "TEXT"` (or `--attention-file NOTE.txt`) flags one email: the subject starts with
+"⚠ NEEDS ATTENTION:" and TEXT opens the body under "⚠ PLEASE READ BEFORE USING THESE REPORTS". Use it only when
+readers must be careful: rows under review, a late report, data that stopped part-way. An empty note sends the usual
+email, so a chat can always pass its note file. At most 600 characters. A mailer older than the `Code.gs` of 20 Nov
+2026 stops a flagged send with "mailer: outdated" (an unflagged one still goes). WhatsApp's approved template has no
+room for the note; the PDF it carries says the same.
+
 ### WhatsApp copies through WATI (optional, off until you switch it on)
 
 **Lever:** callers and team leaders see the plan on their phones the moment it is built, so the first calls of
@@ -229,6 +238,9 @@ deployed, single files to `RECIPIENTS` still go out, and a set or a send to a li
 2. **Deploy → Manage deployments → edit (pencil) → Version: New version → Deploy.** The web address stays
    the same, so nothing changes in the Claude Code environment settings.
 3. Run `checkSetup` once: it should still list your mode and recipients.
+
+The attention note (20 Nov 2026) needs the new `Code.gs` too: until it is deployed, a send with `--attention` stops
+with "mailer: outdated" and sends nothing; sends without a note are unaffected. `check` answers `attention: true` once it is live.
 
 Team chat saves (12 Nov 2026) also need the new `Code.gs`, plus the Script Property `STATE_SAVES` = `on`; run
 `checkStateSaves` to confirm (docs/state_sync.md). Until then `state_sync.py` stops with "action must be check or send".

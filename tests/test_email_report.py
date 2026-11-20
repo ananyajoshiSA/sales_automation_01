@@ -51,10 +51,10 @@ def real(paths):
     return [os.path.realpath(p) for p in paths]
 
 
-def mailer(*answers, mode="live", recipients=3, multi=True, zip_ok=True):
+def mailer(*answers, mode="live", recipients=3, multi=True, zip_ok=True, attention=True):
     """Apps Script answers each POST with a 302 to an echo URL that serves the JSON."""
     ready = {"ok": True, "status": "ready", "mode": mode, "recipients": recipients, **({"multi": True} if multi else {}),
-             **({"zip": True} if zip_ok else {})}
+             **({"zip": True} if zip_ok else {}), **({"attention": True} if attention else {})}
     for a in (ready,) + answers:
         responses.add(responses.POST, URL, status=302, headers={"Location": ECHO})
         responses.add(responses.GET, ECHO, json=a)
@@ -227,6 +227,36 @@ def test_a_zip_of_reports_goes_but_not_one_holding_anything_else_or_to_an_old_ma
     assert er.main([summary, good, "--resend"]) == 2
     assert "mailer: outdated - this Apps Script refuses ZIP files" in capsys.readouterr().out
     assert [x["action"] for x in bodies()] == ["check"]
+
+
+@responses.activate
+def test_an_attention_note_goes_with_the_set_only_when_given(repo, capsys):
+    pdf = put(repo, "project_reports/audit/00_Summary_18112026.pdf", PDF, 600)
+    note = put(repo, "repo/data/discovery_audit/2026-11-18/attention.txt",
+               b"LATE: audit of 18 Nov, sent on 20 Nov.\n\n  40 rows   are UNDER REVIEW.\n", 600)
+    mailer({"ok": True, "status": "sent", "detail": "emailed to 3 recipient(s) in live mode, with the attention note"})
+    assert er.main([pdf, "--attention-file", note]) == 0
+    assert bodies()[1]["attention"] == "LATE: audit of 18 Nov, sent on 20 Nov.\n40 rows are UNDER REVIEW."
+    assert "attention: LATE: audit of 18 Nov, sent on 20 Nov. / 40 rows are UNDER REVIEW." in capsys.readouterr().out
+    responses.reset()
+    mailer({"ok": True, "status": "sent", "detail": "emailed"})
+    assert er.main([pdf, "--resend", "--attention", "  "]) == 0
+    assert "attention" not in bodies()[1]
+
+
+@responses.activate
+def test_an_attention_note_stops_on_an_old_mailer_or_when_too_long(repo, capsys):
+    pdf = put(repo, "project_reports/audit/00_Summary_18112026.pdf", PDF, 600)
+    mailer(attention=False)
+    assert er.main([pdf, "--attention", "Under review"]) == 2
+    assert "mailer: outdated - this Apps Script cannot show an attention note" in capsys.readouterr().out
+    assert [b["action"] for b in bodies()] == ["check"]
+    responses.reset()
+    assert er.main([pdf, "--attention", "x" * 601]) == 2
+    assert "over 600; shorten it. Nothing was sent." in capsys.readouterr().out
+    assert er.main([pdf, "--attention-file", str(repo / "missing.txt")]) == 2
+    assert "cannot read the attention note" in capsys.readouterr().out
+    assert bodies() == []
 
 
 @responses.activate
