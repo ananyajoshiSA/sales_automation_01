@@ -208,14 +208,34 @@ def test_missing_transcripts_are_retried_twice_then_marked_final(tmp_path, monke
     assert cli.retry_earlier("2026-11-14") == []
 
 
+def test_a_lead_audited_in_a_later_run_is_not_carried_again(tmp_path, monkeypatch):
+    from analytics.discovery_audit_module import __main__ as cli
+    monkeypatch.setattr(cli, "BASE", str(tmp_path))
+    late = {"lead": LEAD, "calls_day": "2026-11-11", "calls": [call(LEAD["ProspectID"], "2026-11-11 08:00:00", transcript=None)]}
+    other = {**late, "lead": {**LEAD, "ProspectID": "lead-9999-bbbb"}}
+    for day, entries in (("2026-11-11", [late, other]),
+                         ("2026-11-12", [{**late, "tries": 2, "calls": [call(LEAD["ProspectID"], "2026-11-11 08:00:00",
+                                                                             transcript=TRANSCRIPT)]}])):
+        (tmp_path / day).mkdir()
+        (tmp_path / day / "leads.json").write_text(json.dumps(entries))
+    key = reading.lead_key(late)
+    (tmp_path / "2026-11-12" / "reading" / "results").mkdir(parents=True)
+    p = tmp_path / "2026-11-12" / "reading" / "results" / f"{key}.json"
+    p.write_text(json.dumps({**good_result(), "lead_key": key}))
+    carried = json.load(open(tmp_path / "2026-11-12" / "leads.json"))[0]
+    assert reading.check(str(p), reading.day_text(carried)) == []   # audited in the 12 Nov run
+    # the 11 Nov run still lists it as late; only the lead no later run picked up comes back
+    assert [x["lead"]["ProspectID"] for x in cli.retry_earlier("2026-11-13")] == ["lead-9999-bbbb"]
+
+
 def test_every_tab_with_a_lead_shows_its_number_so_a_search_finds_it(tmp_path, monkeypatch):
     import openpyxl
     monkeypatch.setattr(report, "print_pdf", lambda doc, html, pdf: open(pdf, "wb").write(b"%PDF-1.4"))
     moved = find.pick(LEAD, [stage("2026-11-13 04:00:00", "Discovery Call Done")],
                       [call(LEAD["ProspectID"], "2026-11-13 10:00:00")], DAY)
-    late = {"lead": {**LEAD, "ProspectID": "lead-0002-bbbb", "Phone": None, "Mobile": "9123456780"},
+    late = {"lead": {**LEAD, "ProspectID": "lead-9999-bbbb", "Phone": None, "Mobile": "9123456780"},
             "stage_changed_utc": "2026-11-13 09:00:00", "calls_day": DAY,
-            "calls": [call("lead-0002-bbbb", "2026-11-13 08:00:00", transcript=None)]}
+            "calls": [call("lead-9999-bbbb", "2026-11-13 08:00:00", transcript=None)]}
     out = report.build(DAY, [moved, late], str(tmp_path / "f"), str(tmp_path / "out"), str(tmp_path / "history.jsonl"))
     wb = openpyxl.load_workbook(out["xlsx"])
     for tab, number in (("Moved without a call", "9876543210"), ("Needs a Check", "9123456780"), ("Calls", "9123456780")):
