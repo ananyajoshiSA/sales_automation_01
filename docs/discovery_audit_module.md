@@ -23,6 +23,29 @@ python -m analytics.discovery_audit_module status 2026-11-13
 python -m analytics.discovery_audit_module build 2026-11-13      # workbook, PDFs, ZIP, CSV -> reports folder
 ```
 
+## Daily runs: never stall, never hold the whole email (20 Nov 2026)
+
+On 18 and 19 Nov the daily run asked the owner a question in a pop-up, which froze the run; the chat restarted while
+it waited, so 18 Nov went out a day late and 17 Nov not at all. From now on:
+
+- **Ask in a plain message, never a pop-up**, and keep going.
+- **Something only the owner can decide** (for example many leads moved in one batch by one person): mark those leads
+  under review, build and email on time, then ask.
+  ```bash
+  python -m analytics.discovery_audit_module hold <day> --reason "moved in one batch by X, 13:04-13:41" --moved-between 13:04-13:41
+  python -m analytics.discovery_audit_module hold <day> KEY ... --reason "..."   # or name lead keys
+  python -m analytics.discovery_audit_module hold <day> --list | --clear [KEY ...]
+  ```
+  `--moved-between` (IST, to the minute) takes only the leads moved without a call (the "Moved without a call" tab). Held rows get Review status
+  "UNDER REVIEW: <reason>" and "What to do: Don't act yet" on every tab, amber shading, a note on the Summary tab and an
+  amber box opening the summary PDF; their tab is split into final and under-review tables. After the owner's answer,
+  `hold --clear` (or change the data), build again and send the corrected copy with `--resend`.
+- **Missed days:** do yesterday first, then any missed day, oldest first. A day older than yesterday is labelled LATE
+  in the PDF, the Summary tab and the email.
+- **The email warns too:** `build` writes `data/discovery_audit/<day>/attention.txt` (empty on a normal day; rewritten every build).
+  Always pass it: `scripts/email_report.py <files> --to-list discovery_audit --attention-file data/discovery_audit/<day>/attention.txt`.
+  When it has text, the subject starts "⚠ NEEDS ATTENTION:" and the note opens the email; otherwise the email is unchanged.
+
 ## How leads are found
 
 LeadSquared has no company-wide stage-change list (the bulk read of event 3002 returns no rows) and about 5,000

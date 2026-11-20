@@ -58,6 +58,10 @@ PYTHONPATH=. python3 scripts/email_report.py "<path 1>" "<path 2>" ...
 
 Add `--resend` only when the user asked to send it again after being told it was already sent.
 
+Add `--attention-file PATH` (or `--attention "TEXT"`) to both the preview and the send when the report's own steps
+produced a note for readers (the audit modules' `attention.txt`), or the user asked to warn readers. The email then
+opens with that warning. Never invent one.
+
 Add `--to-list NAME` (to both the preview and the send) only when the user named a recipient list, e.g. "email it
 to the deepanshi list", or this chat was told which list its reports go to. Never guess a list. With no list
 the email goes to the default approved recipients.

@@ -16,7 +16,7 @@ from datetime import datetime
 from openpyxl import Workbook
 from openpyxl.styles import Alignment, Font, PatternFill
 
-from analytics.discovery_audit_module import reading
+from analytics.discovery_audit_module import hold, reading
 from analytics.discovery_audit_module.find import MIN_CONVERSATION_SECS, is_conversation, ist_hm
 from integrations.timeutil import IST, now_ist, utc
 
@@ -161,7 +161,33 @@ h1{font-size:16px;margin:0} .mut{color:#5b6475} h2{font-size:11px;margin:12px 0 
 table{border-collapse:collapse;width:100%} td,th{border:1px solid #e1e5ec;padding:4px 6px;vertical-align:top;text-align:left} th{background:#f3f5f9;width:20%}
 .flag{background:#fde8e7;border-left:4px solid #b3261e;padding:6px 8px;margin:8px 0;font-weight:bold}
 .score{font-size:20px;font-weight:bold;margin:4px 0} .hl{background:#f3f5f9;border-left:3px solid #1F3A5F;padding:5px 8px;margin:6px 0}
-ul{margin:2px 0 0 16px;padding:0} li{margin:2px 0} table.list th{width:auto} .foot{color:#5b6475;font-size:8.5px;margin-top:10px}"""
+ul{margin:2px 0 0 16px;padding:0} li{margin:2px 0} table.list th{width:auto} .foot{color:#5b6475;font-size:8.5px;margin-top:10px}
+.rev{background:#fff4d6;border-left:4px solid #b26a00;padding:6px 8px;margin:8px 0} .rev p{margin:2px 0}
+h2.revh{background:#b26a00} tr.rev td{background:#fffaf0}"""
+AMBER = PatternFill("solid", fgColor="FFF4D6")
+
+
+def review_cell(held: dict, ent: dict) -> str:
+    r = held.get(reading.lead_key(ent))
+    return f"UNDER REVIEW: {r}" if r else "Final"
+
+
+def shade_held(ws, col: int) -> None:
+    """Rows whose Review status (column col, 1-based) is under review: amber, the status in bold."""
+    for rw in ws.iter_rows(min_row=2):
+        if str(rw[col - 1].value or "").startswith("UNDER REVIEW"):
+            for c in rw:
+                c.fill = AMBER
+            rw[col - 1].font = Font(bold=True, color="B26A00")
+
+
+def review_box(late: str, grouped: list[tuple[str, int]], what: str) -> str:
+    """The amber note that opens the summary PDF on a late or under-review day."""
+    ps = [f"<p><b>{e(late)}</b></p>"] if late else []
+    ps += [f"<p><b>\u26a0 Under review: {n} {what}{'s' if n != 1 else ''}</b> ({e(reason)}). Who is responsible is not settled yet, "
+           "so please don't act on these rows. A corrected copy will follow if the decision changes them. Everything else in "
+           "this report is final.</p>" for reason, n in grouped]
+    return f"<div class=rev>{''.join(ps)}</div>" if ps else ""
 
 
 def lead_pdf_html(r: dict, history: dict, fresh: str) -> str:
@@ -245,7 +271,9 @@ def side(i: int, ent: dict) -> list:
     return f[:2] + [mobile(ent)] + f[2:]
 
 
-def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path: str) -> dict:
+def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path: str,
+          held: dict[str, str] | None = None, late: str = "") -> dict:
+    held = held or {}
     fresh = now_ist().strftime("%d %b %Y %H:%M")
     rows, missing, moved = [], [], []
     for ent in entries:
@@ -264,15 +292,16 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
     wb = Workbook()
     ws = wb.active
     ws.title = "Discovery Call Audit"
-    ws.append(FRONT + reading.SHEET_COLUMNS + EXTRA)
+    ws.append(FRONT + reading.SHEET_COLUMNS + EXTRA + ["Review status"])
     for i, r in enumerate(rows, 1):
         s, res, ent = r["result"]["subscores"], r["result"], r["entry"]
         ws.append(front(i, ent, "Audited") + [r["sheet"][c] for c in reading.SHEET_COLUMNS] + [
             r["strict_label"], f"{r['strict']:g}/10 {r['band']}", res["compliance_flags"], res["burning_problem"],
             f"{s['interest']:g}/{s['burning_problem']:g}/{s['buying_signals']:g}/{(1.5 if not s['objection_raised'] else s['objections']):g}/{s['commitment']:g}",
             len(ent["calls"]), (res.get("review") or {}).get("verdict", "not re-checked"),
-            " ".join(x for x in (ent.get("note"), res.get("quality_note")) if x)])
-    _style(ws, [4, 18, 16, 16, 16, 16, 10, 14, 18, 11, 8, 12, 11, 40, 40, 24, 40, 36, 40, 13, 50, 45, 60, 11, 12, 30, 14, 14, 8, 11, 30])
+            " ".join(x for x in (ent.get("note"), res.get("quality_note")) if x), review_cell(held, ent)])
+    _style(ws, [4, 18, 16, 16, 16, 16, 10, 14, 18, 11, 8, 12, 11, 40, 40, 24, 40, 36, 40, 13, 50, 45, 60, 11, 12, 30, 14, 14, 8, 11, 30, 30])
+    shade_held(ws, ws.max_column)
     ws.freeze_panes = "I2"
 
     sm = wb.create_sheet("Summary")
@@ -280,8 +309,12 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
     rel, stc = Counter(r["sheet"]["Conversion Potential (H,M,L)"] for r in rows), Counter(r["strict_label"] for r in rows)
     lines = [[f"Discovery Call Audit — {ddmmyyyy(day)} (all teams). Data read {fresh} IST."],
              [f"Leads moved to Discovery Call Done: {n_found}. Audited: {len(rows)}. Moved without a call: {len(moved)}. "
-              f"Need a check: {len(missing)} (see those tabs)."],
-             [], ["Conversion potential (next 48 h)", "Relaxed (the prompt's)", "Strict"]]
+              f"Need a check: {len(missing)} (see those tabs)."]]
+    grouped = hold.groups(held, [reading.lead_key(x) for x in entries])
+    notes = ([late] if late else []) + [f"UNDER REVIEW: {n} lead{'s' if n != 1 else ''} ({reason}). Don't act on these rows yet "
+                                       "(Review status column); a corrected copy will follow if the decision changes them." for reason, n in grouped]
+    lines += [[t] for t in notes]
+    lines += [[], ["Conversion potential (next 48 h)", "Relaxed (the prompt's)", "Strict"]]
     lines += [[k, rel.get(x, 0), stc.get(x, 0)] for k, x in (("High", "H"), ("Medium", "M"), ("Low", "L"))]
     lines += [[], ["IIT Compliance", "Calls"]] + [[k, sum(r['sheet']['IIT Compliance'] == k for r in rows)] for k in sorted(reading.IIT)]
     lines += [[], ["Burning problem identified", sum(r['result']['burning_problem'] == 'IDENTIFIED' for r in rows)],
@@ -296,21 +329,28 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
                       sum(r["result"]["compliance_flags"] != "NONE" for r in rs), sum(r["result"]["burning_problem"] == "IDENTIFIED" for r in rs)])
     for ln in lines:
         sm.append(ln)
+    for i in range(3, 3 + len(notes)):
+        sm.cell(i, 1).fill, sm.cell(i, 1).font = AMBER, Font(bold=True)
     sm.column_dimensions["A"].width = 60
 
     mv = wb.create_sheet("Moved without a call")
-    mv.append(SIDE + ["Last real call before the move", "First real call after the move", "What happened", "What to do"])
+    mv.append(SIDE + ["Last real call before the move", "First real call after the move", "Review status", "What happened", "What to do"])
     for i, ent in enumerate(moved, 1):
         what, todo = moved_without_call(ent)
-        mv.append(side(i, ent) + [when(ent.get("last_call_before")), when(ent.get("first_call_after")), what, todo])
-    _style(mv, [4, 20, 13, 18, 18, 18, 18, 30, 30, 45, 55])
+        st = review_cell(held, ent)
+        mv.append(side(i, ent) + [when(ent.get("last_call_before")), when(ent.get("first_call_after")), st, what,
+                                  hold.DONT_ACT if st != "Final" else todo])
+    _style(mv, [4, 20, 13, 18, 18, 18, 18, 30, 30, 30, 45, 55])
+    shade_held(mv, 10)
+    mv.auto_filter.ref = mv.dimensions
 
     na = wb.create_sheet("Needs a Check")
-    na.append(SIDE + ["What happened", "What to do"])
+    na.append(SIDE + ["What happened", "What to do", "Review status"])
     for i, (ent, st, why) in enumerate(missing, 1):
         what, todo = needs_check(ent, st, why)
-        na.append(side(i, ent) + [what, todo])
-    _style(na, [4, 20, 13, 18, 18, 18, 18, 45, 50])
+        na.append(side(i, ent) + [what, todo, review_cell(held, ent)])
+    _style(na, [4, 20, 13, 18, 18, 18, 18, 45, 50, 30])
+    shade_held(na, 10)
 
     cl = wb.create_sheet("Calls")
     cl.append(["Lead (LeadSquared)", "Mobile Number", "Call start (IST)", "Direction", "Status", "Talk time", "Caller (LeadSquared)", "Transcript"])
@@ -336,7 +376,7 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
         print_pdf(lead_pdf_html(r, history, fresh), f"{pdf_dir}/{name}.html", f"{pdf_dir}/{name}")
         pdfs.append(f"{pdf_dir}/{name}")
     summary_pdf = f"{pdf_dir}/00_Summary_{tag}.pdf"
-    print_pdf(summary_html(day, rows, missing, moved, fresh, n_found), f"{summary_pdf}.html", summary_pdf)
+    print_pdf(summary_html(day, rows, missing, moved, fresh, n_found, held, late), f"{summary_pdf}.html", summary_pdf)
     csv_path = f"{pdf_dir}/Batch_Summary.csv"
     with open(csv_path, "w", newline="", encoding="utf-8-sig") as f:
         w = csv.writer(f)
@@ -349,33 +389,47 @@ def build(day: str, entries: list[dict], folder: str, out_dir: str, history_path
         for p in [summary_pdf, csv_path] + pdfs:
             z.write(p, os.path.basename(p))
     return {"found": n_found, "audited": len(rows), "moved_without_call": len(moved), "needs_check": Counter(st for _, st, _ in missing),
+            "under_review": sum(n for _, n in grouped), "late": bool(late), "attention": hold.attention(late, grouped),
             "xlsx": xlsx, "zip": zpath, "summary_pdf": summary_pdf, "relaxed": dict(rel)}
 
 
-def summary_html(day: str, rows: list[dict], missing: list, moved: list, fresh: str, n_found: int) -> str:
+def summary_html(day: str, rows: list[dict], missing: list, moved: list, fresh: str, n_found: int,
+                 held: dict[str, str] | None = None, late: str = "") -> str:
+    held = held or {}
     pot = {"H": "High", "M": "Medium", "L": "Low"}
+    under = lambda ent: reading.lead_key(ent) in held
+    tr = lambda ent: "<tr class=rev>" if under(ent) else "<tr>"
+    tag = lambda ent: f"<b>Under review:</b> {e(held[reading.lead_key(ent)])}. " if under(ent) else ""
     def name(r: dict) -> str:
         n = r["sheet"]["Lead Name"]
         return n if n != "Not Evident" else " ".join(x for x in (r["entry"]["lead"].get("FirstName"), r["entry"]["lead"].get("LastName")) if x) or n
 
-    trs = "".join(f"<tr><td>{e(name(r))}</td><td>{e(callers(r['entry']))}</td><td><b>{pot[r['sheet']['Conversion Potential (H,M,L)']]}</b></td>"
+    trs = "".join(f"{tr(r['entry'])}<td>{e(name(r))}</td><td>{e(callers(r['entry']))}</td><td><b>{pot[r['sheet']['Conversion Potential (H,M,L)']]}</b></td>"
                   f"<td>{r['strict']:g}/10 {r['band']}</td><td>{'CRITICAL' if r['result']['compliance_flags'] != 'NONE' else '—'}</td>"
-                  f"<td>{e(r['result']['pdf']['highlight_end'])}</td></tr>" for r in rows)
+                  f"<td>{tag(r['entry'])}{e(r['result']['pdf']['highlight_end'])}</td></tr>" for r in rows)
     nm = lambda ent: " ".join(x for x in (ent["lead"].get("FirstName"), ent["lead"].get("LastName")) if x)
-    nas = "".join(f"<tr><td>{e(nm(m[0]))}</td><td>{e(callers(m[0]))}</td><td>{e(needs_check(*m)[0])}</td><td>{e(needs_check(*m)[1])}</td></tr>" for m in missing)
-    mvs = "".join(f"<tr><td>{e(nm(x))}</td><td>{e(callers(x))}</td><td>{e(utc(x['stage_changed_utc']).astimezone(IST).strftime('%I:%M %p').lstrip('0'))}</td>"
-                  f"<td>{e(moved_without_call(x)[0])}</td><td>{e(moved_without_call(x)[1])}</td></tr>" for x in moved)
+    nas = "".join(f"{tr(m[0])}<td>{e(nm(m[0]))}</td><td>{e(callers(m[0]))}</td><td>{tag(m[0])}{e(needs_check(*m)[0])}</td>"
+                  f"<td>{e(hold.DONT_ACT if under(m[0]) else needs_check(*m)[1])}</td></tr>" for m in missing)
+    mv_row = lambda x: (f"{tr(x)}<td>{e(nm(x))}</td><td>{e(callers(x))}</td><td>{e(utc(x['stage_changed_utc']).astimezone(IST).strftime('%I:%M %p').lstrip('0'))}</td>"
+                        f"<td>{tag(x)}{e(moved_without_call(x)[0])}</td><td>{e(hold.DONT_ACT if under(x) else moved_without_call(x)[1])}</td></tr>")
+    final, review = [x for x in moved if not under(x)], [x for x in moved if under(x)]
+    mvs, rvs = "".join(mv_row(x) for x in final), "".join(mv_row(x) for x in review)
     crit = [r for r in rows if r["result"]["compliance_flags"] != "NONE"]
-    by_mover = Counter(callers(x) for x in moved)
+    by_mover = Counter(callers(x) for x in final)
+    keys = [reading.lead_key(r["entry"]) for r in rows] + [reading.lead_key(x) for x in moved] + [reading.lead_key(m[0]) for m in missing]
+    box = review_box(late, hold.groups(held, keys), "lead")
+    head = "<tr><th>Lead</th><th>Caller</th><th>Moved</th><th>What happened</th><th>What to do</th></tr>"
     return f"""<!doctype html><html><head><meta charset=utf-8><style>{CSS}</style></head><body>
 <h1>Discovery Call Audit — {ddmmyyyy(day)}</h1><div class=mut>All teams · leads moved to "Discovery Call Done" that day · their calls up to the move read together (later follow-ups left out) · data read {e(fresh)} IST</div>
-<div class=hl><b>For team leaders:</b> {f"{len(crit)} lead{'s' if len(crit) != 1 else ''} heard a prohibited claim; coach those callers today ({e(', '.join(sorted({callers(r['entry']) for r in crit})))})." if crit else "No prohibited claims heard."}
-{f"{len(moved)} lead{'s were' if len(moved) != 1 else ' was'} moved without a call first ({e(', '.join(f'{c} {k}' for c, k in by_mover.most_common()))}): ask the caller why." if moved else ""}
+{box}<div class=hl><b>For team leaders:</b> {f"{len(crit)} lead{'s' if len(crit) != 1 else ''} heard a prohibited claim; coach those callers today ({e(', '.join(sorted({callers(r['entry']) for r in crit})))})." if crit else "No prohibited claims heard."}
+{f"{len(final)} lead{'s were' if len(final) != 1 else ' was'} moved without a call first ({e(', '.join(f'{c} {k}' for c, k in by_mover.most_common()))}): ask the caller why." if final else ""}
+{f"{len(review)} more moved without a call are under review (listed separately): don't act on them yet." if review else ""}
 {f"{len(missing)} lead{'s need' if len(missing) != 1 else ' needs'} a check (listed at the end)." if missing else ""}</div>
-<p>Leads moved: <b>{n_found}</b> · audited: <b>{len(rows)}</b> · moved without a call: <b>{len(moved)}</b> · need a check: <b>{len(missing)}</b></p>
+<p>Leads moved: <b>{n_found}</b> · audited: <b>{len(rows)}</b> · moved without a call: <b>{len(moved)}</b>{f" (<b>{len(review)} under review</b>)" if review else ""} · need a check: <b>{len(missing)}</b></p>
 <h2>AUDITED LEADS (highest potential first)</h2><table class=list><colgroup><col style="width:13%"><col style="width:15%"><col style="width:8%"><col style="width:11%"><col style="width:10%"><col></colgroup>
 <tr><th>Lead</th><th>Caller</th><th>Sheet</th><th>Score /10</th><th>Compliance</th><th>Where it ended</th></tr>{trs}</table>
-{f'<h2>MOVED WITHOUT A CALL</h2><table class=list><tr><th>Lead</th><th>Caller</th><th>Moved</th><th>What happened</th><th>What to do</th></tr>{mvs}</table>' if moved else ''}
+{f'<h2>MOVED WITHOUT A CALL</h2><table class=list>{head}{mvs}</table>' if final else ''}
+{f'<h2 class=revh>MOVED WITHOUT A CALL: UNDER REVIEW (don&#39;t act yet)</h2><table class=list>{head}{rvs}</table>' if review else ''}
 {f'<h2>NEEDS A CHECK</h2><table class=list><tr><th>Lead</th><th>Caller</th><th>What happened</th><th>What to do</th></tr>{nas}</table>' if missing else ''}
 <div class=foot>Sheet = the prompt's relaxed H/M/L. Score = strict total out of 10 (HOT 7+, WARM 4–6.9, COLD below 4).</div></body></html>"""
 

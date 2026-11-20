@@ -29,6 +29,10 @@
  * Each file is kept in the Drive folder "Sales reports/<team>/<date>" for good. WhatsApp collects it through a link
  * that is closed again after 3 days; people keep the file itself in their chat.
  *
+ * A request may carry an attention note (attention, at most 600 characters): only then the subject starts with
+ * "⚠ NEEDS ATTENTION:" and the note opens the email, so readers are warned before they use the reports (a day under
+ * review, a late report). Without it the email reads exactly as before. WhatsApp's approved template carries no note.
+ *
  * A request can never choose who gets an email: at most it names one of these lists. The sent log (User Properties) keeps one entry per mode
  * and file content, so the same file is never emailed twice unless the request says resend. One email, however
  * many files it carries, counts once toward MAX_SENDS_PER_DAY.
@@ -56,6 +60,8 @@ var TZ = 'Asia/Kolkata';
 var MODES = ['off', 'test', 'live'];
 var MAX_BYTES = 20 * 1024 * 1024;  // Gmail's attachment cap is 25 MB per email; stay clear of it
 var MAX_FILES = 10;
+var MAX_ATTENTION = 600;
+var ATTENTION_PREFIX = '\u26a0 NEEDS ATTENTION: ';
 var MAX_RECIPIENTS = 50;
 var EMAIL = /^[^\s@,;<>"]+@([A-Za-z0-9-]+(\.[A-Za-z0-9-]+)+)$/;
 var LIST_KEY = /^LIST_([A-Z0-9_]{1,40})$/;
@@ -179,7 +185,15 @@ function zipHoldsReports_(name, bytes) {
   }
 }
 
-function message_(files, mode, liveCount) {
+/** The request's attention note as plain text (no control characters or blank lines), or '' when there is none. */
+function attentionOf_(raw) {
+  if (raw === undefined || raw === null) return '';
+  var lines = String(raw).replace(/\r\n?/g, '\n').replace(/[\u0000-\u0009\u000b-\u001f\u007f]/g, ' ').split('\n')
+    .map(function (l) { return l.replace(/ {2,}/g, ' ').trim(); }).filter(function (l) { return l; });
+  return lines.join('\n');
+}
+
+function message_(files, mode, liveCount, attention) {
   var one = files.length === 1;
   var lines = ['Hello,', ''].concat(one ? ['The report ' + files[0].name + ' (' + files[0].type.label + ') is attached.'] :
     ['These ' + files.length + ' reports are attached:'].concat(files.map(function (f) { return '- ' + f.name + ' (' + f.type.label + ')'; })), [
@@ -188,11 +202,14 @@ function message_(files, mode, liveCount) {
     '',
     'Please do not forward ' + (one ? 'it' : 'them') + ' outside the company: ' + (one ? 'it' : 'they') + ' may name callers and leads.'
   ]);
+  if (attention) {
+    lines.unshift('\u26a0 PLEASE READ BEFORE USING ' + (one ? 'THIS REPORT' : 'THESE REPORTS'), attention, '', '----------------------------------------', '');
+  }
   if (mode === 'test') {
     lines.unshift('TEST EMAIL: only you received this. In live mode it goes to ' + liveCount + ' approved recipient(s).', '');
   }
   var subject = one ? 'Report: ' + files[0].name : 'Reports: ' + files.length + ' files, ' + nowIst_('d MMM yyyy');
-  return {subject: (mode === 'test' ? '[TEST] ' : '') + subject, body: lines.join('\n')};
+  return {subject: (mode === 'test' ? '[TEST] ' : '') + (attention ? ATTENTION_PREFIX : '') + subject, body: lines.join('\n')};
 }
 
 /** Checks one uploaded file; returns {name, bytes, type, sha} or {rejected: reason}. */
@@ -222,6 +239,10 @@ function deliver_(uploads, opts) {
   if (uploads.length > MAX_FILES) return {status: 'rejected', detail: 'more than ' + MAX_FILES + ' files in one email'};
   var bad = uploads.filter(function (f) { return !FILE_NAME.test(String(f.name || '')); })[0];
   if (bad) return {status: 'rejected', detail: (uploads.length > 1 ? String(bad.name || '(no name)') + ': ' : '') + NAME_RULE};
+  var attention = attentionOf_(opts.attention);
+  if (attention.length > MAX_ATTENTION) {
+    return {status: 'rejected', detail: 'the attention note is over ' + MAX_ATTENTION + ' characters; shorten it, nothing was emailed'};
+  }
   if (cfg.mode === 'off') return {status: 'off', detail: 'DELIVERY_MODE is off, so nothing was emailed'};
   var listName = listName_(opts.list);
   var listBad = listProblem_(cfg, listName);
@@ -263,7 +284,7 @@ function deliver_(uploads, opts) {
     var at = nowIst_('yyyy-MM-dd HH:mm') + ' IST';
     // Mark before sending: if the script is killed mid-send, the files are never emailed twice.
     send.forEach(function (f) { ledger.setProperty(keyOf(f), JSON.stringify({state: 'sending', at: at, name: f.name})); });
-    var msg = message_(send, cfg.mode, liveRecipients_(cfg, listName).length);
+    var msg = message_(send, cfg.mode, liveRecipients_(cfg, listName).length, attention);
     try {
       MailApp.sendEmail({to: to.join(','), subject: msg.subject, body: msg.body, name: 'Sales reports',
                          attachments: send.map(function (f) { return Utilities.newBlob(f.bytes, f.type.mime, f.name); })});
@@ -280,7 +301,7 @@ function deliver_(uploads, opts) {
     ledger.setProperty(today, String(count + 1));
     var skipped = opts.resend ? [] : before;
     var result = {status: 'sent', detail: (send.length === 1 ? '' : send.length + ' files in one email, ') + 'emailed to ' + to.length +
-            ' recipient(s) in ' + cfg.mode + ' mode' + (listName ? ', list ' + listName : '') +
+            ' recipient(s) in ' + cfg.mode + ' mode' + (listName ? ', list ' + listName : '') + (attention ? ', with the attention note' : '') +
             (skipped.length ? '; left out, already emailed: ' + skipped.map(function (f) { return f.name; }).join(', ') : '')};
   } finally {
     lock.releaseLock();
@@ -817,7 +838,8 @@ function reply_(obj) {
 }
 
 /** action "check": what would happen, sends nothing. action "send": email one file (file_name, content_b64,
- * sha256) or several in one email (files: a list of those three). Either may name a recipient list (list).
+ * sha256) or several in one email (files: a list of those three). Either may name a recipient list (list) and carry an
+ * attention note (attention).
  * Actions state_put, state_commit, state_list and state_get save and load a team chat's files (stateAction_). */
 function doPost(e) {
   var req;
@@ -837,7 +859,7 @@ function doPost(e) {
       var bad = cfg.mode === 'off' ? '' : listProblem_(cfg, name);
       if (bad) return reply_({ok: false, status: 'unknown_list', detail: bad});
       var out = {ok: true, status: cfg.mode === 'off' ? 'off' : 'ready', mode: cfg.mode, recipients: recipientsFor_(cfg, name).length,
-                 multi: true, zip: true, list: name || '', lists: Object.keys(cfg.lists).sort()};
+                 multi: true, zip: true, attention: true, list: name || '', lists: Object.keys(cfg.lists).sort()};
       var w = readWhatsApp_();
       if (w.mode !== 'off') out.whatsapp = {mode: w.mode, numbers: name && w.lists[name] ? w.lists[name].length : 0, problem: w.problem};
       return reply_(out);
@@ -849,7 +871,7 @@ function doPost(e) {
       f = f && typeof f === 'object' ? f : {};
       return {name: String(f.file_name || ''), bytes: Utilities.base64Decode(String(f.content_b64 || '')), sha256: f.sha256};
     });
-    var r = deliver_(uploads, {resend: req.resend === true, list: req.list});
+    var r = deliver_(uploads, {resend: req.resend === true, list: req.list, attention: req.attention});
     console.log('send: ' + uploads.map(function (f) { return f.name; }).join(', ') + ' -> ' + r.status + ': ' + r.detail);
     r.ok = ['sent', 'duplicate', 'off'].indexOf(r.status) >= 0;
     return reply_(r);
