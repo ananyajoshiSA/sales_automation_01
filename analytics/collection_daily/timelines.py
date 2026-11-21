@@ -14,7 +14,7 @@ import re
 from datetime import datetime, timedelta
 
 from analytics.bootcamp_collections import _call, _data, _fields, _note_text
-from analytics.collection_scorecard import load
+from analytics.collection_daily.facts import hist_of
 from integrations.leadsquared import LeadSquaredClient
 from integrations.timeutil import IST, utc
 from integrations.transcripts import TranscriptClient
@@ -44,9 +44,9 @@ def load_notes(run_dir: str) -> dict[str, list[dict]]:
     return out
 
 
-def fetch_lead_fields(run_dir: str, dirs: list[str]) -> dict:
-    """Last Remark and Follow-up comments for every lead of the run's tags (a few requests per tag). Read-only."""
-    tags = sorted({l["mx_Bootcamp_collections"] for d in dirs for l in json.load(open(os.path.join(d, "tagged_leads.json")))})
+def fetch_lead_fields(run_dir: str, tags: list[str]) -> dict:
+    """Last Remark and Follow-up comments for every lead of the given collection tags (a few requests per tag). Read-only."""
+    tags = sorted({t for t in tags if t})
     got, c = {}, LeadSquaredClient()
     for t in tags:
         for l in c.iter_leads("mx_Bootcamp_collections", t, page_size=1000, columns=["ProspectID", *LEAD_FIELDS]):
@@ -169,7 +169,7 @@ def write(run_dir: str, leads: list[dict], cut: datetime, tx_dirs: list[str], si
         if l["enrolled"] or l["dropped"]:
             continue
         if l["data_dir"] not in hists:
-            hists[l["data_dir"]] = load(l["data_dir"])[1]
+            hists[l["data_dir"]] = hist_of(l["data_dir"])
         start = datetime.strptime(l["bootcamp_day"], "%Y-%m-%d").replace(tzinfo=IST) - timedelta(days=3)
         acts = [a for a in hists[l["data_dir"]].get(l["lead_id"]) or [] if utc(a.get("CreatedOn")) and utc(a["CreatedOn"]) >= start]
         ev = events(l, acts, notes.get(l["lead_id"], []), cut, tx_dirs)

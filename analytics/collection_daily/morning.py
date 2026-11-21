@@ -114,7 +114,9 @@ def details(l: dict, j: dict, p: dict) -> str:
     deadline = hm(l["deadline"]) if l["due48"] else "done in time" if l["met48"] else "done, late"
     said = j.get("last_talk") if j.get("last_talk") not in (None, "", "—") else ""
     talk = said or (hm(l["last_real"], "%d %b") if l["last_real"] else "")  # the reader's text carries its own date
-    parts = [("Bootcamp", f"{l['bootcamp']} · D{l['day']}"), ("Status", STATUS[j["status"]]), ("Why on the list", p["why"]),
+    where = (("Community batch", f"{l['bootcamp']} · booked {l['booked_on']:%d %b}") if l.get("community")
+             else ("Bootcamp", f"{l['bootcamp']} · D{l['day']}"))
+    parts = [where, ("Status", STATUS[j["status"]]), ("Why on the list", p["why"]),
              ("48-hour deadline", deadline), ("Last real talk", talk), ("Payment", j.get("payment")), ("Objection", j.get("objection"))]
     return "\n".join(f"{k}: {v}" for k, v in parts if v and v != "—")
 

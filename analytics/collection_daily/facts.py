@@ -10,6 +10,10 @@ Rules agreed with the user (17 Nov 2026):
 - **Substantial conversation**: an answered call of 2 minutes or more.
 - **Enrolled** also when a Note on the Notes tab says the loan is done (the user's rule, 19 Nov 2026), from when it was
   written; stage comments and activity notes are read by ``analytics.collection_cycle``.
+- **Community leads** (added 21 Nov 2026): a run folder with ``community/`` (``scripts.fetch_collections`` plus
+  ``hist.jsonl`` for the leads in ``community/ids.json``) adds the Community Webinar Collection Sheet's leads of the
+  booking months in ``community/months.json`` (``analytics.community_cycle``), counted from each lead's booking date.
+  Their name carries "(Community)" so every list and page shows it (the user's rule).
 - **Follow-up**: a call-back time saved in a disposition form within 30 minutes after an answered call (a "call back
   now" default, due within 15 minutes of the form, is not one); graders add times agreed in transcripts and Notes.
 """
@@ -21,7 +25,7 @@ import os
 from datetime import datetime, timedelta
 
 from analytics.bootcamp_collections import _data, parse_tag
-from analytics.collection_cycle import cycle_leads, says_loan_done, state
+from analytics.collection_cycle import cycle_leads, loan_done_at, says_loan_done, state
 from analytics.collection_scorecard import hierarchy, load
 from integrations.timeutil import IST, utc
 
@@ -103,14 +107,55 @@ def note_loan_done(notes: list[dict], cut: datetime) -> datetime | None:
     return min(times) if times else None
 
 
+COMMUNITY = "community"
+_HISTS: dict[str, dict] = {}
+
+
+def hist_of(data_dir: str) -> dict:
+    """lead_id -> activities for a weekend folder or the community folder (read once per process)."""
+    if data_dir not in _HISTS:
+        if os.path.exists(os.path.join(data_dir, "tagged_leads.json")):
+            _HISTS[data_dir] = load(data_dir)[1]
+        else:
+            from analytics.community_cycle import load_hist
+            _HISTS[data_dir] = load_hist(os.path.join(data_dir, "hist.jsonl"))
+    return _HISTS[data_dir]
+
+
+def community(run_dir: str, cut: datetime, notes: dict, member_groups: dict) -> list[dict]:
+    """The community collection leads of the run's booking months (both teams), with their facts."""
+    from analytics.community_cycle import community_leads, sheet_rows
+    d = os.path.join(run_dir, COMMUNITY)
+    if not os.path.exists(os.path.join(d, "hist.jsonl")):
+        return []
+    months = tuple(json.load(open(os.path.join(d, "months.json"))))
+    rows, index = sheet_rows(d, months)
+    hist, team, out = hist_of(d), hierarchy(member_groups), []
+    for side in SIDES:
+        got, _ = community_leads(rows, index, hist, member_groups, side, months)
+        for l in got:
+            if l["assigned"] > cut:
+                continue
+            start = datetime(l["booked_on"].year, l["booked_on"].month, l["booked_on"].day, tzinfo=IST)
+            acts = sorted((a for a in hist.get(l["lead_id"]) or [] if utc(a.get("CreatedOn"))), key=lambda a: a["CreatedOn"])
+            done = [t for t in (l["enrolled_at"], loan_done_at(acts, start), note_loan_done(notes.get(l["lead_id"], []), cut)) if t]
+            l = {**l, "enrolled_at": min(done) if done else None, "name": f'{l["name"]} (Community)', "community": True,
+                 "tag": (index.get(l["lead_id"]) or {}).get("mx_Bootcamp_collections")}
+            out.append({**l, "side": side, "bootcamp_day": l["booked_on"].isoformat(), "data_dir": d, "team_of": team.get(l["caller"]),
+                        **lead_facts(l, acts, start, cut)})
+    return out
+
+
 def collect(run_dir: str, cut: datetime) -> list[dict]:
-    """Every collection lead of the run's weekends (both teams) assigned by ``cut``, with its facts."""
+    """Every collection lead of the run's weekends and community booking months (both teams) assigned by ``cut``."""
     from analytics.collection_daily.timelines import load_notes  # timelines reads facts' output, not the other way
     notes = load_notes(run_dir)
     out = []
     for d, day in weekends(run_dir):
         leads, hist, meta = load(d)
-        team = hierarchy(meta.get("member_groups") or {})
+        _HISTS[d] = hist
+        groups = meta.get("member_groups") or {}
+        team = hierarchy(groups)
         start = datetime.strptime(day, "%Y-%m-%d").replace(tzinfo=IST)
         for side in SIDES:
             for l in cycle_leads(leads, hist, meta, day, side):
@@ -121,4 +166,4 @@ def collect(run_dir: str, cut: datetime) -> list[dict]:
                 acts = sorted((a for a in hist.get(l["lead_id"]) or [] if utc(a.get("CreatedOn"))), key=lambda a: a["CreatedOn"])
                 out.append({**l, "side": side, "bootcamp_day": day, "data_dir": d, "team_of": team.get(l["caller"]),
                             **lead_facts(l, acts, start, cut)})
-    return out
+    return out + (community(run_dir, cut, notes, groups) if out else [])

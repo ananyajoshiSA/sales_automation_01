@@ -133,6 +133,8 @@ class TeamPDF:
         self.cut, self.day, self.yday = cut, day, day - timedelta(days=1)
         self.feedback, (self.mis_as_of, mis_rows), self.students, self.notes = feedback, mis, students, notes
         self.mis = [r for r in mis_rows if r["side"].lower() in side.lower()]
+        self.bootcamp_leads = [l for l in self.leads if not l.get("community")]
+        self.community_leads = [l for l in self.leads if l.get("community")]
         self.stats = review.day_stats(self.leads, self.yday)
         self.stats_before = review.day_stats(self.leads, self.yday - timedelta(days=1))
         self.ads = sorted({l["ad"] for l in self.leads})
@@ -179,7 +181,7 @@ class TeamPDF:
                 "<h2>Contents</h2><ol>" + "".join(f"<li>{e(c)}</li>" for c in contents) + "</ol>"
                 f'<p class="muted">Data: LeadSquared read {self.cut.astimezone(IST):%a %d %b %H:%M} IST (calls, stage comments, disposition notes and '
                 f'call-back times, comment fields, Notes). {self.notes.get("transcripts", "")} Bootcamp pool sheet MIS of {self.mis_as_of}, '
-                f'downloaded {self.notes.get("pool_read", "")} IST. Only calls to November bootcamp collection leads are counted. '
+                f'downloaded {self.notes.get("pool_read", "")} IST. Only calls to November bootcamp collection leads and November community collection leads (marked "(Community)") are counted. '
                 'Statuses, payment plans, objections and the IIT answer are read from each lead\'s calls, transcripts, comments and Notes.</p></div>')
 
     def review_page(self) -> str:
@@ -399,9 +401,33 @@ class TeamPDF:
                 f'<h2>Recovery against the {TARGET}% target (pool sheet MIS of {e(self.mis_as_of)})</h2>' + mt
                 + f'<p class="muted">Recovered = disbursed, one shot or instalments, as the MIS counts it; collected includes booking fees on pending and '
                   f'dropped leads. LeadSquared has {len(self.rows)} open leads for this team; records that differ from the pool sheet are listed in section 9.</p>'
+                + self.community_money()
                 + "<h2>Open leads by payment route and status</h2>" + pt
                 + '<p class="muted">Route read from each lead\'s payment plan as the readers wrote it. Leads with a payment date due '
                   'are in section 2 (the payment-dates calendar was removed on 19 Nov: it repeated that list).</p></div>')
+
+    def community_money(self) -> str:
+        """Community leads' own money from the Community Webinar Collection Sheet (the pool sheet MIS is bootcamps only)."""
+        c = self.community_leads
+        if not c:
+            return ""
+        by: dict[str, list] = {}
+        for l in c:
+            by.setdefault(l["bootcamp"], []).append(l)
+        rows = []
+        for b, ls in sorted(by.items()):
+            done = sum(l["enrolled"] for l in ls)
+            rows.append([e(b), str(len(ls)), str(done), f"{pct(done, len(ls))}%", str(sum(l["dropped"] for l in ls)),
+                         lakh(sum(l["received"] for l in ls)), lakh(sum(l["balance"] for l in ls if not l["enrolled"] and not l["dropped"]))])
+        done = sum(l["enrolled"] for l in c)
+        rows.append(["<b>Community, November bookings</b>", f"<b>{len(c)}</b>", f"<b>{done}</b>", f"<b>{pct(done, len(c))}%</b>",
+                     f'<b>{sum(l["dropped"] for l in c)}</b>', f'<b>{lakh(sum(l["received"] for l in c))}</b>',
+                     f'<b>{lakh(sum(l["balance"] for l in c if not l["enrolled"] and not l["dropped"]))}</b>'])
+        return ("<h2>Community leads (Community Webinar Collection Sheet)</h2>"
+                + table([("Community batch", "34%"), ("Leads", "9%"), ("Enrolled", "10%"), ("Recovery", "10%"), ("Dropped", "9%"),
+                         ("Received", "14%"), ("Balance on open leads", "14%")], rows, {i: "n" for i in range(1, 7)})
+                + '<p class="muted">Enrolled from LeadSquared (Course Enrolled, Collections done or loan done); money is the community sheet\'s '
+                  'own per lead.</p>')
 
     def overview(self) -> str:
         rows = []
@@ -456,7 +482,7 @@ class TeamPDF:
               for l, j, p in cold]
         wr = [[lead_cell(l), e(datetime.strptime(j["waiting_until"][:10], "%Y-%m-%d").strftime("%a %d %b")), e(j.get("last_talk") or "—")] for l, j in wait]
         recs = []
-        for l in self.leads:
+        for l in self.bootcamp_leads:  # the pool sheet holds bootcamp students only
             s = self.students.get(re.sub(r"\D", "", l["phone"])[-10:])
             if not s:
                 continue
@@ -465,7 +491,7 @@ class TeamPDF:
                 recs.append([lead_cell(l), e(f'Pool sheet: {s.get("status") or s.get("outcome")}'), "LeadSquared stage not Course Enrolled: move the stage."])
             elif l["enrolled"] and not done and (s.get("status") or "").lower() in ("pending", ""):
                 recs.append([lead_cell(l), "LeadSquared: Course Enrolled", e(f'Pool sheet: {s.get("status") or "pending"}: update the sheet with the payment.')])
-        missing = [l for l in self.leads if not l["enrolled"] and not l["dropped"] and not self.students.get(re.sub(r"\D", "", l["phone"])[-10:])]
+        missing = [l for l in self.bootcamp_leads if not l["enrolled"] and not l["dropped"] and not self.students.get(re.sub(r"\D", "", l["phone"])[-10:])]
         return ('<div class="page"><h2>9. Leads going cold, waiting list, records to fix</h2>'
                 + f"<h2>Cold ({len(cold)}): WhatsApp first, then one call</h2>"
                 + table([("Lead", "28%"), ("Why cold", "30%"), ("Objection", "20%"), ("Next step", "22%")], cr)

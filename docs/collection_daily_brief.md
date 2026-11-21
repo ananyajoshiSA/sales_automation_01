@@ -5,7 +5,7 @@ Give this brief to each reader who grades open November bootcamp collection lead
 no keyword rules. Statuses agreed with the user on 17 Nov 2026; they replace hot / warm / cold for the daily reports
 only (`docs/collection_grading.md` still governs the Wednesday and Friday reports until those are redesigned).
 
-Each lead paid a booking fee for a bootcamp. The caller is collecting the balance: one shot, card EMI, a loan through a
+Each lead paid a booking fee for a bootcamp, or (leads marked "(Community)", added 21 Nov 2026) a booking fee of ₹999–₹3,000 for a community programme batch; grade both the same way. The caller is collecting the balance: one shot, card EMI, a loan through a
 finance partner (Bajaj, Eduvanz, Shopse, Credence, Propelld, Fibe, paper finance) or instalments.
 
 The timeline (`<run_dir>/tl/<lead_id>.txt`) carries every call with its Salesa transcript where one matched, every

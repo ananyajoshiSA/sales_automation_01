@@ -228,3 +228,9 @@ def test_a_notes_tab_entry_saying_loan_done_enrols():
     notes = [{"t": "2026-11-18 09:30:00", "text": "Loan done by Fibe"}, {"t": "2026-11-18 08:00:00", "text": "after loan done, send portal"}]
     assert facts.note_loan_done(notes, ist("2026-11-18 20:00")) == datetime(2026, 11, 18, 9, 30, tzinfo=timezone.utc)
     assert facts.note_loan_done(notes, ist("2026-11-18 14:00")) is None  # 09:30 UTC is 15:00 IST
+
+
+def test_community_lead_details_show_the_batch_and_booking_date():
+    l = open_lead("1", community=True, bootcamp="Independent Director G88–89", booked_on=date(2026, 11, 7))
+    got = morning.details(l, {"status": "hot"}, {"why": ""}).splitlines()
+    assert got[0] == "Community batch: Independent Director G88–89 · booked 07 Nov"

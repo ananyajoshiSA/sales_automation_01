@@ -11,7 +11,7 @@ import os
 from collections import Counter
 from datetime import date, datetime, timedelta
 
-from analytics.collection_daily.facts import REAL_SECS
+from analytics.collection_daily.facts import REAL_SECS, hist_of
 from analytics.collection_daily.timelines import events
 from integrations.timeutil import IST
 
@@ -79,7 +79,7 @@ def digests(leads: list[dict], hists: dict, notes: dict, day: date, cut: datetim
         mine = [l for l in leads if l["caller"] == caller]
         lines = [f"CALLER {caller} (TL {mine[0]['tl']}, AD {mine[0]['ad']}) — {day:%a %d %b %Y}", "NUMBERS: " + stats_line(stats[caller]), ""]
         for l in mine:
-            acts = [a for a in hists[l["data_dir"]].get(l["lead_id"]) or []]
+            acts = [a for a in (hists.get(l["data_dir"]) or hist_of(l["data_dir"])).get(l["lead_id"]) or []]
             ev = [(t, x) for t, x in events(l, acts, notes.get(l["lead_id"], []), cut, tx_dirs) if start <= t < start + timedelta(days=1)]
             if not ev:
                 continue

@@ -75,7 +75,7 @@ def main(argv: list[str] | None = None) -> None:
         older = sorted(glob.glob("data/**/transcripts", recursive=True), key=os.path.getmtime, reverse=True)
         tx_dirs = [tx] + [d for d in older if os.path.abspath(d) != os.path.abspath(tx)]
         if not a.no_fetch:
-            timelines.fetch_lead_fields(a.run_dir, [d for d, _ in facts.weekends(a.run_dir)])
+            timelines.fetch_lead_fields(a.run_dir, [l.get("tag") for l in leads])
             # every number with a real talk that no saved transcript covers, read again unless already read after the data
             todo = timelines.without_transcript(leads, tx_dirs, cut)
             print("transcripts fetched %d, still to fetch %d" % timelines.fetch_transcripts(tx, todo, fresh_after=cut))
