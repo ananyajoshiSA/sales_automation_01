@@ -102,3 +102,17 @@ waiting leads, records to fix, and the day's routine.
 .venv/bin/python -m analytics.collection_daily.pdf $D 2026-11-19 exports/collection_daily/plan_2026-11-18.json exports/collection_daily "Salesa transcripts: …"
 ```
 
+## Community leads (added 21 Nov 2026)
+
+The lists and PDFs also carry community collection leads, named "Lead (Community)". Put them in the run folder's
+`community/` before `prepare`:
+
+```bash
+PYTHONPATH=. .venv/bin/python -m scripts.fetch_collections $D/community 2026-10
+```
+
+Then write `$D/community/months.json` (booking months, e.g. `["2026-11"]`) and `$D/community/ids.json` (the matched
+lead ids of those months, from `analytics.community_cycle.sheet_rows`), fetch their histories with
+`scripts/fetch_lead_histories.py $D/community/ids.json $D/community/hist.jsonl`, and add `$D/community/ids.json` to
+the Notes fetch. A community lead counts from its booking date; its money is the community sheet's own.
+

@@ -21,4 +21,4 @@ The user asked (19 Nov 2026) not to rebuild the PDFs now and to keep a list of c
 | 14 | 19 Nov | Team leader's times only in "What you check, and when"; the hour-by-hour page shows callers only. Its one extra item (payment links and EMI sheets ready, 09:45) moved into the checks. | in code |
 | 15 | 19 Nov | Priority leads: no check-by column; the time is in each group's heading. | in code |
 | 16 | 19 Nov | 48-hour tracker: the per-caller table removed. Each caller's 48-hour score and "answered within 48 h" (the pick-up measure) are in the team overview; per-caller counts of leads given, overdue and due are not shown elsewhere (the lead list below shows every lead). | in code |
-
+| 17 | 21 Nov | Community collection leads in the daily lists and PDFs, marked "(Community)"; November bookings for now. | in code |
