@@ -157,8 +157,10 @@ def header(l: dict, cut: datetime, fields: dict) -> str:
             + (f"LEAD COMMENT FIELDS (LSQ): {fields}\n" if fields else ""))
 
 
-def write(run_dir: str, leads: list[dict], cut: datetime, tx_dirs: list[str], since: datetime | None = None) -> list[dict]:
-    """Timelines for the open leads (only those with new activity since ``since``, if given); returns the index."""
+def write(run_dir: str, leads: list[dict], cut: datetime, tx_dirs: list[str], since: datetime | None = None,
+          always: set[str] | None = None) -> list[dict]:
+    """Timelines for the open leads (only those with new activity since ``since``, if given, plus the ``always`` ones,
+    such as leads never graded); returns the index."""
     out_dir = os.path.join(run_dir, "tl")
     os.makedirs(out_dir, exist_ok=True)
     notes = load_notes(run_dir)
@@ -173,7 +175,7 @@ def write(run_dir: str, leads: list[dict], cut: datetime, tx_dirs: list[str], si
         start = datetime.strptime(l["bootcamp_day"], "%Y-%m-%d").replace(tzinfo=IST) - timedelta(days=3)
         acts = [a for a in hists[l["data_dir"]].get(l["lead_id"]) or [] if utc(a.get("CreatedOn")) and utc(a["CreatedOn"]) >= start]
         ev = events(l, acts, notes.get(l["lead_id"], []), cut, tx_dirs)
-        if since and not any(t > since for t, _ in ev):
+        if since and l["lead_id"] not in (always or set()) and not any(t > since for t, _ in ev):
             continue
         path = os.path.join(out_dir, l["lead_id"] + ".txt")
         open(path, "w").write(header(l, cut, fields.get(l["lead_id"])) + "\n" + "\n".join(f"{ist(t)} IST  {x}" for t, x in ev) + "\n")

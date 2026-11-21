@@ -80,7 +80,9 @@ def main(argv: list[str] | None = None) -> None:
             todo = timelines.without_transcript(leads, tx_dirs, cut)
             print("transcripts fetched %d, still to fetch %d" % timelines.fetch_transcripts(tx, todo, fresh_after=cut))
         since = datetime.fromisoformat(a.since).replace(tzinfo=IST) if a.since else None
-        index = timelines.write(a.run_dir, leads, cut, tx_dirs, since)
+        jpath = os.path.join(a.run_dir, "judgements.json")
+        graded = set(json.load(open(jpath))) if os.path.exists(jpath) else set()
+        index = timelines.write(a.run_dir, leads, cut, tx_dirs, since, always={l["lead_id"] for l in leads} - graded)
         print(f"{len(index)} timelines in {a.run_dir}/tl")
     elif a.cmd == "merge":
         added, missing = merge(a.run_dir, a.day, leads)
