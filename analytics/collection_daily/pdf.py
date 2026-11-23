@@ -658,7 +658,7 @@ def load_feedback(run_dir: str) -> dict:
 def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_note: str = "", side: str | None = None,
           by_tl: bool = False) -> list[str]:
     cut = facts.read_at(run_dir)
-    leads = facts.collect(run_dir, cut)
+    leads = [l for l in facts.collect(run_dir, cut) if not side or l["side"] == side]  # one team's run grades that team only
     judged = judged_on(os.path.join(run_dir, "judgements.json"), cut.astimezone(IST).date())
     rows = morning.plan(leads, judged, day, cut)
     prev = json.load(open(prev_plan))

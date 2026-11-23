@@ -67,6 +67,7 @@ def main(argv: list[str] | None = None) -> None:
     m.add_argument("day")
     m.add_argument("out_dir")
     m.add_argument("--caller", help="one caller's sheet alone (a sample; the day's plan is not written)")
+    m.add_argument("--side", help='"Mayur" or "Puja / Anmol": one team only (its plan is written for that team)')
     a = ap.parse_args(argv)
     cut = facts.read_at(a.run_dir)  # the data's own time, not the clock: a dial after the fetch is not "missed"
     leads = facts.collect(a.run_dir, cut)
@@ -89,6 +90,8 @@ def main(argv: list[str] | None = None) -> None:
         print(f"{added} grades added; {len(missing)} open leads without a grade")
     else:
         day = date.fromisoformat(a.day)
+        if a.side:
+            leads = [l for l in leads if l["side"] == a.side]
         books, saved = morning.build(leads, judged_on(os.path.join(a.run_dir, "judgements.json"), cut.astimezone(IST).date()),
                                      day, cut, a.out_dir, a.caller)
         print("\n".join(books + ([saved] if saved else [])))
