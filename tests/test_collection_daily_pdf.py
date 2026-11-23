@@ -54,3 +54,13 @@ def test_day_result_and_day_stats():
     assert (s["dials"], s["answered"], s["real"], s["talk_secs"]) == (3, 2, 1, 340)
     assert (s["d48_due"], s["d48_met"], s["in_missed"], s["in_unreturned"]) == (2, 1, 1, 1)
     assert "3 dials · 67% answered · 1 real talks" in stats_line(s) and "11:00–12:00" in stats_line(s)
+
+
+def test_team_leader_money_from_the_callerwise_mis():
+    rows = [{"bootcamp": "Bootcamp | US Accounting & Bookkeeping - Nov 14, Nov 15, Nov 16 , 2026", "caller": "Yamini Hitesh Billore",
+             "all_teams": 10, "recovered": 6, "pending": 3, "dropped": 1, "recovered_amount": 100.0, "pending_amount": 50.0},
+            {"bootcamp": "Bootcamp | US Accounting & Bookkeeping - Nov 14, Nov 15, Nov 16 , 2026", "caller": "Rahul Kumar",
+             "all_teams": 5, "recovered": 1, "pending": 4, "dropped": 0, "recovered_amount": 10.0, "pending_amount": 40.0}]
+    got = pdf.tl_mis(rows, {"Yamini Billore"})
+    assert [(r["all_teams"], r["recovered"], r["day"]) for r in got] == [(10, 6, "2026-11-14")]
+    assert pdf.same_person("Yamini Billore", "Yamini Hitesh Billore") and not pdf.same_person("Rahul Kumar", "Rahul Sharma")

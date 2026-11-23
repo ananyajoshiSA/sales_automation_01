@@ -10,7 +10,7 @@ Bootcamp pool sheet downloaded into the run folder (``bootcamp_pool.xlsx``) for 
 Groups of payment route, objection and IIT answer are read from the readers' own written fields (status, payment,
 objection, iit_pitch); the PDF says so where it counts them.
 
-    python -m analytics.collection_daily.pdf <run_dir> <day YYYY-MM-DD> <previous plan.json> <out_dir>
+    python -m analytics.collection_daily.pdf <run_dir> <day YYYY-MM-DD> <previous plan.json> <out_dir> ["note"] [--side "Puja / Anmol"] [--by-tl]
 """
 
 from __future__ import annotations
@@ -26,7 +26,8 @@ from datetime import date, datetime, timedelta
 from analytics.collection_daily import facts, morning, review
 from analytics.collection_daily.__main__ import judged_on
 from analytics.collection_reports import CSS, e, lakh, pct, write_pdf
-from analytics.collections.pool_mis import load_mis, load_students
+from analytics.collections.pool_mis import course_of, load_mis, load_students
+from analytics.collections.tags import tag_date
 from integrations.timeutil import IST
 
 TARGET = 85
@@ -122,19 +123,69 @@ def day_result(l: dict, day: date) -> str:
     return "Not reached" if any(c["out"] for c in calls) else "Not called"
 
 
+def load_callerwise(path: str, month: date) -> list[dict]:
+    """The pool sheet's "Callerwise Split <Mon> <yy>" tab: one row per bootcamp and caller, for a team leader's PDF."""
+    import openpyxl
+    wb = openpyxl.load_workbook(path, read_only=True, data_only=True)
+    try:
+        tab = next((n for n in wb.sheetnames if n.lower().startswith("callerwise split") and month.strftime("%b").lower() in n.lower()
+                    and month.strftime("%y") in n), None)
+        if not tab:
+            return []
+        out, head = [], False
+        for r in wb[tab].iter_rows(values_only=True):
+            r = list(r) + [None] * 16
+            if r[0] == "Team":
+                head = True
+                continue
+            name = str(r[3] or "").strip()
+            if not head or not name or name.lower() in ("total", "grand total") or not isinstance(r[4], (int, float)):
+                continue
+            out.append({"bootcamp": str(r[2] or r[1] or ""), "caller": name, "all_teams": int(r[4] or 0), "recovered": int(r[6] or 0),
+                        "pending": int(r[7] or 0), "dropped": int(r[8] or 0), "recovered_amount": float(r[10] or 0),
+                        "pending_amount": float(r[13] or 0)})
+        return out
+    finally:
+        wb.close()
+
+
+def same_person(a: str, b: str) -> bool:
+    """LeadSquared and the pool sheet spell some callers differently ("Yamini Billore", "Yamini Hitesh Billore")."""
+    x, y = set(a.lower().split()), set(b.lower().split())
+    return bool(x) and bool(y) and (x <= y or y <= x)
+
+
+def tl_mis(rows: list[dict], callers: set[str]) -> list[dict]:
+    """The caller-wise MIS rows of a team leader's callers, added up per bootcamp in the team MIS's shape."""
+    by: dict[str, dict] = {}
+    for r in rows:
+        if not any(same_person(r["caller"], c) for c in callers):
+            continue
+        b = by.setdefault(r["bootcamp"], {"side": "", "name": r["bootcamp"], "course": course_of(r["bootcamp"]), "day": tag_date(r["bootcamp"]),
+                                          "all_teams": 0, "recovered": 0, "pending": 0, "dropped": 0, "recovered_amount": 0.0,
+                                          "pending_amount": 0.0})
+        for k in ("all_teams", "recovered", "pending", "dropped", "recovered_amount", "pending_amount"):
+            b[k] += r[k]
+    return list(by.values())
+
+
 class TeamPDF:
     def __init__(self, side: str, leads: list[dict], rows: list[tuple], prev: dict, cut: datetime, day: date,
-                 feedback: dict, mis: tuple[str, list[dict]], students: dict, notes: dict):
-        self.side, self.team = side, TEAM_ADS[side]
-        self.leads = [l for l in leads if l["side"] == side]
+                 feedback: dict, mis: tuple[str, list[dict]], students: dict, notes: dict, tl: str | None = None,
+                 callerwise: list[dict] | None = None):
+        # with ``tl``: one team leader's callers only (the user, 23 Nov: one PDF per TL); money from the caller-wise MIS
+        self.side, self.tl = side, tl
+        self.team = TEAM_ADS[side] + (f" · TL {tl}" if tl else "")
+        self.leads = [l for l in leads if l["side"] == side and (not tl or l["tl"] == tl)]
         self.by_id = {l["lead_id"]: l for l in self.leads}
-        self.rows = [r for r in rows if r[0]["side"] == side]
+        self.rows = [r for r in rows if r[0]["side"] == side and (not tl or r[0]["tl"] == tl)]
         self.cut, self.day, self.yday = cut, day, day - timedelta(days=1)
         # a list built for another day (none was built for the previous day) is not compared with the previous day's calls
         self.has_list = prev.get("day") == self.yday.isoformat()
         self.prev = {k: v for k, v in prev.get("leads", {}).items() if k in self.by_id} if self.has_list else {}
         self.feedback, (self.mis_as_of, mis_rows), self.students, self.notes = feedback, mis, students, notes
-        self.mis = [r for r in mis_rows if r["side"].lower() in side.lower()]
+        self.mis = ([r for r in mis_rows if r["side"].lower() in side.lower()] if not tl else
+                    tl_mis(callerwise or [], {l["caller"] for l in self.leads} | {tl}))
         self.bootcamp_leads = [l for l in self.leads if not l.get("community")]
         self.community_leads = [l for l in self.leads if l.get("community")]
         self.stats = review.day_stats(self.leads, self.yday)
@@ -180,11 +231,65 @@ class TeamPDF:
                 f'<p>A review of {self.yday:%A} first, then today\'s priority leads and checks, each caller\'s feedback, the 48-hour '
                 'tracker, money against the target, and the routine. Callers work from the Excel call list.</p></div>'
                 '<div class="tiles6">' + "".join(f'<div class="tile"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in tiles) + "</div>"
-                "<h2>Contents</h2><ol>" + "".join(f"<li>{e(c)}</li>" for c in contents) + "</ol>"
-                f'<p class="muted">Data: LeadSquared read {self.cut.astimezone(IST):%a %d %b %H:%M} IST (calls, stage comments, disposition notes and '
+                + (self.act_today() + '<p class="muted">Then: ' + " · ".join(e(c) for c in contents) + ".</p>" if self.tl else
+                   "<h2>Contents</h2><ol>" + "".join(f"<li>{e(c)}</li>" for c in contents) + "</ol>")
+                + f'<p class="muted">Data: LeadSquared read {self.cut.astimezone(IST):%a %d %b %H:%M} IST (calls, stage comments, disposition notes and '
                 f'call-back times, comment fields, Notes). {self.notes.get("transcripts", "")} Bootcamp pool sheet MIS of {self.mis_as_of}, '
                 f'downloaded {self.notes.get("pool_read", "")} IST. Only calls to November bootcamp collection leads and November community collection leads (marked "(Community)") are counted. '
                 'Statuses, payment plans, objections and the IIT answer are read from each lead\'s calls, transcripts, comments and Notes.</p></div>')
+
+    def balance(self, l: dict) -> float | None:
+        """Balance still to collect: the community sheet's for a community lead, the pool sheet's for a bootcamp lead."""
+        if l.get("community"):
+            return l.get("balance")
+        s = self.students.get(re.sub(r"\D", "", l["phone"])[-10:])
+        return s.get("balance") if s else None
+
+    def act_today(self) -> str:
+        """Page 1 for a team leader: the leads where money moves or is lost today, each with its amount, date and step."""
+        day = self.day
+        rs = lambda x: "—" if x is None else f"₹{x:,.0f}"
+        pay, booked, brink, seen = [], [], [], set()
+        for l, j, p in self.rows:
+            kind = objection_kind(j.get("objection"))
+            d = promised(j.get("payment"), day.year)
+            quiet = (self.cut - l["last_real"]).days if l["last_real"] else None
+            if kind == "Refund or cancel" or (j["status"] == "cold" and l["real_talks"]) or (
+                    j["status"] in ("hot", "counsel") and quiet is not None and quiet >= 5 and l["dials"] and not (j.get("waiting_until") or "") > day.isoformat()):
+                why = ("Asked for a refund or to cancel" if kind == "Refund or cancel" else "Cold after a real talk" if j["status"] == "cold"
+                       else f"{morning.STATUS[j['status']]} but no real talk for {quiet} days")
+                brink.append((l, j, p, why))
+                seen.add(l["lead_id"])
+            elif j["status"] in ("hot", "counsel") and d and d <= day:
+                pay.append((l, j, p, d))
+                seen.add(l["lead_id"])
+        for l, j, p in self.rows:
+            if l["lead_id"] not in seen and p["group"] == 1 and p["due"] and j["status"] in ("hot", "counsel", "connected", "callback"):
+                booked.append((l, j, p))
+        pay.sort(key=lambda r: (r[3], r[0]["caller"]))
+        booked.sort(key=lambda r: r[2]["due"])
+
+        def who(l):
+            return f'<b>{e(l["name"] or "—")}</b> <span class="ph">{e(l["phone"])}</span><br><span class="muted">{e(l["caller"])} · {e(l["bootcamp"])}</span>'
+        t1 = table([("#", "3%"), ("Lead", "25%"), ("Balance", "9%"), ("Promised", "12%"), ("Payment plan · last talk", "29%"), ("Do today", "22%")],
+                   [[str(i), who(l), rs(self.balance(l)), e(f"{d:%a %d %b}" + (" (overdue)" if d < day else " (today)")),
+                     e(f'{j.get("payment") or "—"} · {j.get("last_talk") or "—"}'), e(j.get("next") or "—")]
+                    for i, (l, j, p, d) in enumerate(pay, 1)], {2: "n"})
+        t2 = table([("Time", "8%"), ("Lead", "25%"), ("Balance", "9%"), ("Status", "13%"), ("Last talk", "27%"), ("Do today", "18%")],
+                   [[f'<b>{p["due"].astimezone(IST):%H:%M}</b>', who(l), rs(self.balance(l)), e(morning.STATUS[j["status"]]),
+                     e(j.get("last_talk") or "—"), e(j.get("next") or "—")] for l, j, p in booked], {2: "n"})
+        t3 = table([("#", "3%"), ("Lead", "25%"), ("Balance", "9%"), ("Why at risk", "18%"), ("What the lead said", "25%"), ("Do today", "20%")],
+                   [[str(i), who(l), rs(self.balance(l)), f'<span class="bad">{e(why)}</span>', e(j.get("objection") or j.get("last_talk") or "—"),
+                     e(j.get("next") or "Keep the seat; offer instalments or a named later batch")]
+                    for i, (l, j, p, why) in enumerate(brink, 1)], {2: "n"})
+        total = sum(self.balance(l) or 0 for l, *_ in pay)
+        return (f'<h2>1 · Will pay today or already overdue ({len(pay)}) · {rs(total)} to collect</h2>'
+                '<p class="muted">Payment date as the lead gave it on a call or in a Note. Send the link while the lead is on the line and stay on '
+                'until it goes through. Check by 12:00.</p>' + (t1 if pay else "<p>None today.</p>")
+                + f'<h2>2 · Call-backs fixed for today ({len(booked)})</h2>' + (t2 if booked else "<p>None booked.</p>")
+                + f'<h2>3 · On the brink of dropping ({len(brink)})</h2>'
+                '<p class="muted">Asked for a refund or to cancel, gone cold after a real talk, or Hot / To be counselled with no real talk for 5+ days '
+                'despite calls. The team leader calls each one by 12:00.</p>' + (t3 if brink else "<p>None.</p>"))
 
     def review_page(self) -> str:
         y, b = self.team_day(self.stats), self.team_day(self.stats_before)
@@ -407,7 +512,7 @@ class TeamPDF:
         pr = [[e(rt)] + [str(pipe[(rt, s)] or "") for s in sts] + [str(sum(pipe[(rt, s)] for s in sts))] for rt in routes]
         pt = table([("Payment route", "22%")] + [(morning.STATUS[s], "11%") for s in sts] + [("All", "12%")], pr, {i: "n" for i in range(1, 8)})
         return ('<div class="page"><h1>7. Money and the payment pipeline</h1>'
-                f'<h2>Recovery against the {TARGET}% target (pool sheet MIS of {e(self.mis_as_of)})</h2>' + mt
+                f'<h2>Recovery against the {TARGET}% target (pool sheet {"caller-wise " if self.tl else ""}MIS of {e(self.mis_as_of)})</h2>' + mt
                 + f'<p class="muted">Recovered = disbursed, one shot or instalments, as the MIS counts it; collected includes booking fees on pending and '
                   f'dropped leads. LeadSquared has {len(self.rows)} open leads for this team; records that differ from the pool sheet are listed in section 9.</p>'
                 + self.community_money()
@@ -550,7 +655,8 @@ def load_feedback(run_dir: str) -> dict:
     return out
 
 
-def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_note: str = "") -> list[str]:
+def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_note: str = "", side: str | None = None,
+          by_tl: bool = False) -> list[str]:
     cut = facts.read_at(run_dir)
     leads = facts.collect(run_dir, cut)
     judged = judged_on(os.path.join(run_dir, "judgements.json"), cut.astimezone(IST).date())
@@ -563,16 +669,27 @@ def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_not
     feedback = load_feedback(run_dir)
     os.makedirs(out_dir, exist_ok=True)
     paths = []
-    for side, team in TEAM_ADS.items():
-        students = load_students(pool, f"{day:%B %Y}", side)
-        doc = TeamPDF(side, leads, rows, prev, cut, day, feedback, (as_of, mis), students, notes).html()
-        path = os.path.join(out_dir, f"Bootcamp collections plan - {team.split(' (')[0]} - {day:%a %d %b %Y}.pdf")
-        write_pdf(doc, path)
-        paths.append(path)
+    callerwise = load_callerwise(pool, day) if by_tl else []
+    for s, team in TEAM_ADS.items():
+        if side and s != side:
+            continue
+        students = load_students(pool, f"{day:%B %Y}", s)
+        for tl in (sorted({l["tl"] for l in leads if l["side"] == s}) if by_tl else [None]):
+            doc = TeamPDF(s, leads, rows, prev, cut, day, feedback, (as_of, mis), students, notes, tl, callerwise).html()
+            name = team.split(" (")[0] + (f" - TL {tl}" if tl else "")
+            path = os.path.join(out_dir, f"Collections plan - {name} - {day:%a %d %b %Y}.pdf")
+            write_pdf(doc, path)
+            paths.append(path)
     return paths
 
 
 if __name__ == "__main__":
-    run_dir, day, prev_plan, out_dir = sys.argv[1:5]
-    for p in build(run_dir, date.fromisoformat(day), prev_plan, out_dir, sys.argv[5] if len(sys.argv) > 5 else ""):
+    import argparse
+    ap = argparse.ArgumentParser()
+    ap.add_argument("run_dir"); ap.add_argument("day"); ap.add_argument("prev_plan"); ap.add_argument("out_dir")
+    ap.add_argument("transcripts_note", nargs="?", default="")
+    ap.add_argument("--side", help='"Mayur" or "Puja / Anmol": one team only')
+    ap.add_argument("--by-tl", action="store_true", help="one PDF per team leader, with today's act-now leads on page 1")
+    a = ap.parse_args()
+    for p in build(a.run_dir, date.fromisoformat(a.day), a.prev_plan, a.out_dir, a.transcripts_note, a.side, a.by_tl):
         print(p)
