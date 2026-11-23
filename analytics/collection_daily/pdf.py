@@ -249,8 +249,12 @@ class TeamPDF:
         """Page 1 for a team leader: the leads where money moves or is lost today, each with its amount, date and step."""
         day = self.day
         rs = lambda x: "—" if x is None else f"₹{x:,.0f}"
-        pay, booked, brink, seen = [], [], [], set()
+        pay, booked, brink, paid, seen = [], [], [], [], set()
         for l, j, p in self.rows:
+            if self.balance(l) == 0:  # the sheet has it fully paid: not a lead to chase, a record to fix
+                paid.append((l, j, p))
+                seen.add(l["lead_id"])
+                continue
             kind = objection_kind(j.get("objection"))
             d = promised(j.get("payment"), day.year)
             quiet = (self.cut - l["last_real"]).days if l["last_real"] else None
@@ -289,7 +293,11 @@ class TeamPDF:
                 + f'<h2>2 · Call-backs fixed for today ({len(booked)})</h2>' + (t2 if booked else "<p>None booked.</p>")
                 + f'<h2>3 · On the brink of dropping ({len(brink)})</h2>'
                 '<p class="muted">Asked for a refund or to cancel, gone cold after a real talk, or Hot / To be counselled with no real talk for 5+ days '
-                'despite calls. The team leader calls each one by 12:00.</p>' + (t3 if brink else "<p>None.</p>"))
+                'despite calls. The team leader calls each one by 12:00.</p>' + (t3 if brink else "<p>None.</p>")
+                + (f'<h2>4 · Paid in full per the sheet, still open in LeadSquared ({len(paid)})</h2>'
+                   '<p class="muted">Confirm the payment with finance and move the stage to Course Enrolled; do not chase these leads.</p>'
+                   + table([("Lead", "34%"), ("Status in the lists", "18%"), ("Last talk", "48%")],
+                           [[who(l), e(morning.STATUS[j["status"]]), e(j.get("last_talk") or "—")] for l, j, p in paid]) if paid else ""))
 
     def review_page(self) -> str:
         y, b = self.team_day(self.stats), self.team_day(self.stats_before)
