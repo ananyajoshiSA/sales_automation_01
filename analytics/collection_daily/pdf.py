@@ -350,6 +350,11 @@ class TeamPDF:
                 + '<div class="green">10:00 huddle (5 minutes): each caller reads out their three for today (section 5) and the time they will call them.</div></div>')
 
     def feedback_page(self) -> str:
+        if not self.feedback:  # e.g. after a Sunday with a handful of dials: say so rather than print empty cards
+            y = self.team_day(self.stats)
+            return ('<div class="page"><h1>5. Feedback to give each caller</h1>'
+                    f'<p>No caller feedback today: {self.yday:%A} had {y["dials"]} dials to collection leads ({y["real"]} real talks). '
+                    'Each caller\'s numbers for the day are in the caller table (section 1).</p></div>')
         cards = []
         for c in self.callers:
             s, f = self.stats[c], self.feedback.get(c)
