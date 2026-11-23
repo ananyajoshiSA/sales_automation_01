@@ -129,8 +129,10 @@ class TeamPDF:
         self.leads = [l for l in leads if l["side"] == side]
         self.by_id = {l["lead_id"]: l for l in self.leads}
         self.rows = [r for r in rows if r[0]["side"] == side]
-        self.prev = {k: v for k, v in prev.get("leads", {}).items() if k in self.by_id}
         self.cut, self.day, self.yday = cut, day, day - timedelta(days=1)
+        # a list built for another day (none was built for the previous day) is not compared with the previous day's calls
+        self.has_list = prev.get("day") == self.yday.isoformat()
+        self.prev = {k: v for k, v in prev.get("leads", {}).items() if k in self.by_id} if self.has_list else {}
         self.feedback, (self.mis_as_of, mis_rows), self.students, self.notes = feedback, mis, students, notes
         self.mis = [r for r in mis_rows if r["side"].lower() in side.lower()]
         self.bootcamp_leads = [l for l in self.leads if not l.get("community")]
@@ -248,11 +250,13 @@ class TeamPDF:
 
         return ('<div class="page">' + f'<h1>1. {self.yday:%A} review: what worked, what didn\'t, missed opportunities</h1>'
                 + f'<h2>Scorecard: {bd} vs {yd}</h2>' + sc + who
-                + f'<h2>What {self.yday:%A}\'s list asked vs what happened</h2>'
-                + f'<p class="muted">{self.yday:%A}\'s list was built from the LeadSquared read of {e(self.notes.get("prev_cut", ""))}; '
-                  'each lead counts once: enrolled that day, else a real talk (2 min+), else a short pick-up, else dialled but not reached, else not called.</p>' + ask
+                + ((f'<h2>What {self.yday:%A}\'s list asked vs what happened</h2>'
+                    + f'<p class="muted">{self.yday:%A}\'s list was built from the LeadSquared read of {e(self.notes.get("prev_cut", ""))}; '
+                      'each lead counts once: enrolled that day, else a real talk (2 min+), else a short pick-up, else dialled but not reached, else not called.</p>' + ask)
+                   if self.has_list else f'<p class="muted">No call list was built for {self.yday:%A}, so there is no list to compare the day with.</p>')
                 + f'<h2>Team performance by caller ({yd})</h2>' + pt
-                + f'<h2>{self.yday:%A}\'s follow-ups, 48-hour and Hot leads that were not called or not reached ({len(miss)})</h2>' + mt
+                + (f'<h2>{self.yday:%A}\'s follow-ups, 48-hour and Hot leads that were not called or not reached ({len(miss)})</h2>' + mt
+                   if self.has_list else "")
                 + self.missed() + "</div>")
 
     def missed(self) -> str:
