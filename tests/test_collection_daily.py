@@ -234,3 +234,12 @@ def test_community_lead_details_show_the_batch_and_booking_date():
     l = open_lead("1", community=True, bootcamp="Independent Director G88–89", booked_on=date(2026, 11, 7))
     got = morning.details(l, {"status": "hot"}, {"why": ""}).splitlines()
     assert got[0] == "Community batch: Independent Director G88–89 · booked 07 Nov"
+
+
+def test_one_team_build_keeps_the_other_teams_plan(tmp_path):
+    a = open_lead("1") | {"allocated": ist("2026-11-14 10:00")}
+    b = open_lead("2", side="Puja / Anmol", caller="Shweta", tl="Aditya", ad="Anmol") | {"allocated": ist("2026-11-14 10:00")}
+    judged = {"1": {"status": "hot"}, "2": {"status": "hot"}}
+    morning.build([b], judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
+    _, saved = morning.build([a], judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
+    assert set(json.load(open(saved))["leads"]) == {"1", "2"}

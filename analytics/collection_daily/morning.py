@@ -242,8 +242,13 @@ def build(leads: list[dict], judged: dict, day: date, cut: datetime, out_dir: st
     if caller:
         return books, None
     saved = os.path.join(out_dir, f"plan_{day.isoformat()}.json")
-    json.dump({"day": day.isoformat(), "cut": cut.isoformat(),
-               "leads": {l["lead_id"]: {"caller": l["caller"], "side": l["side"], "group": p["group"], "status": j["status"],
-                                        "why": p["why"], "due": p["due"].isoformat() if p["due"] else None} for l, j, p in rows}},
-              open(saved, "w"), indent=1)
+    mine = {l["lead_id"]: {"caller": l["caller"], "side": l["side"], "group": p["group"], "status": j["status"],
+                           "why": p["why"], "due": p["due"].isoformat() if p["due"] else None} for l, j, p in rows}
+    sides = {l["side"] for l, _, _ in rows}
+    kept = {}
+    if os.path.exists(saved):  # a team built on its own keeps the other team's plan for the day
+        old = json.load(open(saved))
+        if old.get("day") == day.isoformat():
+            kept = {k: v for k, v in old.get("leads", {}).items() if v.get("side") not in sides}
+    json.dump({"day": day.isoformat(), "cut": cut.isoformat(), "leads": {**kept, **mine}}, open(saved, "w"), indent=1)
     return books, saved
