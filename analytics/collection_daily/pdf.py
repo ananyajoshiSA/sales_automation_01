@@ -685,7 +685,8 @@ def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_not
         for tl in (sorted({l["tl"] for l in leads if l["side"] == s}) if by_tl else [None]):
             doc = TeamPDF(s, leads, rows, prev, cut, day, feedback, (as_of, mis), students, notes, tl, callerwise).html()
             name = team.split(" (")[0] + (f" - TL {tl}" if tl else "")
-            path = os.path.join(out_dir, f"Collections plan - {name} - {day:%a %d %b %Y}.pdf")
+            # the team PDF keeps its name; per-TL PDFs (Anmol's team, from 23 Nov) are named for the TL
+            path = os.path.join(out_dir, (f"Collections plan - {name}" if tl else f"Bootcamp collections plan - {name}") + f" - {day:%a %d %b %Y}.pdf")
             write_pdf(doc, path)
             paths.append(path)
     return paths
