@@ -22,3 +22,4 @@ The user asked (19 Nov 2026) not to rebuild the PDFs now and to keep a list of c
 | 15 | 19 Nov | Priority leads: no check-by column; the time is in each group's heading. | in code |
 | 16 | 19 Nov | 48-hour tracker: the per-caller table removed. Each caller's 48-hour score and "answered within 48 h" (the pick-up measure) are in the team overview; per-caller counts of leads given, overdue and due are not shown elsewhere (the lead list below shows every lead). | in code |
 | 17 | 21 Nov | Community collection leads in the daily lists and PDFs, marked "(Community)"; November bookings for now. | in code |
+| 18 | 23 Nov | Anmol's team: one PDF per TL (`--side "Puja / Anmol" --by-tl`). Page 1 lists today's act-now leads with balances and dates: will pay today or overdue, call-backs fixed for today, on the brink of dropping, and paid in full per the sheet but open in LeadSquared. Money per TL from the caller-wise MIS. Rest of the format unchanged. | in code |
