@@ -146,3 +146,32 @@ def test_summary_pdf_notes_name_best_and_worst_from_the_figures(monkeypatch):
     assert "1 of 3 sales did not match a GrowthX lead" in n
     doc = fp.html_doc(r, fi.checks(r, MAP, LEADS), "t", "fresh")
     assert "Brand search" in doc and "failed" in doc
+
+
+def test_transcript_reading_sets_priority_from_what_the_lead_said(tmp_path):
+    from analytics import funnel_icp_callers as fc
+
+    m = {**MAP, "stated_icp_codes": {"E": "Retired", "F": "General"}}
+    leads = LEADS + [lead(f"900000001{i}", "ret-a", "2026-10-03T13:00") for i in range(5)]
+    logs = LOGS + [{"call_id": 10 + i, "to": f"900000001{i}", "status": "Contacted",
+                    "disposition": "Full Conversion NEW" if i == 4 else "Hangup NEW"} for i in range(5)]
+    tp = fi.timepay_by_phone(logs)
+    r = fi.build(leads, SALES, m, tp)
+    tsv = os.path.join(tmp_path, "read.tsv")
+    with open(tsv, "w", encoding="utf-8") as f:
+        f.write("9000000010\tY\tP\tE\tR\tasked the fee and Monday timing\n"
+                "9000000011\tN\tF\tF\tR\tanswered every question\n"
+                "9000000012\tN\tP\tE\tR\tretired banker, 30 years\n"
+                "9000000013\tN\tP\tF\tR\tshort chat\n"
+                "9000000014\tN\tN\t\tX\tnot interested, please don't call\n")
+    read = fc.read_transcripts(tsv, m["stated_icp_codes"])
+    rows = {x["Phone"]: x for x in fc.caller_rows(leads, r, m, tp, {}, read)}
+    assert [rows[f"900000001{i}"]["prio"] for i in range(5)] == [1, 2, 3, 4, 7]  # 14's AI "yes" loses to a clear no
+    assert rows["9000000010"]["What they said"] == "asked the fee and Monday timing"
+    assert rows["9000000011"]["Discovery answered"] == "All answered"
+    assert rows["9000000001"]["prio"] == 6 and rows["9000000001"]["Discovery answered"] == "(not read)"
+    assert all(c[0] == "PASS" for c in fc.caller_checks(list(rows.values()), r))
+    path = os.path.join(tmp_path, "c.xlsx")
+    fc.write_caller_xlsx(list(rows.values()), path, "t", "f", m, r)
+    how = [c.value for c in openpyxl.load_workbook(path)["How to use"]["A"]]
+    assert "1 · Clear interest" in how and "7 · Said no: call last" in how

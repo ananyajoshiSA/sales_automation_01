@@ -1,0 +1,180 @@
+{
+ "bootcamp": "academic_writing_nov",
+ "sales_tab_hint": "Bootcamp | Global Academic Writ",
+ "icps": [
+  "PhD / post-doc / research scholars",
+  "Professors / college lecturers",
+  "School teachers / educators",
+  "Masters students / holders",
+  "Women in academia / research",
+  "Career break / homemakers",
+  "Content / freelance writers",
+  "Bioscience / biotech / medical",
+  "Academics in their 50s-60s",
+  "Stuck in academia",
+  "AI-worried writers",
+  "Non-STEM disciplines",
+  "General"
+ ],
+ "pages": {
+  "02-phd-no-faculty-post": "PhD / post-doc / research scholars",
+  "03-life-science-msc": "Bioscience / biotech / medical",
+  "04-economics-policy": "Non-STEM disciplines",
+  "09-school-teachers": "School teachers / educators",
+  "10-coaching-faculty": "School teachers / educators",
+  "11-online-tutors": "School teachers / educators",
+  "nov21-acw-check-agri-graduates": "Bioscience / biotech / medical",
+  "nov21-acw-check-agri-graduates-google-2": "Bioscience / biotech / medical",
+  "nov21-acw-check-assistant-professors": "Professors / college lecturers",
+  "nov21-acw-check-bams-doctors": "Bioscience / biotech / medical",
+  "nov21-acw-check-bds-graduates": "Bioscience / biotech / medical",
+  "nov21-acw-check-bed-graduates": "School teachers / educators",
+  "nov21-acw-check-bed-graduates-google-2": "School teachers / educators",
+  "nov21-acw-check-bhms-doctors": "Bioscience / biotech / medical",
+  "nov21-acw-check-mbbs-neet-pg": "Bioscience / biotech / medical",
+  "nov21-acw-check-mbbs-neet-pg-google-2": "Bioscience / biotech / medical",
+  "nov21-acw-check-nurses": "Bioscience / biotech / medical",
+  "nov21-acw-check-nurses-google-2": "Bioscience / biotech / medical",
+  "nov21-acw-check-pharma-graduates": "Bioscience / biotech / medical",
+  "nov21-acw-check-pharma-graduates-google-2": "Bioscience / biotech / medical",
+  "nov21-acw-check-pharmacists": "Bioscience / biotech / medical",
+  "nov21-acw-check-pharmacists-google-2": "Bioscience / biotech / medical",
+  "nov21-acw-check-project-fellows-google-2": "PhD / post-doc / research scholars",
+  "nov21-acw-check-psychology-pg": "Non-STEM disciplines",
+  "nov21-acw-check-psychology-pg-google-2": "Non-STEM disciplines",
+  "nov21-acw-check-retired-professors": "Academics in their 50s-60s",
+  "nov21-acw-check-retired-professors-google-2": "Academics in their 50s-60s",
+  "nov21-acw-check-small-city-pg": "Masters students / holders",
+  "nov21-acw-check-ugc-net-aspirants": "Masters students / holders",
+  "nov21-acw-check-ugc-net-aspirants-google-2": "Masters students / holders",
+  "nov21-acw-check-upsc-aspirants": "General",
+  "nov21-acw-check-upsc-aspirants-google-2": "General",
+  "nov21-acw-check-women-ayush-doctors": "Bioscience / biotech / medical",
+  "nov21-acw-ctrl-assistant-professors": "Professors / college lecturers",
+  "nov21-acw-ctrl-assistant-professors-google": "Professors / college lecturers",
+  "nov21-acw-ctrl-bams-bhms-bds": "Bioscience / biotech / medical",
+  "nov21-acw-ctrl-economics": "Non-STEM disciplines",
+  "nov21-acw-ctrl-english-literature-google": "Non-STEM disciplines",
+  "nov21-acw-ctrl-homemakers": "Career break / homemakers",
+  "nov21-acw-ctrl-homemakers-google": "Career break / homemakers",
+  "nov21-acw-ctrl-medical-researchers": "Bioscience / biotech / medical",
+  "nov21-acw-ctrl-pharmacists": "Bioscience / biotech / medical",
+  "nov21-acw-ctrl-phd-scholars": "PhD / post-doc / research scholars",
+  "nov21-acw-ctrl-phd-scholars-google": "PhD / post-doc / research scholars",
+  "nov21-acw-ctrl-research-scholars": "PhD / post-doc / research scholars",
+  "nov21-acw-ctrl-research-scholars-google": "PhD / post-doc / research scholars",
+  "nov21-acw-ctrl-women-in-academia": "Women in academia / research",
+  "nov21-acw-ctrl-women-in-academia-google": "Women in academia / research",
+  "nov21-acw-vid-assistant-professor-second-income": "Professors / college lecturers",
+  "nov21-acw-vid-assistant-professor-second-income-google": "Professors / college lecturers",
+  "nov21-acw-vid-ayush-bds-not-practising": "Bioscience / biotech / medical",
+  "nov21-acw-vid-ayush-bds-not-practising-google": "Bioscience / biotech / medical",
+  "nov21-acw-vid-ma-english-graduates": "Non-STEM disciplines",
+  "nov21-acw-vid-medical-researchers-paid": "Bioscience / biotech / medical",
+  "nov21-acw-vid-phd-mother-restart": "Career break / homemakers",
+  "nov21-acw-vid-phd-mother-restart-google": "Career break / homemakers",
+  "nov21-acw-vid-phd-no-permanent-post": "PhD / post-doc / research scholars",
+  "nov21-acw-vid-phd-no-permanent-post-google": "PhD / post-doc / research scholars",
+  "nov21-acw-vid-teachers-waiting": "School teachers / educators",
+  "nov21-acw-vid-teachers-waiting-google": "School teachers / educators"
+ },
+ "general_segments": {
+  "nov21-acw-check-upsc-aspirants": "UPSC aspirants between attempts",
+  "nov21-acw-check-upsc-aspirants-google-2": "UPSC aspirants between attempts"
+ },
+ "playbook": {
+  "PhD / post-doc / research scholars": {
+   "pain": "the highest qualification in the country and the least leverage. Journals charge the world to read their paper and pay the author nothing.",
+   "open_with": "systematic reviews, grant proposals and paid peer review — real research work, credited to them.",
+   "story": "Dr Shyamalee Patar.",
+   "day": ""
+  },
+  "Professors / college lecturers": {
+   "pain": "they already do this writing — papers, reviews, proposals — and have simply never sold it in a market that pays for it.",
+   "open_with": "two evening hours can out-earn a full teaching day; retainers of five hundred to one thousand five hundred dollars a month per professor.",
+   "story": "Dr Shyamalee Patar (earns beside her faculty post).",
+   "day": ""
+  },
+  "School teachers / educators": {
+   "pain": "heavy teaching load, lesson plans, exams, admin — none of it translating into pay or recognition.",
+   "open_with": "simplifying complex ideas is the product; academic editing and research support are entry doors.",
+   "story": "Sangeeta Tolagi or Radha Harilal.",
+   "day": ""
+  },
+  "Masters students / holders": {
+   "pain": "a degree with no visible route to income.",
+   "open_with": "dissertation skills are literature review skills, and lit reviews pay five hundred to one thousand dollars.",
+   "story": "Pallavi Srivastava.",
+   "day": ""
+  },
+  "Women in academia / research": {
+   "pain": "do not assume one. Ask what she is looking for.",
+   "open_with": "credited work, on her hours, remote.",
+   "story": "Dr Shyamalee Patar or Pallavi Srivastava. Never make gender the centrepiece.",
+   "day": ""
+  },
+  "Career break / homemakers": {
+   "pain": "the gap on the C V is doing all the talking.",
+   "open_with": "freelance clients do not ask for a gap-free resume — they buy quality, and the return needs no re-entry into the job market.",
+   "story": "Ruksana Ustad, Amita Chauhan, Reeha Paul Roy, or Ashwini Joish. Never comment on the reason for the break.",
+   "day": ""
+  },
+  "Content / freelance writers": {
+   "pain": "commodity rates, inconsistent work, clients gone to AI.",
+   "open_with": "niching up, not starting over. Academic clients are demand-driven — professors must publish, think tanks must report — fewer clients, better briefs, 3–5x content rates.",
+   "story": "Biswaindu.",
+   "day": ""
+  },
+  "Bioscience / biotech / medical": {
+   "pain": "a science degree with no obvious commercial route.",
+   "open_with": "medical writing — clinical study summaries, regulatory documents, journal manuscripts — the highest-paying track, seventy-five to one hundred dollars per hour.",
+   "story": "Neha Yeul.",
+   "day": ""
+  },
+  "Academics in their 50s-60s": {
+   "pain": "expertise about to be switched off.",
+   "open_with": "expertise does not retire; reviews, editing and research support on their own schedule.",
+   "story": "Ramesh Chandran Vadali.",
+   "day": ""
+  },
+  "Stuck in academia": {
+   "pain": "waiting for a ladder that may never arrive.",
+   "open_with": "independent academic work pays on skill, not seniority — no promotion required.",
+   "story": "Anujvrat Singh.",
+   "day": ""
+  },
+  "AI-worried writers": {
+   "pain": "watching their skill get commoditised.",
+   "open_with": "AI made research-grade writing more valuable, not less — it replaced generic content, not judgment.",
+   "story": "Biswaindu.",
+   "day": ""
+  },
+  "Non-STEM disciplines": {
+   "pain": "assumes only STEM qualifies.",
+   "open_with": "every discipline has buyers — policy briefs, MBA dissertations, pedagogy research, survey design, cultural and social research.",
+   "story": "Ramesh Chandran Vadali or Rajveer Hagjer.",
+   "day": ""
+  },
+  "General": {
+   "pain": "",
+   "open_with": "The market, the entry rate, and the 2-hours-a-day roadmap.",
+   "story": "Sangeeta Tolagi",
+   "day": ""
+  }
+ },
+ "stated_icp_codes": {
+  "A": "PhD / post-doc / research scholars",
+  "B": "Professors / college lecturers",
+  "C": "School teachers / educators",
+  "D": "Masters students / holders",
+  "E": "Women in academia / research",
+  "F": "Career break / homemakers",
+  "G": "Content / freelance writers",
+  "H": "Bioscience / biotech / medical",
+  "I": "Academics in their 50s-60s",
+  "J": "Stuck in academia",
+  "K": "AI-worried writers",
+  "L": "Non-STEM disciplines",
+  "U": "General"
+ }
+}

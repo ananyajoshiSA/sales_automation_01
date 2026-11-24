@@ -117,5 +117,44 @@
   "nov14-wai-vid-small-town-graduates": "Small-town graduates at home",
   "nov14-wai-vid-small-town-graduates-google": "Small-town graduates at home",
   "remote-work-revolution-women-14-16-nov-2026": "Main bootcamp page (generic, all women)"
+ },
+ "playbook": {
+  "Mothers and homemakers": {
+   "pain": "Running the home, but no income of my own.",
+   "open_with": "Running a home is unpaid project work — budgeting, scheduling, vendors; a few free hours are enough",
+   "story": "Mariyam Raj Bargeer (Sonal Gupta if she mentions young children)",
+   "day": ""
+  },
+  "Restarting after a career break": {
+   "pain": "It feels like the world moved on.",
+   "open_with": "The gap is in the market, not in her; clients ask for a sample, not a C V",
+   "story": "Priyanka Rathore",
+   "day": ""
+  },
+  "BPO / night-shift workers": {
+   "pain": "Night shifts have ruined my routine.",
+   "open_with": "She already has English and customer handling — the hardest part is done; same work, by day, from home",
+   "story": "Sushmitha Arukalla",
+   "day": ""
+  },
+  "Earn from home / freelance": {
+   "pain": "Hard work at local rates, little money.",
+   "open_with": "The work doesn't change, the payer does; give the market figures straight if she wants numbers",
+   "story": "Prerna Joshi",
+   "day": ""
+  },
+  "General": {
+   "pain": "I use ChatGPT daily but earn nothing from it.",
+   "open_with": "Clients don't pay for the tool, they pay for finished work — A I makes her faster at it",
+   "story": "Prerna Joshi",
+   "day": ""
+  }
+ },
+ "stated_icp_codes": {
+  "1": "Mothers and homemakers",
+  "2": "Restarting after a career break",
+  "3": "BPO / night-shift workers",
+  "4": "Earn from home / freelance",
+  "5": "General"
  }
 }

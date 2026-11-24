@@ -14,6 +14,18 @@ Priority (no invented probabilities; "above average" is the ICP's lead → sale 
     6  Said no, wrong number or blacklisted: call last, after checking
 Inside each priority, the best-selling ICP comes first.
 
+With ``--transcript-read`` (every connected lead's transcript read by Claude, one TSV row per lead:
+``phone, interest Y/N, discovery F/P/N, ICP code, outcome R/S/X, evidence``) the priority comes from what the
+lead said instead:
+    1  Clear interest in their own words (asked about fees, course, schedule or next steps, or committed)
+    2  Answered all the discovery questions
+    3  Said enough to place them in a specific ICP (not General)
+    4  A real conversation, but ICP unclear or General
+    5  Connected, but no real conversation (hung up at the intro, silence, voicemail)
+    6  The AI agent never reached them
+    7  Clear no, wrong number or not relevant: call last, after checking
+Inside each priority, the best-selling ICP comes first.
+
 Written by ``python -m analytics.funnel_icp report ...`` next to the stage 1 file; ``--stated-icp`` adds
 the ICP read from each lead's call summary (a TSV of phone, code).
 """
@@ -30,6 +42,47 @@ DO_NOT_CALL = (  # a "No" on the AI call: these leads go last, never off the lis
 CALLBACK = ("Call Back", "Third Party Callback")
 PRIORITY_TEXT = {1: "1 · Call first", 2: "2 · Call next", 3: "3 · Then these", 4: "4 · Then these",
                  5: "5 · Not reached yet", 6: "6 · Said no: call last"}
+READ_TEXT = {1: "1 · Clear interest", 2: "2 · Answered all discovery", 3: "3 · Clear best-fit ICP",
+             4: "4 · Talked, ICP unclear", 5: "5 · No real conversation", 6: "6 · Not reached yet",
+             7: "7 · Said no: call last"}
+DISCOVERY_TEXT = {"F": "All answered", "P": "Some answered", "N": "None"}
+
+
+def read_transcripts(path: str | None, codes: dict[str, str]) -> dict[str, dict]:
+    """phone -> what the lead said, from the transcript-reading TSV (columns in the module docstring)."""
+    out: dict[str, dict] = {}
+    if not path:
+        return out
+    with open(path, encoding="utf-8") as f:
+        for line in f:
+            p = line.rstrip("\n").split("\t")
+            if len(p) < 5 or not phone10(p[0]):
+                continue
+            out[phone10(p[0])] = {"interest": p[1].strip().upper() == "Y", "discovery": p[2].strip().upper()[:1],
+                                  "icp": codes.get(p[3].strip(), ""), "outcome": p[4].strip().upper()[:1],
+                                  "evidence": p[5].strip() if len(p) > 5 else ""}
+    return out
+
+
+def read_priority(rd: dict, answer: str, general: bool) -> tuple[int, str]:
+    """Priority 1-7 from the transcript reading; ``answer`` (the AI label) only places unread leads."""
+    if rd:
+        if rd["interest"]:
+            return 1, "Showed clear interest on the call"
+        if rd["outcome"] == "X":
+            return 7, "Said no, wrong number or not relevant: one polite call to confirm"
+        if rd["discovery"] == "F":
+            return 2, "Answered all the discovery questions"
+        if rd["icp"] and not general and rd["outcome"] == "R":
+            return 3, "Told us enough to place them in a best-fit ICP"
+        if rd["outcome"] == "R":
+            return 4, "Talked, but their ICP is unclear or General"
+        return 5, "Picked up, but no real conversation"
+    if answer in ("Not reached", "Not dialled"):
+        return 6, "The AI agent never reached them"
+    if answer == "No":
+        return 7, "Said no on the AI call: one polite call to confirm"
+    return 5, "Picked up; no transcript to read"
 
 
 def ai_answer(t: dict) -> str:
@@ -60,7 +113,7 @@ def read_stated(path: str | None, codes: dict[str, str]) -> dict[str, str]:
 
 
 def caller_rows(leads: list[dict], result: dict, icp_map: dict, tp: dict[str, dict] | None,
-                stated: dict[str, str]) -> list[dict]:
+                stated: dict[str, str], read: dict[str, dict] | None = None) -> list[dict]:
     pages, segs, book = icp_map["pages"], icp_map.get("general_segments", {}), icp_map.get("playbook", {})
     people = first_touch(leads)
     sold = {s["key"]: s for s in result["sales"] if s["key"]}
@@ -71,7 +124,8 @@ def caller_rows(leads: list[dict], result: dict, icp_map: dict, tp: dict[str, di
     for key, row in people.items():
         slug = page_slug(row.get("pageUrl"))
         ad_icp = pages.get(slug, "UNMAPPED")
-        said = stated.get(key, "")
+        rd = (read or {}).get(key, {})
+        said = rd.get("icp") or stated.get(key, "")
         use = said or ad_icp
         # "General" from the call only means none of the call ICPs fit, so it never replaces a specific ad
         # ICP; teacher ads keep Teachers when the reading had no teacher option (Retired / General / Senior women).
@@ -95,10 +149,17 @@ def caller_rows(leads: list[dict], result: dict, icp_map: dict, tp: dict[str, di
                6: "Blacklisted on the dialer: check before calling" if any(d.startswith("Blacklisted") for d in dispos)
                else "Wrong number on the AI call: check the number first" if any(d.startswith("Wrong Number") for d in dispos)
                else "Said no to the AI agent: one polite call to confirm"}[prio]
+        if read is not None:
+            prio, why = read_priority(rd, answer, rd.get("icp", "") in ("", "General"))
+            label = READ_TEXT[prio]
+        else:
+            label = PRIORITY_TEXT[prio]
         pb = book.get(use, {})
         rows.append({
             "tab": "Already enrolled" if key in sold else "Call list", "prio": prio,
-            "Priority": PRIORITY_TEXT[prio], "Why this priority": why,
+            "Priority": label, "Why this priority": why,
+            "What they said": rd.get("evidence", ""),
+            "Discovery answered": DISCOVERY_TEXT.get(rd.get("discovery", ""), "(not read)" if read is not None else ""),
             "Name": row.get("name") or row.get("fullName") or "", "Phone": key if key.isdigit() else "",
             "Email": email_key(row.get("email")), "ICP": use, "ICP sales so far": sales_so_far,
             "Said yes to the AI agent?": answer, "AI call summary": t.get("summary", ""),
@@ -120,8 +181,8 @@ def caller_rows(leads: list[dict], result: dict, icp_map: dict, tp: dict[str, di
     return rows
 
 
-COLS = ["Priority", "Name", "Phone", "ICP", "ICP sales so far", "Said yes to the AI agent?", "AI call summary",
-        "Why this priority", "Open with", "Story to tell", "Day to point to", "Pain to touch", "AI call result",
+COLS = ["Priority", "Name", "Phone", "ICP", "ICP sales so far", "Said yes to the AI agent?", "What they said",
+        "Discovery answered", "AI call summary", "Why this priority", "Open with", "Story to tell", "Day to point to", "Pain to touch", "AI call result",
         "AI attempts", "Last AI call (IST)", "ICP from ad", "ICP from what they told the AI", "Check", "Segment",
         "Ad they responded to", "Signed up (IST)", "Email", "Call outcome (fill in)", "Next step (fill in)"]
 
@@ -141,7 +202,7 @@ def caller_checks(rows: list[dict], result: dict) -> list[tuple[str, str, str]]:
     bad = {k: (v, result["icp"].get(k, {}).get("leads")) for k, v in by_ad.items()
            if v != result["icp"].get(k, {}).get("leads")}
     out.append(("PASS" if not bad else "FAIL", "Caller list: leads per ad ICP = stage 1", str(bad) if bad else "ok"))
-    noprio = sum(1 for r in rows if r["tab"] == "Call list" and r["prio"] not in PRIORITY_TEXT)
+    noprio = sum(1 for r in rows if r["tab"] == "Call list" and r["prio"] not in READ_TEXT)
     out.append(("PASS" if not noprio else "FAIL", "Caller list: every lead to call has a priority", f"{noprio} without"))
     return out
 
@@ -150,13 +211,30 @@ def write_caller_xlsx(rows: list[dict], path: str, title: str, fresh: str, icp_m
     import openpyxl
     from openpyxl.styles import Alignment, Font, PatternFill
 
+    read_mode = any(r["Priority"] in READ_TEXT.values() for r in rows)
+    meanings = {READ_TEXT[k]: v for k, v in {
+        1: "Showed clear interest in their own words: asked about fees, the course, timings or next steps, or committed",
+        2: "Answered all the discovery questions, but no clear sign of interest",
+        3: "Said enough about themselves to place them in a best-fit ICP",
+        4: "Had a real conversation, but their ICP is unclear or General",
+        5: "Picked up, but no real conversation (hung up at the intro, silence, voicemail)",
+        6: "The AI agent never reached them",
+        7: "Said no, wrong number or not relevant: call last, after checking"}.items()} if read_mode else {
+        PRIORITY_TEXT[k]: v for k, v in {
+            1: "Said yes to the AI agent, and their ICP buys at or above the campaign average",
+            2: "Said yes, but their ICP buys below average (or has no sales yet)",
+            3: "Asked for a callback or gave no clear answer; ICP buys above average",
+            4: "Asked for a callback or gave no clear answer; ICP buys below average",
+            5: "The AI agent never reached them",
+            6: "Said no, wrong number or blacklisted: call last, after checking"}.items()}
     wb = openpyxl.Workbook()
     ws = wb.active
     ws.title = "How to use"
     for line in [
         [title], [fresh], [],
         ["Who this is for: sales callers. Every lead is on the Call list, best first. Nobody is left out."],
-        ["1. Work the Call list top to bottom: priority 1 first, down to 6. Low priority still gets a call."],
+        [f"1. Work the Call list top to bottom: priority 1 first, down to {7 if read_mode else 6}. Low priority still gets a call."],
+        *([["   Priority comes from reading each lead's call transcript; 'What they said' quotes the evidence."]] if read_mode else []),
         ["2. Before dialling, read 'AI call summary'. Don't ask again what they already told our AI agent."],
         ["3. 'ICP sales so far' shows how often people like this lead have bought. Higher = easier to convert."],
         ["4. Use 'Open with', 'Story to tell' and 'Day to point to' for their ICP. Never say the word ICP."],
@@ -165,13 +243,7 @@ def write_caller_xlsx(rows: list[dict], path: str, title: str, fresh: str, icp_m
         ["7. 'Already enrolled' is for onboarding, not sales."],
         [],
         ["Priority", "Meaning"],
-        *[[PRIORITY_TEXT[k], v] for k, v in {
-            1: "Said yes to the AI agent, and their ICP buys at or above the campaign average",
-            2: "Said yes, but their ICP buys below average (or has no sales yet)",
-            3: "Asked for a callback or gave no clear answer; ICP buys above average",
-            4: "Asked for a callback or gave no clear answer; ICP buys below average",
-            5: "The AI agent never reached them",
-            6: "Said no, wrong number or blacklisted: call last, after checking"}.items()],
+        *[[k, v] for k, v in meanings.items()],
         [], ["ICP (best sellers first)", "Leads", "Lead → sale so far", "Open with", "Story", "Day"],
         *[[k, v["leads"], round(v["sales"] / v["leads"], 4) if v["leads"] else 0,
            icp_map.get("playbook", {}).get(k, {}).get("open_with", ""),

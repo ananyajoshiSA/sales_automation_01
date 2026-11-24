@@ -21,7 +21,7 @@ and added to the map before ``report`` runs.
     python -m analytics.funnel_icp pages  <bootcamp> <leadtype> <out_dir> [--from YYYY-MM-DD --to YYYY-MM-DD]
     python -m analytics.funnel_icp report <bootcamp> <leadtype> <sales.xlsx> <tab> <out_dir>
         [--from .. --to ..] [--timepay CAMPAIGN_ID[,ID]] [--tp-from YYYY-MM-DDTHH:MM:SS --tp-to ..]
-        [--timepay-logs logs.json] [--stated-icp phone_code.tsv]
+        [--timepay-logs logs.json] [--stated-icp phone_code.tsv] [--transcript-read read.tsv]
 
 Managers get a one-page PDF, ``ICP_summary_<leadtype>.pdf``. Every tab of both workbooks is also written as CSV (``<file>_<tab>.csv``); share the CSVs.
 Stage 1 (managers): ``ICP_funnel_report_<leadtype>.xlsx``. Stage 2 (sales callers): ``Caller_list_<leadtype>.xlsx``,
@@ -433,6 +433,7 @@ def main(argv: list[str] | None = None) -> int:
             p.add_argument("--tp-to")
             p.add_argument("--timepay-logs", help="saved logs JSON instead of fetching")
             p.add_argument("--stated-icp", help="TSV of phone<TAB>code: ICP read from each lead's call summary")
+            p.add_argument("--transcript-read", help="TSV from reading each lead's transcript: priority from what they said")
     a = ap.parse_args(argv)
     icp_map = load_map(a.bootcamp)
     os.makedirs(a.out_dir, exist_ok=True)
@@ -471,9 +472,10 @@ def main(argv: list[str] | None = None) -> int:
         tp = timepay_by_phone(logs)
     result = build(leads, read_sales(a.sales_xlsx, a.tab), icp_map, tp)
     chk = checks(result, icp_map, leads, tp_expected, tp_read)
-    from analytics.funnel_icp_callers import caller_checks, caller_rows, read_stated, write_caller_xlsx
+    from analytics.funnel_icp_callers import caller_checks, caller_rows, read_stated, read_transcripts, write_caller_xlsx
 
-    callers = caller_rows(leads, result, icp_map, tp, read_stated(a.stated_icp, icp_map.get("stated_icp_codes", {})))
+    callers = caller_rows(leads, result, icp_map, tp, read_stated(a.stated_icp, icp_map.get("stated_icp_codes", {})),
+                          read_transcripts(a.transcript_read, icp_map.get("stated_icp_codes", {})) if a.transcript_read else None)
     chk += caller_checks(callers, result)
     path = os.path.join(a.out_dir, f"ICP_funnel_report_{a.leadtype}.xlsx")
     fresh = f"Data pulled {datetime.now(IST):%d %b %Y, %I:%M %p} IST"
