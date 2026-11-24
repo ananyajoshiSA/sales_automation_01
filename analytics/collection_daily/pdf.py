@@ -673,7 +673,7 @@ class TeamPDF:
                 f'{self.cut.astimezone(IST):%a %d %b %H:%M}. Their 48-hour deadline is 20:00 on {self.yday + timedelta(days=2):%a %d %b}.</p>'
                 + table([("Team leader", "17%"), ("Caller", "19%"), ("Given", "8%"), ("Attempted", "10%"), ("Not attempted", "11%"),
                          ("Answered", "10%"), ("Real talk", "10%"), ("Enrolled", "9%")], rows, {i: "n" for i in range(2, 8)})
-                + (f"<h2>Not attempted yet ({len(not_tried)}): action these first</h2>" + lst if not_tried else "<p>Every fresh lead has been dialled.</p>")
+                + (f"<h2>Not attempted yet and still open ({len(not_tried)}): action these first</h2>" + lst if not_tried else "<p>Every fresh lead has been dialled.</p>")
                 + "</div>")
 
     def body(self, banner: str = "") -> list[str]:
