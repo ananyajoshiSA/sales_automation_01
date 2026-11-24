@@ -646,6 +646,45 @@ class TeamPDF:
                 + '<p class="muted">The team leader\'s checks and times are in section 3.</p>'
                 + "<h1>On every call</h1><ol>" + "".join(f"<li>{e(r)}</li>" for r in rules) + "</ol></div>")
 
+    def fresh_page(self) -> str:
+        """Leads given to callers on the previous day: how many each caller has not dialled yet (Mayur's ask, 24 Nov 2026)."""
+        fresh = [l for l in self.leads if l["allocated"].astimezone(IST).date() == self.yday]
+        tried = lambda l: any(c["out"] and c["t"] >= l["allocated"] for c in l["calls"])
+        by: dict[tuple, list] = {}
+        for l in fresh:
+            by.setdefault((l["tl"], l["caller"]), []).append(l)
+        rows = []
+        for (tl, c), ls in sorted(by.items()):
+            n_not = sum(1 for l in ls if not tried(l))
+            rows.append([e(tl), e(c), str(len(ls)), str(len(ls) - n_not), f'<span class="bad">{n_not}</span>' if n_not else "0",
+                         str(sum(1 for l in ls if l["first_pickup"])), str(sum(1 for l in ls if l["real_talks"])), str(sum(l["enrolled"] for l in ls))])
+        if not fresh:
+            return f'<div class="page"><h1>Fresh leads given on {self.yday:%A %d %b}</h1><p>No leads were given to callers that day.</p></div>'
+        not_tried = sorted((l for l in fresh if not tried(l) and not l["enrolled"] and not l["dropped"]), key=lambda l: (l["tl"], l["caller"], l["allocated"]))
+        tot = [str(len(fresh)), str(sum(1 for l in fresh if tried(l))), f'<b>{len(fresh) - sum(1 for l in fresh if tried(l))}</b>',
+               str(sum(1 for l in fresh if l["first_pickup"])), str(sum(1 for l in fresh if l["real_talks"])), str(sum(l["enrolled"] for l in fresh))]
+        rows.append(["<b>Team</b>", ""] + [f"<b>{x}</b>" for x in tot])
+        lst = table([("#", "4%"), ("Lead", "34%"), ("Team leader", "18%"), ("Given to caller", "16%"), ("Bootcamp", "28%")],
+                    [[str(i), f'<b>{e(l["name"] or "—")}</b> <span class="ph">{e(l["phone"])}</span><br><span class="muted">{e(l["caller"])}</span>',
+                      e(l["tl"]), f'{l["allocated"].astimezone(IST):%a %d %b %H:%M}', e(l["bootcamp"])] for i, l in enumerate(not_tried, 1)])
+        return (f'<div class="page"><h1>Fresh leads given on {self.yday:%A %d %b}: {len(fresh)} leads, '
+                f'{len(fresh) - sum(1 for l in fresh if tried(l))} not attempted yet</h1>'
+                f'<p class="muted">Attempted = at least one dial after the lead reached the caller, up to the LeadSquared read of '
+                f'{self.cut.astimezone(IST):%a %d %b %H:%M}. Their 48-hour deadline is 20:00 on {self.yday + timedelta(days=2):%a %d %b}.</p>'
+                + table([("Team leader", "17%"), ("Caller", "19%"), ("Given", "8%"), ("Attempted", "10%"), ("Not attempted", "11%"),
+                         ("Answered", "10%"), ("Real talk", "10%"), ("Enrolled", "9%")], rows, {i: "n" for i in range(2, 8)})
+                + (f"<h2>Not attempted yet ({len(not_tried)}): action these first</h2>" + lst if not_tried else "<p>Every fresh lead has been dialled.</p>")
+                + "</div>")
+
+    def body(self, banner: str = "") -> list[str]:
+        """The sections after the cover and before the routine, for one team leader in a team-wise PDF."""
+        def join(*parts: str) -> str:
+            inner = [p.removeprefix('<div class="page">').removesuffix("</div>") for p in parts]
+            return '<div class="page">' + "".join(inner) + "</div>"
+        first = self.review_page().replace('<div class="page">', '<div class="page">' + banner, 1)
+        return [first, self.priority(), join(self.checks(), self.overview()), self.feedback_page(), self.tracker(), self.money(),
+                join(self.objections(), self.cold_waiting_records())]
+
     def html(self) -> str:
         def join(*parts: str) -> str:  # short sections share a page
             inner = [p.removeprefix('<div class="page">').removesuffix("</div>") for p in parts]
@@ -656,6 +695,22 @@ class TeamPDF:
                 f'<style>{CSS}{EXTRA_CSS}</style></head><body>{"".join(pages)}</body></html>')
 
 
+def teamwise_html(side: str, args: tuple, callerwise: list[dict]) -> str:
+    """One PDF for a team, divided by team leader (Mayur's ask, 24 Nov 2026): the team cover, the fresh leads not yet
+    attempted, then each TL's sections under a TL banner, and the routine once at the end."""
+    team = TeamPDF(side, *args)
+    parts = [team.cover(), team.fresh_page()]
+    for tl in sorted({l["tl"] for l in team.leads}, key=lambda t: (next(l["ad"] for l in team.leads if l["tl"] == t), t)):
+        t = TeamPDF(side, *args, tl=tl, callerwise=callerwise)
+        callers = ", ".join(t.callers)
+        banner = (f'<div class="band"><small>{e(team.team)} · AD {e(t.ads[0])}</small><h1>TL {e(tl)}</h1>'
+                  f'<p>{len(t.rows)} open leads · callers: {e(callers)}</p></div>')
+        parts += t.body(banner)
+    parts.append(team.routine())
+    return (f'<!doctype html><html><head><meta charset="utf-8"><title>{e(team.team)} call plan</title>'
+            f'<style>{CSS}{EXTRA_CSS}</style></head><body>{"".join(parts)}</body></html>')
+
+
 def load_feedback(run_dir: str) -> dict:
     out = {}
     for f in sorted(glob.glob(os.path.join(run_dir, "feedback", "out*.json"))):
@@ -664,7 +719,7 @@ def load_feedback(run_dir: str) -> dict:
 
 
 def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_note: str = "", side: str | None = None,
-          by_tl: bool = False) -> list[str]:
+          by_tl: bool = False, teamwise: bool = False) -> list[str]:
     cut = facts.read_at(run_dir)
     leads = [l for l in facts.collect(run_dir, cut) if not side or l["side"] == side]  # one team's run grades that team only
     judged = judged_on(os.path.join(run_dir, "judgements.json"), cut.astimezone(IST).date())
@@ -677,11 +732,16 @@ def build(run_dir: str, day: date, prev_plan: str, out_dir: str, transcripts_not
     feedback = load_feedback(run_dir)
     os.makedirs(out_dir, exist_ok=True)
     paths = []
-    callerwise = load_callerwise(pool, day) if by_tl else []
+    callerwise = load_callerwise(pool, day) if by_tl or teamwise else []
     for s, team in TEAM_ADS.items():
         if side and s != side:
             continue
         students = load_students(pool, f"{day:%B %Y}", s)
+        if teamwise:
+            path = os.path.join(out_dir, f"Bootcamp collections plan - {team.split(' (')[0]} - {day:%a %d %b %Y}.pdf")
+            write_pdf(teamwise_html(s, (leads, rows, prev, cut, day, feedback, (as_of, mis), students, notes), callerwise), path)
+            paths.append(path)
+            continue
         for tl in (sorted({l["tl"] for l in leads if l["side"] == s}) if by_tl else [None]):
             doc = TeamPDF(s, leads, rows, prev, cut, day, feedback, (as_of, mis), students, notes, tl, callerwise).html()
             name = team.split(" (")[0] + (f" - TL {tl}" if tl else "")
@@ -699,6 +759,7 @@ if __name__ == "__main__":
     ap.add_argument("transcripts_note", nargs="?", default="")
     ap.add_argument("--side", help='"Mayur" or "Puja / Anmol": one team only')
     ap.add_argument("--by-tl", action="store_true", help="one PDF per team leader, with today's act-now leads on page 1")
+    ap.add_argument("--teamwise", action="store_true", help="one PDF divided by team leader, with the fresh leads not yet attempted")
     a = ap.parse_args()
-    for p in build(a.run_dir, date.fromisoformat(a.day), a.prev_plan, a.out_dir, a.transcripts_note, a.side, a.by_tl):
+    for p in build(a.run_dir, date.fromisoformat(a.day), a.prev_plan, a.out_dir, a.transcripts_note, a.side, a.by_tl, a.teamwise):
         print(p)
