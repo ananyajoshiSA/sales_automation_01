@@ -14,6 +14,10 @@ within 24 hours. Drafts are never picked. Every file of a set goes in one email.
 With --to-list NAME the email goes to the mailer's list LIST_<NAME> (set in the Apps Script settings) instead
 of its default RECIPIENTS; the request names the list, never addresses.
 
+With --attention TEXT (or --attention-file PATH) the subject starts with "⚠ NEEDS ATTENTION:" and TEXT opens the
+email, warning readers before they use the reports: a day under review, a late report. Use it only for those; an
+empty note sends the usual email.
+
 Needs REPORT_EMAIL_URL (the web app's /exec address) and REPORT_EMAIL_TOKEN in the root .env or the
 cloud environment's settings.
 
@@ -21,6 +25,7 @@ cloud environment's settings.
     PYTHONPATH=. python scripts/email_report.py [FILE ...] --check         # what would be sent, to how many; sends nothing
     PYTHONPATH=. python scripts/email_report.py [FILE ...] [--resend]      # email them, together in one email
     PYTHONPATH=. python scripts/email_report.py [FILE ...] --to-list elite # to the mailer's LIST_ELITE
+    PYTHONPATH=. python scripts/email_report.py [FILE ...] --attention-file NOTE.txt  # flagged email, NOTE first
 """
 
 from __future__ import annotations
@@ -62,6 +67,7 @@ INNER = re.compile(r"^[A-Za-z0-9][A-Za-z0-9 ._()+-]{0,150}\.(pdf|xlsx|xls|csv|do
 NOT_FINISHED = re.compile(r"(?<![a-z])(draft|partial|tmp|temp)(?![a-z])", re.I)  # report_draft.pdf, not attempts.csv
 MAX_BYTES = 20 * 1024 * 1024  # Gmail takes 25 MB of attachments per email; the mailer stays below it
 MAX_FILES = 10
+MAX_ATTENTION = 600  # the mailer's own limit
 SETTLE_SECS = 10  # a file changed this recently may still be being written
 SET_GAP_SECS = 30 * 60  # reports finished within 30 min of the next one belong to the same set
 STALE_SECS = 24 * 3600
@@ -224,11 +230,11 @@ def upload(path: str) -> dict:
             "content_b64": base64.b64encode(data).decode("ascii")}
 
 
-def send(paths: list[str], url: str, token: str, resend: bool = False, to_list: str = "") -> dict:
+def send(paths: list[str], url: str, token: str, resend: bool = False, to_list: str = "", attention: str = "") -> dict:
     """One file goes in the original request shape, which every mailer version takes; several go as `files`."""
     files = [upload(p) for p in paths]
     body = {"token": token, "action": "send", "resend": resend, **(files[0] if len(files) == 1 else {"files": files}),
-            **({"list": to_list} if to_list else {})}
+            **({"list": to_list} if to_list else {}), **({"attention": attention} if attention else {})}
     return call(url, body, f"send {len(files)} file(s)")
 
 
@@ -243,6 +249,12 @@ def distinct(paths: list[str]) -> list[str]:
     return out
 
 
+def clean_note(text: str) -> str:
+    """The attention note as the mailer will show it: plain lines, no blank ones."""
+    lines = [" ".join(ln.split()) for ln in text.replace("\r", "\n").split("\n")]
+    return "\n".join(ln for ln in lines if ln)
+
+
 def main(argv: list[str]) -> int:
     ap = argparse.ArgumentParser(description=__doc__.split("\n")[0])
     ap.add_argument("files", nargs="*", help="the reports to send together (default: the latest set)")
@@ -250,8 +262,18 @@ def main(argv: list[str]) -> int:
     ap.add_argument("--check", action="store_true", help="say what would be sent and to how many; send nothing")
     ap.add_argument("--resend", action="store_true", help="email files that were already sent, again")
     ap.add_argument("--to-list", default="", metavar="NAME", help="send to the mailer's LIST_<NAME> instead of RECIPIENTS")
+    ap.add_argument("--attention", default="", metavar="TEXT", help="flag the email: TEXT opens it and the subject says NEEDS ATTENTION")
+    ap.add_argument("--attention-file", default="", metavar="PATH", help="the same, with the note read from a text file")
     a = ap.parse_args(argv)
     now = time.time()
+    try:
+        attention = clean_note(a.attention + "\n" + (open(a.attention_file, encoding="utf-8").read() if a.attention_file else ""))
+    except OSError as exc:
+        print(f"refused: cannot read the attention note: {exc}")
+        return 2
+    if len(attention) > MAX_ATTENTION:
+        print(f"refused: the attention note is {len(attention)} characters, over {MAX_ATTENTION}; shorten it. Nothing was sent.")
+        return 2
     to_list = a.to_list.strip().lower()
     if to_list and not LIST_NAME.match(to_list):
         print(f"refused: the list name {a.to_list!r} must use only letters, digits and _")
@@ -308,9 +330,15 @@ def main(argv: list[str]) -> int:
             print("mailer: outdated - this Apps Script refuses ZIP files. Paste the new email_report/Code.gs and deploy a "
                   "new version (docs/email_report.md), or send the set without the ZIP. Nothing was sent.")
             return 2
+        if attention and not c.get("attention"):
+            print("mailer: outdated - this Apps Script cannot show an attention note. Paste the new email_report/Code.gs and "
+                  "deploy a new version (docs/email_report.md). Nothing was sent.")
+            return 2
+        if attention:
+            print("attention: " + attention.replace("\n", " / "))
         if a.check:
             return 0
-        r = send(paths, url, token, a.resend, to_list)
+        r = send(paths, url, token, a.resend, to_list, attention)
     except ApiError as exc:
         print(f"error: {exc}")
         return 2

@@ -204,3 +204,32 @@ def test_every_tab_with_a_lead_shows_its_number_so_a_search_finds_it(tmp_path, m
         ws = wb[tab]
         col = [c.value for c in ws[1]].index("Mobile Number")
         assert number in [r[col] for r in ws.iter_rows(min_row=2, values_only=True)], tab
+
+
+def test_under_review_and_late_days_are_marked_and_the_email_gets_a_note(tmp_path, monkeypatch, capsys):
+    import openpyxl
+    from analytics.discovery_audit_module import hold
+    from analytics.followup_audit_module import __main__ as cli
+    pages = {}
+    monkeypatch.setattr(report, "print_pdf", lambda doc, html, pdf: (pages.__setitem__(pdf, doc), open(pdf, "wb").write(b"%PDF-1.4")))
+    moved = [find.pick({**LEAD, "ProspectID": f"lead-00{i}0-batch"}, [stage("2026-11-06 05:07:00", DCD), stage(f"2026-11-13 07:3{i}:00", FU)],
+                       [call("2026-11-06 04:50:00", secs=900)], DAY) for i in range(2)]
+    late = entry(transcript=None)
+    late["lead"] = {**LEAD, "ProspectID": "late-0002-bbbb"}
+    monkeypatch.setattr(cli, "BASE", str(tmp_path))
+    (tmp_path / DAY).mkdir()
+    (tmp_path / DAY / "leads.json").write_text(json.dumps(moved + [late]))
+    cli.main(["hold", DAY, "--reason", "batch move by X", "--moved-between", "13:00-13:00"])   # 07:30 UTC only
+    held = hold.load(str(tmp_path / DAY))
+    assert list(held) == [reading.lead_key(moved[0])]
+    out = report.build(DAY, moved + [late], str(tmp_path / "f"), str(tmp_path / "out"), str(tmp_path / "h.jsonl"),
+                       ddir=str(tmp_path / "d"), held=held, late=hold.late_note(DAY, "2026-11-16"))
+    assert out["under_review"] == 1 and out["attention"].startswith("LATE: this is the audit of 13 Nov, sent on 16 Nov")
+    assert "UNDER REVIEW: 1 lead (batch move by X)" in out["attention"]
+    ws = openpyxl.load_workbook(out["xlsx"])["Moved without a conversation"]
+    head = [c.value for c in ws[1]]
+    rows = [dict(zip(head, r)) for r in ws.iter_rows(min_row=2, values_only=True)]
+    assert sorted(r["Review status"] for r in rows) == ["Final", "UNDER REVIEW: batch move by X"]
+    assert [r["What to do"] for r in rows if r["Review status"] != "Final"] == [hold.DONT_ACT]
+    doc = pages[out["summary_pdf"]]
+    assert "class=rev" in doc and "UNDER REVIEW (don&#39;t act yet)" in doc and "1 more moved without a conversation" in doc
