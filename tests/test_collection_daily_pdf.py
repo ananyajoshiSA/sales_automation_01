@@ -98,3 +98,14 @@ def test_management_reached_payment_never_counts_cold():
     assert reached_payment({"status": "counsel", "payment": "Bajaj loan, docs on Friday"})
     assert not reached_payment({"status": "connected", "payment": "undecided"})
     assert not reached_payment({"status": "cold", "payment": "Bajaj loan"})
+
+
+def test_management_leads_dialled_counts_each_lead_once():
+    from analytics.collection_daily.management import leads_dialled
+    t = lambda d, h: datetime(2026, 11, d, h, tzinfo=IST)
+    call = lambda by, when, out=True: {"by": by, "t": when, "out": out}
+    leads = [{"calls": [call("Asha", t(24, 10)), call("Asha", t(24, 12)), call("Asha", t(24, 15))]},
+             {"calls": [call("Asha", t(23, 10)), call("Ravi", t(24, 11))]},
+             {"calls": [call("Asha", t(24, 9), out=False)]},
+             {"calls": [call("Asha", t(24, 18))]}]
+    assert leads_dialled(leads, "Asha", date(2026, 11, 24)) == 2

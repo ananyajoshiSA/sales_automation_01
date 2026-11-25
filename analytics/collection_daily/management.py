@@ -54,6 +54,11 @@ def untouched(leads: list[dict], rows: list[tuple], day: date) -> int:
                and (not l["last_dial"] or l["last_dial"].astimezone(IST).date() < since))
 
 
+def leads_dialled(leads: list[dict], caller: str, day: date) -> int:
+    """Unique collection leads the caller dialled on ``day`` (from the same leads the dials are counted on)."""
+    return sum(1 for l in leads if any(c["out"] and c["by"] == caller and review.on(c["t"], day) for c in l["calls"]))
+
+
 def reached_payment(j: dict) -> bool:
     return j["status"] == "hot" or (j["status"] in ("counsel", "connected") and route(j.get("payment")) != "Not decided")
 
@@ -212,11 +217,11 @@ class Management:
                 if rn is not None and ro is not None and rn <= ro - 10:
                     flags.append(f"recovery {ro}% Oct → {rn}% on older Nov bootcamps")
                 if flags:
-                    rows.append([e(c), e(tl), f"{s['dials']} / {s['real']}", "; ".join(flags)])
+                    rows.append([e(c), e(tl), f"{s['dials']} / {leads_dialled(t.leads, c, self.yday)} / {s['real']}", "; ".join(flags)])
         return ("<h2>4 · Callers to look at</h2>"
-                + (table([("Caller", "18%"), ("TL", "16%"), (f"Dials / real talks {self.yday:%a}", "13%"), ("Why", "53%")], rows)
+                + (table([("Caller", "17%"), ("TL", "14%"), (f"Dials / leads dialled / real talks {self.yday:%a}", "17%"), ("Why", "52%")], rows)
                    if rows else "<p>No caller is below the thresholds.</p>")
-                + '<p class="muted">Thresholds: under 20 collection dials, 48-hour score under 80%, 4+ untouched leads, answer rate under 30%, '
+                + '<p class="muted">Leads dialled = different collection leads the caller dialled. Thresholds: under 20 collection dials, 48-hour score under 80%, 4+ untouched leads, answer rate under 30%, '
                   'recovery on older November bootcamps 10+ points below October.</p>')
 
     def compliance_box(self) -> str:
