@@ -1,10 +1,12 @@
-"""Two-page management report for a collection team's head and AD (Puja Malik and Anmol Gakhar for Anmol's team,
-asked 25 Nov 2026): no lead lists, only the data points where they need to act. Five action points, where the month
-stands (leads and rupees), what worked and what did not since the previous day's pool sheet, a scorecard per TL,
-money waiting on a decision, open money by bootcamp and caller, callers to look at, compliance, records to fix and
-patterns for sales. The money views follow Puja's own daily analysis (8 Oct 2026), this month's bootcamps only.
-Built from the same run as the daily PDFs (facts, grades, the pool sheet) plus two earlier downloads of the pool
-sheet: the previous day's (cash collected since) and a week-old one (the week's movement).
+"""Management report for a collection team's head and AD (Puja Malik and Anmol Gakhar for Anmol's team, asked
+25 Nov 2026): no lead lists, only the data points where they need to act, in plain words, at most three pages.
+Page 1: what to do today (five points from fixed rules), this month so far, and what worked and what did not since
+yesterday morning's pool sheet. Page 2: each team leader's team against its aims, money waiting on a decision, and
+money still to collect by bootcamp. Page 3: callers who need attention, compliance, records to fix, and what leads
+are telling us. The money views follow Puja's own daily analysis (8 Oct 2026), this month's bootcamps only.
+
+Every number shared with this morning's team leader reports is checked against them before the PDF is written
+(``checks.py``); a difference stops the build.
 
     python -m analytics.collection_daily.management <run_dir> <day YYYY-MM-DD> <previous-day pool.xlsx> <week-ago pool.xlsx> <out_dir> [--side "Puja / Anmol"] [--compliance file.json]
 """
@@ -30,12 +32,12 @@ from integrations.timeutil import IST
 SETTLED_DAYS = 21  # a bootcamp this old has had most of its collection time: fair to set against October's final figure
 HEADS = {"Puja / Anmol": "Puja Malik and Anmol Gakhar", "Mayur": "Mayur and the ADs"}
 MGMT_CSS = """
-body { font-size:8.6px; } h2 { font-size:11px; margin:6px 0 3px; } table { font-size:7.8px; margin:1px 0 4px; }
-.tiles6 .tile b { font-size:15px; } .band { padding:9px 14px; margin-bottom:6px; } .band h1 { font-size:16px; }
-.red, .amber, .green { padding:3px 8px; margin:2px 0; } td.flag { color:#a3390b; font-weight:bold; }
-.tiles5 { display:grid; grid-template-columns: repeat(5,1fr); gap:5px; margin:4px 0 6px; } .tiles5 .tile b { font-size:13px; }
-.tiles5 .tile span { font-size:7.4px; } .two { display:grid; grid-template-columns: 1fr 1fr; gap:8px; }
-ol.acts { margin:2px 0 4px 16px; padding:0; } ol.acts li { margin:2px 0; }
+body { font-size:10px; line-height:1.45; } h2 { font-size:13px; margin:14px 0 6px; } h3 { font-size:10.5px; margin:4px 0; }
+table { font-size:9px; margin:2px 0 6px; } td, th { padding:4px 6px; } .band { padding:12px 16px; margin-bottom:8px; }
+.band h1 { font-size:18px; } .tiles6 .tile b { font-size:13px; } .tiles6 .tile span { font-size:8.6px; }
+.two { display:grid; grid-template-columns: 1fr 1fr; gap:12px; } ol.acts { margin:4px 0 6px 18px; padding:0; } ol.acts li { margin:5px 0; }
+ul.notes { margin:2px 0 4px 16px; padding:0; color:#52514e; font-size:8.6px; } ul.notes li { margin:1px 0; }
+.amber { padding:5px 9px; margin:4px 0; }
 """
 RECOVERED = ("disbursed", "one shot", "installments")  # the MIS counts these as recovered (checked 25 Nov: 228 = 145 + 39 + 44)
 OPEN = "booking fees received"
@@ -134,7 +136,16 @@ class Management:
         self.in_prev = {(r["phone"], r["bootcamp_raw"]) for r in prev}
         read = lambda f: datetime.fromtimestamp(os.path.getmtime(f), IST)
         self.pool_read, self.prev_read = read(pool), read(prev_pool)
-        self.since = f"{self.prev_read:%a}'s sheet"
+        self.window = (f"yesterday {self.prev_read:%H:%M}" if self.prev_read.date() == day - timedelta(days=1)
+                       else f"{self.prev_read:%a %d %b %H:%M}")
+        # sheet problems are shown at the top of the report, not worked around quietly
+        odd = lambda rows: sum(1 for r in rows if r["month"] and (r["month"] == "unknown" or r["month"] > f"{day.year + 1}"))
+        self.data_notes = []
+        for rows, when in ((sheet_rows(pool, None, side), self.pool_read), (prev, self.prev_read)):
+            if k := odd(rows):
+                self.data_notes.append(f"The pool sheet downloaded {when:%a %d %b %H:%M} has {k} rows with an impossible date (a year after "
+                                       f"{day.year + 1}, or none). They were matched to their leads by phone number and bootcamp"
+                                       + (", and the sheet should be corrected." if when == self.pool_read else "; today's download is correct."))
         self.compliance = [c for c in compliance if c.get("side") == side]
         args = (leads, self.rows, {"day": "", "leads": {}}, self.cut, day, load_feedback(run_dir),
                 (self.as_of, mis), self.students, {"transcripts": "", "pool_read": "", "prev_cut": ""})
@@ -203,19 +214,56 @@ class Management:
                 g["week"][d] += bal(l)
         return g
 
-    # -- page 1 -----------------------------------------------------------------------------------------------------
-    def headline(self) -> str:
+    # -- numbers shared by the pages and the checks -----------------------------------------------------------------
+    def tl_numbers(self, t: TeamPDF) -> dict:
+        ls = t.leads
+        past = [l for l in ls if self.cut > l["deadline"]]
+        st = Counter()
+        for c in t.callers:
+            st.update(t.stats.get(c, Counter()))
+        talked = [j for l, j, _ in t.rows if l["real_talks"]]
+        g = self.money_groups(t)
+        _, _, _, paid = t.today_groups()
+        return {"open": len(t.rows), "enrolled": st["enrolled"], "met48": sum(l["met48"] for l in past), "past48": len(past),
+                "dials": st["dials"], "real": st["real"], "fu_kept": st["fu_kept"], "fu_due": st["fu_due"],
+                "in_unreturned": st["in_unreturned"], "in_missed": st["in_missed"],
+                "saved": sum(1 for l in ls for f in l["follow_ups"] if f["set_at"].astimezone(IST).date() == self.yday),
+                "untouched": self.untouched(ls), "talked": len(talked), "agreed": sum(map(reached_payment, talked)),
+                "rec_old": recovery(self.cw_settled, t.callers), "rec_oct": recovery(self.cw_oct, t.callers),
+                "due_n": len(g["due"]), "due_rs": sum(g["due"]), "paid": len(paid),
+                "callers": {c: (t.stats.get(c, Counter())["dials"], t.stats.get(c, Counter())["real"]) for c in t.callers}}
+
+    def sheet_totals(self) -> dict:
         sh = self.sheet
-        price, got = sum(r["price"] or 0 for r in sh), sum(r["received"] or 0 for r in sh)
-        rec = sum(1 for r in sh if (r["status"] or "").lower() in RECOVERED)
-        op = [r for r in sh if (r["status"] or "").lower() == OPEN]
-        inst = [r for r in sh if (r["status"] or "").lower() == "installments" and (r["balance"] or 0) > 0]
-        drop = [r for r in sh if (r["status"] or "").lower() == "drop"]
-        cash = sum(a for *_, a in self.moves)
-        return (f'<div class="green"><b>{self.day:%B} pool {lakh(price)} · collected {lakh(got)} ({pct(got, price)}% by rupees; '
-                f'{rec} of {len(sh)} leads recovered, {pct(rec, len(sh))}% by leads) · open {lakh(sum(r["balance"] or 0 for r in op))} across '
-                f'{len(op)} leads, plus {lakh(sum(r["balance"] or 0 for r in inst))} still due on {len(inst)} instalment plans · written off '
-                f'{lakh(sum(r["balance"] or 0 for r in drop))} ({len(drop)} drops) · cash since {e(self.since)}: {"+" if cash >= 0 else ""}{lakh(cash)}.</b></div>')
+        st = lambda r: (r["status"] or "").lower()
+        return {"n": len(sh), "price": sum(r["price"] or 0 for r in sh), "got": sum(r["received"] or 0 for r in sh),
+                "rec": sum(1 for r in sh if st(r) in RECOVERED), "open": sum(1 for r in sh if st(r) == OPEN),
+                "open_rs": sum(r["balance"] or 0 for r in sh if st(r) == OPEN),
+                "inst": sum(1 for r in sh if st(r) == "installments" and (r["balance"] or 0) > 0),
+                "inst_rs": sum(r["balance"] or 0 for r in sh if st(r) == "installments"),
+                "drop": sum(1 for r in sh if st(r) == "drop"), "drop_rs": sum(r["balance"] or 0 for r in sh if st(r) == "drop")}
+
+    # -- page 1 -----------------------------------------------------------------------------------------------------
+    def glance(self) -> str:
+        s = self.sheet_totals()
+        end = (self.day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
+        days_left = (end - self.day).days + 1
+        need = max(0, math.ceil(TARGET * s["n"] / 100) - s["rec"])
+        names = {r["name"] for r in self.week}
+        now = [r for r in self.mis if r["name"] in names]
+        wk = pct(sum(r["recovered"] for r in self.week), sum(r["all_teams"] for r in self.week))
+        nw = pct(sum(r["recovered"] for r in now), sum(r["all_teams"] for r in now))
+        com = [l for l in self.leads if l.get("community")]
+        tiles = [(f"{s['rec']} of {s['n']} leads recovered ({pct(s['rec'], s['n'])}%)",
+                  f"Target {TARGET}%. A week ago, the same bootcamps were at {wk}%; now they are at {nw}%."),
+                 (f"{need} more leads to recover", f"to reach {TARGET}% by {end:%a %d %b}: about {math.ceil(need / days_left)} a day for {days_left} days."),
+                 (f"{lakh(s['got'])} collected", f"out of {lakh(s['price'])} for this month's bootcamps ({pct(s['got'], s['price'])}%)."),
+                 (f"{lakh(s['open_rs'])} still to collect", f"from {s['open']} leads who have paid only the booking fee. Another "
+                  f"{lakh(s['inst_rs'])} is due on {s['inst']} instalment plans."),
+                 (f"{s['drop']} leads dropped", f"{lakh(s['drop_rs'])} lost this month."),
+                 (f"{sum(l['enrolled'] for l in com)} of {len(com)} community leads enrolled", "November community bookings (not in the pool sheet).")]
+        return ("<h2>This month so far</h2>" + '<div class="tiles6">'
+                + "".join(f'<div class="tile"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in tiles) + "</div>")
 
     def actions(self) -> str:
         """Five action points for the head of the team, each from a fixed rule over this report's own numbers."""
@@ -227,30 +275,32 @@ class Management:
         zero = sorted((o for o, v in cash.items() if v <= 0 and held[o] > 0), key=lambda o: -held[o])
         out = []
         if zero:
-            out.append(f"<b>Ask the {len(zero)} callers who brought in no money since {e(self.since)} what they collect today</b>, biggest open "
-                       "book first: " + ", ".join(f"{e(first(o))} ({lakh(held[o])})" for o in zero) + ".")
+            out.append(f"<b>Speak to the {len(zero)} callers who have had no payment since {e(self.window)}.</b> Ask each one what they "
+                       "will collect today. Start with those who have the most money still to collect: "
+                       + ", ".join(f"{e(first(o))} ({lakh(held[o])})" for o in zero) + ".")
         due = {tl: self.money_groups(t) for tl, t in self.by_tl.items()}
         n, rs = sum(len(g["due"]) for g in due.values()), sum(sum(g["due"]) for g in due.values())
         if n:
-            out.append(f"<b>{n} leads ({lakh(rs)}) promised payment by today or are overdue</b>: ask each TL at 12:00 how many paid: "
-                       + ", ".join(f"{e(tl)} {len(g['due'])} ({lakh(sum(g['due']))})" for tl, g in sorted(due.items(), key=lambda x: -sum(x[1]["due"]))) + ".")
+            out.append(f"<b>{n} leads ({lakh(rs)}) promised to pay by today, or are late.</b> At 12:00, ask each team leader how many have paid: "
+                       + ", ".join(f"{e(tl)} {len(g['due'])} leads ({lakh(sum(g['due']))})" for tl, g in sorted(due.items(), key=lambda x: -sum(x[1]["due"])))
+                       + ".")
         rf = sum(len(g["refund"]) for g in due.values())
         if rf:
-            out.append(f"<b>Decide the {rf} refund or cancel asks ({lakh(sum(sum(g['refund']) for g in due.values()))}) today</b>: keep the seat "
-                       "with instalments or a later batch, or let them go. The TLs have the names on page 1 of their PDFs.")
+            out.append(f"<b>{rf} leads ({lakh(sum(sum(g['refund']) for g in due.values()))}) asked for a refund or to cancel.</b> Decide today: "
+                       "keep them with instalments or a later batch, or let them go. Their names are on page 1 of each team leader's report.")
         stuck = [b for b in self.judged() if b["cash"] <= 0 and b["open"]]
         if stuck:
             b = stuck[0]
             top = sorted(b["holders"].items(), key=lambda h: -h[1][1])[:3]
-            out.append(f"<b>Push {e(b['name'])}</b>: {b['open']} leads and {lakh(b['open_rs'])} open, {pct(b['rec'], b['n'])}% recovered, no money "
-                       f"since {e(self.since)}. Most of it is with " + ", ".join(f"{e(first(o))} ({h[0]} leads, {lakh(h[1])})" for o, h in top) + ".")
+            out.append(f"<b>{e(b['name'])}: {b['open']} leads still owe {lakh(b['open_rs'])}, and no payment has come in since {e(self.window)}.</b> "
+                       "Most of this money is with " + ", ".join(f"{e(first(o))} ({h[0]} leads, {lakh(h[1])})" for o, h in top) + ".")
         fresh = [l for l in self.leads if l["allocated"].astimezone(IST).date() == self.yday
                  and not any(c["out"] and c["t"] >= l["allocated"] for c in l["calls"])]
         if fresh:
             per = Counter(l["tl"] for l in fresh)
-            out.append(f"<b>{len(fresh)} leads given on {self.yday:%a} were not dialled by {self.cut.astimezone(IST):%H:%M}</b>: get them dialled by "
-                       "11:00 (" + ", ".join(f"{e(tl)}'s team {k}" for tl, k in per.most_common()) + ").")
-        return "<h2>1 · Your action points for today</h2><ol class=\"acts\">" + "".join(f"<li>{x}</li>" for x in out[:5]) + "</ol>"
+            out.append(f"<b>{len(fresh)} leads given to callers on {self.yday:%A} had not been called by {self.cut.astimezone(IST):%H:%M} today</b> ("
+                       + ", ".join(f"{k} in {e(tl)}'s team" for tl, k in per.most_common()) + "). Get them called by 11:00.")
+        return '<h2>What to do today</h2><ol class="acts">' + "".join(f"<li>{x}</li>" for x in out[:5]) + "</ol>"
 
     def worked(self) -> str:
         cash = self.cash_by_caller()
@@ -258,81 +308,58 @@ class Management:
         best = [(o, v) for o, v in cash.most_common() if v > 0]
         camps = sorted(self.camps(), key=lambda b: -b["cash"])
         enrolled = Counter(l["caller"] for l in self.leads if review.on(l.get("enrolled_at"), self.yday))
-        good = [("Cash collected", f"{'+' if total >= 0 else ''}{lakh(total)} since {self.since} ({self.prev_read:%a %H:%M})"),
-                ("Best collectors", " · ".join(f"{e(first(o))} +{lakh(v)}" for o, v in best[:4]) or "none"),
-                ("Fastest-paying bootcamp", f"{e(camps[0]['name'])} +{lakh(camps[0]['cash'])}" if camps and camps[0]["cash"] > 0 else "none"),
-                (f"Enrolled on {self.yday:%a} (LeadSquared)", f"{sum(enrolled.values())}: " + " · ".join(f"{e(first(c))} {k}" for c, k in enrolled.most_common())
-                 if enrolled else "0")]
-        zero = [o for o, v in cash.items() if v <= 0]
+        good = [("Money received", f"{lakh(total)} since {e(self.window)}"),
+                ("Brought in the most", ", ".join(f"{e(first(o))} {lakh(v)}" for o, v in best[:4]) or "No one"),
+                ("Bootcamp that paid the most", f"{e(camps[0]['name'])}: {lakh(camps[0]['cash'])}" if camps and camps[0]["cash"] > 0 else "None"),
+                (f"Enrolled on {self.yday:%A}", f"{sum(enrolled.values())} leads: " + ", ".join(f"{e(first(c))} {k}" for c, k in enrolled.most_common())
+                 if enrolled else "None")]
+        zero = sorted(o for o, v in cash.items() if v <= 0)
         stuck = [b for b in self.judged() if b["cash"] <= 0 and b["open"]]
         low = [b for b in self.judged() if b["open"]]
         low = min(low, key=lambda b: (b["rec"] / b["n"], -b["open_rs"])) if low else None
-        bad = [(f"{len(zero)} of {len(cash)} callers collected ₹0", " · ".join(e(first(o)) for o in sorted(zero)) or "none"),
-               ("Lowest recovery (held 7+ days ago)", f"{e(low['name'])}: {pct(low['rec'], low['n'])}% recovered, {low['open']} open, {lakh(low['open_rs'])}" if low else "—"),
-               ("Bootcamps with no cash", " · ".join(f"{e(b['name'])} ({lakh(b['open_rs'])} open)" for b in stuck[:3]) or "none")]
-        tb = lambda rows: table([("What", "34%"), ("Number", "66%")], [[f"<b>{e(a)}</b>", b] for a, b in rows])
-        return ('<h2>3 · Since yesterday</h2><div class="two"><div><b class="ok">What worked</b>' + tb(good) + '</div><div><b class="bad">What did not</b>'
-                + tb(bad) + "</div></div>"
-                + f'<p class="muted">Cash = rise in "money received" between the pool sheet downloaded {self.prev_read:%a %d %b %H:%M} and '
-                  f'{self.pool_read:%a %d %b %H:%M} IST, on this month\'s bootcamp leads already in the earlier sheet: when finance updated the sheet, '
-                  'not always the day the lead paid. New leads\' booking fees are not counted.</p>')
+        bad = [("No payment received", f"{len(zero)} of {len(cash)} callers: " + ", ".join(e(first(o)) for o in zero) if zero else "Every caller had a payment"),
+               ("Lowest recovery", f"{e(low['name'])}: {pct(low['rec'], low['n'])}% of leads recovered; {low['open']} leads still owe {lakh(low['open_rs'])}"
+                if low else "—"),
+               ("Bootcamps with no payment", "<br>".join(f"{e(b['name'])}: {lakh(b['open_rs'])} still to collect" for b in stuck[:3]) or "None")]
+        tb = lambda rows: ('<table>' + "".join(f'<tr><td style="width:36%"><b>{e(a)}</b></td><td>{b}</td></tr>' for a, b in rows) + "</table>")
+        return ('<h2>Since yesterday morning</h2><div class="two"><div><h3 class="ok">What worked</h3>' + tb(good)
+                + '</div><div><h3 class="bad">What did not work</h3>' + tb(bad) + "</div></div>"
+                + f'<p class="muted">Money received means payments entered in the pool sheet between {self.prev_read:%a %d %b %H:%M} and '
+                  f'{self.pool_read:%a %d %b %H:%M} IST, the two morning downloads. Finance enters them, so a payment made but not yet entered '
+                  'is not counted. Booking fees of new leads are not counted. Enrolments are from LeadSquared. Bootcamps held in the last 7 days '
+                  'are left out of "lowest recovery" and "no payment".</p>')
 
-    def month(self) -> str:
-        n, rec = sum(r["all_teams"] for r in self.mis), sum(r["recovered"] for r in self.mis)
-        drop = sum(r["dropped"] for r in self.mis)
-        end = (self.day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
-        days_left = (end - self.day).days + 1
-        need = max(0, math.ceil(TARGET * n / 100) - rec)
-        names = {r["name"] for r in self.week}
-        same_now = [r for r in self.mis if r["name"] in names]
-        wk_n, wk_rec = sum(r["all_teams"] for r in self.week), sum(r["recovered"] for r in self.week)
-        sn_n, sn_rec = sum(r["all_teams"] for r in same_now), sum(r["recovered"] for r in same_now)
-        callers = {l["caller"] for l in self.leads}
-        oct_ = [r for r in self.cw_oct if any(same_person(r["caller"], c) for c in callers)]
-        o_n, o_rec = sum(r["all_teams"] for r in oct_), sum(r["recovered"] for r in oct_)
-        com = [l for l in self.leads if l.get("community")]
-        tiles = [(f"{rec} of {n} ({pct(rec, n)}%)", f"leads recovered this month · target {TARGET}% · pool sheet MIS of {self.as_of}"),
-                 (f"{need} more", f"recoveries needed for {TARGET}% by {end:%a %d %b}: about {math.ceil(need / days_left)} a day for {days_left} days"),
-                 (f"{pct(sn_rec, sn_n)}% vs {pct(wk_rec, wk_n)}%",
-                  f"recovered on the bootcamps that were in the MIS a week ago: now vs then (MIS of {self.week_as_of}: {wk_rec} of {wk_n})"),
-                 (f"{drop} dropped", f"this month ({pct(drop, n)}% of leads) · bootcamps of 24 and 31 Oct at {recovery(self.cw_settled, callers)}% "
-                  f"recovered; October finished at {pct(o_rec, o_n)}%"),
-                 (f"{sum(l['enrolled'] for l in com)} of {len(com)}", "community leads (November bookings) enrolled · not in the pool MIS")]
-        return ("<h2>2 · Where the month stands</h2>" + '<div class="tiles5">'
-                + "".join(f'<div class="tile"><b>{e(a)}</b><span>{e(b)}</span></div>' for a, b in tiles) + "</div>")
-
+    # -- page 2 -----------------------------------------------------------------------------------------------------
     def scorecard(self) -> str:
-        rows = []
-        for tl, t in self.by_tl.items():
-            ls = t.leads
-            past = [l for l in ls if self.cut > l["deadline"]]
-            s48 = pct(sum(l["met48"] for l in past), len(past)) if past else None
-            st = Counter()
-            for c in t.callers:
-                st.update(t.stats.get(c, Counter()))
-            op_rows = t.rows
-            talked = [j for l, j, _ in op_rows if l["real_talks"]]
-            reached_pay = sum(map(reached_payment, talked))
-            saved = sum(1 for l in ls for f in l["follow_ups"] if f["set_at"].astimezone(IST).date() == self.yday)
-            unt = self.untouched(ls)
-            rn, ro = recovery(self.cw_settled, t.callers), recovery(self.cw_oct, t.callers)
-            rows.append([f"<b>{e(tl)}</b>", str(len(op_rows)), str(st["enrolled"]),
-                         red(f"{s48}%" if s48 is not None else "—", s48 is not None and s48 < 90),
-                         red(str(unt), unt >= 5), red(f'{st["in_unreturned"]} of {st["in_missed"]}', st["in_unreturned"] > 0),
-                         red(f'{saved} saved · {st["fu_kept"]}/{st["fu_due"]} kept', saved < max(1, st["real"] // 2)),
-                         red(f"{pct(reached_pay, len(talked))}%", pct(reached_pay, len(talked)) < 60),
-                         red(f"{rn}%" if rn is not None else "—", rn is not None and ro is not None and rn < ro - 5),
-                         f"{ro}%" if ro is not None else "—"])
-        return ("<h2>4 · Team leaders: where each is off track</h2>"
-                + table([("TL", "13%"), ("Open leads", "7%"), (f"Enrolled {self.yday:%a}", "8%"), ("48-hour score (90%)", "9%"),
-                         ("Untouched 3+ days", "9%"), (f"Missed calls not called back ({self.yday:%a})", "11%"),
-                         (f"Call-backs ({self.yday:%a})", "14%"), ("Talks that reached payment", "10%"), ("Recovery, older Nov bootcamps", "9%"),
-                         ("October final", "10%")], rows, {i: "n" for i in range(1, 10)})
-                + f'<p class="muted">Red = below target, or recovery 5+ points under October. "Talks that reached payment" = of the open leads with a '
-                  'real talk, those Hot, or To be counselled / Talked with a payment route agreed (loan, card, UPI); a cold lead never counts. '
-                  '"Untouched 3+ days": open leads, given 3+ days ago, not cold or waiting, with no dial on any of the last 3 days. Call-backs: times saved in LeadSquared after a talk; '
-                  f'most callers save none. Recovery compares like with like: November bootcamps held {SETTLED_DAYS}+ days ago (24 and 31 Oct) '
-                  'against October\'s final figure, from the caller-wise MIS; the newer bootcamps are still being collected.</p>')
+        n = {tl: self.tl_numbers(t) for tl, t in self.by_tl.items()}
+        tls = list(n)
+        yd = self.yday.strftime("%A")
+
+        def row(label, aim, cell):
+            return [label] + [cell(n[tl]) for tl in tls] + [aim]
+        rows = [row("Open leads to work today", "", lambda x: str(x["open"])),
+                row(f"Enrolled on {yd}", "", lambda x: str(x["enrolled"])),
+                row("New leads who had a real talk within 48 hours", "90% or more",
+                    lambda x: red(f"{pct(x['met48'], x['past48'])}%", pct(x["met48"], x["past48"]) < 90) + f" <span class=muted>({x['met48']} of {x['past48']})</span>"),
+                row("Leads not called for 3 days or more", "none", lambda x: red(str(x["untouched"]), x["untouched"] > 0)),
+                row(f"Leads who called us on {yd} and were not called back", "none",
+                    lambda x: red(f"{x['in_unreturned']} of {x['in_missed']}", x["in_unreturned"] > 0)),
+                row(f"Call-back times saved after a talk on {yd}", "", lambda x: f"{x['saved']} <span class=muted>(after {x['real']} real talks)</span>"),
+                row(f"Call-backs due on {yd} that were made on time", "all", lambda x: red(f"{x['fu_kept']} of {x['fu_due']}", x["fu_kept"] < x["fu_due"])),
+                row("Leads who talked and agreed how they will pay", "",
+                    lambda x: f"{pct(x['agreed'], x['talked'])}% <span class=muted>({x['agreed']} of {x['talked']})</span>"),
+                row("Recovery on the bootcamps of 24 and 31 Oct", "October or better",
+                    lambda x: red(f"{x['rec_old']}%" if x["rec_old"] is not None else "—",
+                                  x["rec_old"] is not None and x["rec_oct"] is not None and x["rec_old"] < x["rec_oct"] - 5)),
+                row("Recovery in October, same callers (final)", "", lambda x: f"{x['rec_oct']}%" if x["rec_oct"] is not None else "—")]
+        return ("<h2>How each team leader's team is doing</h2>"
+                + table([("", "34%")] + [(f"{e(tl)}", "16%") for tl in tls] + [("Aim", "18%")], rows, {i: "n" for i in range(1, len(tls) + 1)})
+                + '<ul class="notes"><li>Red means the team is short of the aim.</li>'
+                  '<li>A real talk is an answered call of 2 minutes or more.</li>'
+                  '<li>"Not called for 3 days or more" counts open leads, given at least 3 days ago, that are not cold or waiting for a later date.</li>'
+                  '<li>"Agreed how they will pay" counts leads who talked and are Hot, or have chosen a loan, card or UPI. A cold lead never counts.</li>'
+                  f'<li>Recovery uses the bootcamps held at least {SETTLED_DAYS // 7} weeks ago, so it can be compared with October\'s final figure. '
+                  'Newer bootcamps are still being collected. Red means 5 or more points below October.</li></ul>')
 
     def money(self) -> str:
         rows, tot = [], {"due": [], "refund": [], "loan": [], "week": Counter()}
@@ -341,34 +368,38 @@ class Management:
             for k in ("due", "refund", "loan"):
                 tot[k] += g[k]
             tot["week"].update(g["week"])
-            rows.append([f"<b>{e(tl)}</b>"] + [f"{len(g[k])} · {lakh(sum(g[k]))}" for k in ("due", "refund", "loan")]
+            rows.append([f"<b>{e(tl)}</b>"] + [f"{len(g[k])} leads · {lakh(sum(g[k]))}" for k in ("due", "refund", "loan")]
                         + [lakh(sum(g["week"].values()))])
-        rows.append(["<b>Team</b>"] + [f"<b>{len(tot[k])} · {lakh(sum(tot[k]))}</b>" for k in ("due", "refund", "loan")]
+        rows.append(["<b>Whole team</b>"] + [f"<b>{len(tot[k])} leads · {lakh(sum(tot[k]))}</b>" for k in ("due", "refund", "loan")]
                     + [f"<b>{lakh(sum(tot['week'].values()))}</b>"])
-        week = " · ".join(f"{d:%a %d}: {lakh(v)}" for d, v in sorted(tot["week"].items()))
-        return ("<h2>5 · Money waiting on a decision (number of leads · balance)</h2>"
-                + table([("TL", "16%"), ("Due today or overdue", "21%"), ("Refund or cancel asked: your call", "23%"),
-                         ("Loans stuck (date passed or none)", "21%"), ("Promised rest of week", "19%")], rows)
-                + f'<p class="muted">Promised by day: {e(week) or "none"}. A loan lead past its date is in both the first and third columns. Balances from the pool sheet (bootcamp) and the community sheet; '
-                  'payment dates as each lead gave them.</p>')
+        week = ", ".join(f"{lakh(v)} on {d:%A}" for d, v in sorted(tot["week"].items()))
+        return ("<h2>Money waiting on a decision</h2>"
+                + table([("Team leader", "16%"), ("Promised to pay by today, or late", "22%"), ("Asked for a refund or to cancel: you decide", "22%"),
+                         ("Loan not done, and the date has passed or was never given", "22%"), ("Promised later this week", "18%")], rows)
+                + '<ul class="notes">'
+                + (f"<li>Promised later this week: {e(week)}.</li>" if week else "")
+                + "<li>A loan lead whose date has passed is counted in both the first and the third column.</li>"
+                  "<li>The first two columns are the same leads as page 1 of each team leader's report. Amounts are what each lead still owes.</li></ul>")
 
-    # -- page 2 -----------------------------------------------------------------------------------------------------
     def bootcamps(self) -> str:
         rows, week = [], (self.day - timedelta(days=7)).isoformat()
         for b in sorted(self.camps(), key=lambda b: b["day"]):
             top = sorted(b["holders"].items(), key=lambda h: -h[1][1])[:3]
+            new = 2 * b["tracked"] < b["n"]
             rows.append([f"<b>{e(b['name'])}</b>", str(b["n"]), red(f"{pct(b['rec'], b['n'])}%", pct(b["rec"], b["n"]) < 50 and b["day"] <= week),
-                         str(b["open"]), lakh(b["open_rs"]),
-                         (red(lakh(b["cash"]), b["cash"] <= 0 and b["open"] > 0) if 2 * b["tracked"] >= b["n"] else "new in the sheet"),
-                         " · ".join(f"{e(first(o))} ({h[0]}, {lakh(h[1])})" for o, h in top) or "—"])
-        return (f"<h2>6 · Open money by bootcamp and caller ({self.day:%B})</h2>"
-                + table([("Bootcamp", "22%"), ("Leads", "6%"), ("Recovered", "8%"), ("Open leads", "7%"), ("Open ₹", "9%"),
-                         (f"Cash since {self.since}", "10%"), ("Most open money with (leads, ₹)", "38%")], rows, {i: "n" for i in range(1, 6)})
-                + '<p class="muted">From the pool sheet\'s Mastersheet: open = booking fee paid, rest not yet; recovered = loan disbursed, one shot '
-                  'or on instalments, as the MIS counts it. Red = under 50% recovered (bootcamps held 7+ days ago), or open money with no cash since the previous sheet.</p>')
+                         f"{b['open']} · {lakh(b['open_rs'])}", "new" if new else red(lakh(b["cash"]), b["cash"] <= 0 and b["open"] > 0),
+                         ", ".join(f"{e(first(o))} {h[0]} ({lakh(h[1])})" for o, h in top) or "—"])
+        return (f"<h2>Money still to collect, by bootcamp</h2>"
+                + table([("Bootcamp", "25%"), ("Leads", "7%"), ("Recovered", "9%"), ("Still to collect (leads · ₹)", "15%"),
+                         (f"Received since {e(self.window)}", "12%"), ("Callers with the most to collect: leads (₹)", "32%")], rows, {i: "n" for i in range(1, 5)})
+                + '<ul class="notes"><li>"Still to collect" counts leads who have paid only the booking fee. "Recovered" counts leads whose loan was '
+                  'disbursed, who paid in one go, or who are on instalments, as in the pool sheet MIS.</li>'
+                  '<li>Red means under 50% recovered (for bootcamps held a week ago or more), or no payment since yesterday morning.</li></ul>')
 
+    # -- page 3 -----------------------------------------------------------------------------------------------------
     def callers(self) -> str:
         rows, cash = [], self.cash_by_caller()
+        yd = self.yday.strftime("%A")
         for tl, t in self.by_tl.items():
             for c in t.callers:
                 s = t.stats.get(c, Counter())
@@ -378,38 +409,37 @@ class Management:
                 unt = self.untouched(mine)
                 ans = pct(s["answered"], s["dials"]) if s["dials"] else None
                 rn, ro = recovery(self.cw_settled, [c]), recovery(self.cw_oct, [c])
-                flags = []
+                why = []
                 if s["dials"] < 20:
-                    flags.append(f"{s['dials']} collection dials {self.yday:%a}")
+                    why.append(f"Made {s['dials']} calls on {yd}, fewer than 20.")
                 if s48 is not None and s48 < 80:
-                    flags.append(f"48-hour score {s48}%")
+                    why.append(f"Had a real talk with only {s48}% of new leads within 48 hours.")
                 if unt >= 4:
-                    flags.append(f"{unt} leads untouched 3+ days")
+                    why.append(f"{unt} leads not called for 3 days or more.")
                 if ans is not None and s["dials"] >= 20 and ans < 30:
-                    flags.append(f"answer rate {ans}%")
+                    why.append(f"Only {ans}% of calls were answered.")
                 if rn is not None and ro is not None and rn <= ro - 10:
-                    flags.append(f"recovery {ro}% Oct → {rn}% on older Nov bootcamps")
-                if flags:
+                    why.append(f"Recovery on the 24 and 31 Oct bootcamps is {rn}%, against {ro}% in October.")
+                if why:
                     got = sum(v for o, v in cash.items() if same_person(o, c))
-                    rows.append([e(c), e(tl), f"{s['dials']} / {leads_dialled(t.leads, c, self.yday)} / {s['real']}", red(lakh(got), got <= 0),
-                                 "; ".join(flags)])
-        return ("<h2>7 · Callers to look at</h2>"
-                + (table([("Caller", "16%"), ("TL", "13%"), (f"Dials / leads dialled / real talks {self.yday:%a}", "15%"), (f"Cash since {self.since}", "9%"),
-                          ("Why", "47%")], rows)
-                   if rows else "<p>No caller is below the thresholds.</p>")
-                + '<p class="muted">Leads dialled = different collection leads the caller dialled. Thresholds: under 20 collection dials, 48-hour score under 80%, 4+ untouched leads, answer rate under 30%, '
-                  'recovery on older November bootcamps 10+ points below October.</p>')
+                    rows.append([f"<b>{e(c)}</b><br><span class=muted>{e(tl)}</span>", str(s["dials"]), str(leads_dialled(t.leads, c, self.yday)),
+                                 str(s["real"]), red(lakh(got), got <= 0), "<br>".join(why)])
+        return ("<h2>Callers who need attention</h2>"
+                + (table([("Caller and team leader", "19%"), (f"Calls on {yd}", "8%"), ("Different leads called", "9%"), ("Real talks", "7%"),
+                          (f"Received since {e(self.window)}", "11%"), ("Why", "46%")], rows, {1: "n", 2: "n", 3: "n", 4: "n"})
+                   if rows else "<p>No caller is below the limits.</p>")
+                + '<p class="muted">A caller is listed for any of these: fewer than 20 calls in the day; a real talk with under 80% of new leads within '
+                  '48 hours; 4 or more leads not called for 3 days; under 30% of calls answered; recovery 10 or more points below October.</p>')
 
     def compliance_box(self) -> str:
         if not self.compliance:
-            return "<h2>8 · Compliance</h2><p>No checked call advised a lead to give a finance partner false information.</p>"
+            return "<h2>Compliance</h2><p>No checked call advised a lead to give a finance partner false information.</p>"
         items = "".join(f'<li><b>{e(c["caller"])}</b> ({e(c["date"])}): {e(c["what"])}</li>' for c in self.compliance)
-        return (f"<h2>8 · Compliance: {len(self.compliance)} call(s) to review</h2><ol>{items}</ol>"
-                '<p class="muted">Each checked against its transcript. Lead details are with the analyst on request.</p>')
+        return (f"<h2>Compliance: {len(self.compliance)} call to review</h2><ol>{items}</ol>"
+                '<p class="muted">Each call was checked against its recording transcript. Lead details are available on request.</p>')
 
     def records(self) -> str:
-        rows = {l["lead_id"]: (j, p) for l, j, p in self.rows}
-        paid_open = sum(1 for l in self.leads if l["lead_id"] in rows and self.team.balance(l) == 0)
+        paid = sum(n["paid"] for n in (self.tl_numbers(t) for t in self.by_tl.values()))
         enrolled_pending = 0
         for l in self.leads:
             s = self.students.get("".join(ch for ch in l["phone"] if ch.isdigit())[-10:])
@@ -417,40 +447,64 @@ class Management:
                 enrolled_pending += 1
         fresh = [l for l in self.leads if l["allocated"].astimezone(IST).date() == self.yday]
         not_tried = sum(1 for l in fresh if not any(c["out"] and c["t"] >= l["allocated"] for c in l["calls"]))
-        items = [f"<b>{paid_open}</b> leads paid in full per the sheets but still open in LeadSquared: finance to confirm, stage to Course Enrolled.",
-                 f"<b>{enrolled_pending}</b> leads Course Enrolled in LeadSquared but pending in the pool sheet: update the sheet.",
-                 f"<b>{not_tried}</b> of {len(fresh)} leads given to callers on {self.yday:%a} not dialled by {self.cut.astimezone(IST):%a %H:%M}."]
-        return "<h2>9 · Records and handovers</h2><ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>"
+        items = []
+        if paid:
+            items.append(f"{paid} leads have paid in full according to the pool sheet but are still open in LeadSquared. Finance should confirm, "
+                         "then move them to Course Enrolled.")
+        if enrolled_pending:
+            items.append(f"{enrolled_pending} leads are Course Enrolled in LeadSquared but still pending in the pool sheet. The sheet needs updating.")
+        items.append(f"{not_tried} of the {len(fresh)} leads given to callers on {self.yday:%A} had not been called by "
+                     f"{self.cut.astimezone(IST):%H:%M} today.")
+        return "<h2>Records to fix</h2><ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>"
+
+    REASONS = {"No card or loan route": "have no credit card or cannot get a loan", "Wants later or no time": "want to pay later or say they have no time",
+               "Money or price": "say they are short of money or the price is too high", "Refund or cancel": "asked for a refund or to cancel",
+               "Family decides": "are waiting for their family to decide", "Doubts about the course": "have doubts about the course",
+               "Other": "gave another reason"}
 
     def patterns(self) -> str:
         ob = Counter(objection_kind(j.get("objection")) for _, j, _ in self.rows if j.get("objection") and j["status"] in ("counsel", "cold"))
         st = Counter(j["status"] for _, j, _ in self.rows)
-        return (f'<h2>10 · Patterns for sales</h2><p>Objections on open leads: {e(" · ".join(f"{k} {v}" for k, v in ob.most_common(5)))}. '
-                f"Open leads by status: Hot {st['hot']} · To be counselled {st['counsel']} · Talked, no payment yet {st['connected']} · "
-                f"Call-back {st['callback']} · Not connected {st['notconnected']} · Cold {st['cold']}.</p>")
+        reasons = [f"{v} {self.REASONS.get(k, k.lower())}" for k, v in ob.most_common()]
+        said = (", ".join(reasons[:-1]) + " and " + reasons[-1]) if len(reasons) > 1 else "".join(reasons)
+        return ("<h2>What leads are telling us</h2><ul>"
+                f"<li>Of the {len(self.rows)} open leads, {st['hot']} are ready to pay, {st['counsel']} need more counselling, {st['connected']} have "
+                f"talked but have not discussed payment, {st['callback']} asked us to call back, {st['notconnected']} have not picked up yet and "
+                f"{st['cold']} have gone cold.</li>"
+                f"<li>Of the {sum(ob.values())} leads who need more counselling or have gone cold and gave a reason: {e(said)}.</li></ul>")
 
-    def html(self) -> str:
+    def html(self, checked: str = "") -> str:
         head = (f'<div class="band"><small>Collections · {e(TEAM_ADS[self.side])} · for {e(HEADS[self.side])}</small>'
-                f'<h1>Where to act · {self.day:%A %d %B %Y}</h1><p>LeadSquared read {self.cut.astimezone(IST):%a %d %b %H:%M} IST · pool sheet '
-                f'MIS of {e(self.as_of)}, downloaded {self.pool_read:%a %H:%M} IST. No lead lists: the team leaders have those in their own PDFs.</p></div>')
-        p1 = '<div class="page">' + head + self.headline() + self.actions() + self.month() + self.worked() + self.scorecard() + "</div>"
-        p2 = ('<div class="page">' + self.money() + self.bootcamps() + self.callers() + self.compliance_box() + self.records()
-              + self.patterns() + "</div>")
+                f'<h1>Where to act · {self.day:%A %d %B %Y}</h1><p>Calls and leads from LeadSquared, read {self.cut.astimezone(IST):%a %d %b %H:%M} IST. '
+                f'Money from the pool sheet downloaded {self.pool_read:%a %d %b %H:%M} IST. No lead lists: the team leaders have those in their own reports.</p></div>')
+        notes = "".join(f'<div class="amber">{e(x)}</div>' for x in self.data_notes)
+        p1 = '<div class="page">' + head + notes + self.actions() + self.glance() + self.worked() + "</div>"
+        p2 = '<div class="page">' + self.scorecard() + self.money() + self.bootcamps() + "</div>"
+        p3 = ('<div class="page">' + self.callers() + self.compliance_box() + self.records() + self.patterns()
+              + (f'<p class="muted">{e(checked)}</p>' if checked else "") + "</div>")
         return (f'<!doctype html><html><head><meta charset="utf-8"><title>Where to act</title>'
-                f"<style>{CSS}{EXTRA_CSS}{MGMT_CSS}</style></head><body>{p1}{p2}</body></html>")
+                f"<style>{CSS}{EXTRA_CSS}{MGMT_CSS}</style></head><body>{p1}{p2}{p3}</body></html>")
 
 
 def main() -> None:
+    from analytics.collection_daily.checks import against_morning
     ap = argparse.ArgumentParser()
     ap.add_argument("run_dir"); ap.add_argument("day"); ap.add_argument("prev_pool"); ap.add_argument("week_ago_pool"); ap.add_argument("out_dir")
     ap.add_argument("--side", default="Puja / Anmol")
     ap.add_argument("--compliance", help="verified calls: [{side, caller, date, what}]")
     a = ap.parse_args()
     comp = json.load(open(a.compliance)) if a.compliance else []
-    m = Management(a.side, a.run_dir, date.fromisoformat(a.day), a.prev_pool, a.week_ago_pool, comp)
+    day = date.fromisoformat(a.day)
+    m = Management(a.side, a.run_dir, day, a.prev_pool, a.week_ago_pool, comp)
+    n, wrong = against_morning(m, a.out_dir)
+    for w in wrong:
+        print("MISMATCH:", w)
+    if wrong:
+        raise SystemExit(f"{len(wrong)} of {n} numbers differ from this morning's reports: no PDF written")
+    print(f"{n} numbers checked against this morning's reports and the pool sheet: all match")
     os.makedirs(a.out_dir, exist_ok=True)
-    path = os.path.join(a.out_dir, f"Collections - where to act - {TEAM_ADS[a.side].split(' (')[0]} - {date.fromisoformat(a.day):%a %d %b %Y}.pdf")
-    write_pdf(m.html(), path)
+    path = os.path.join(a.out_dir, f"Collections - where to act - {TEAM_ADS[a.side].split(' (')[0]} - {day:%a %d %b %Y}.pdf")
+    write_pdf(m.html(f"Checked before sending: {n} numbers match this morning's team leader reports and the pool sheet's MIS."), path)
     print(path)
 
 

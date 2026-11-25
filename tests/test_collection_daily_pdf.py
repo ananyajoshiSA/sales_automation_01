@@ -127,3 +127,22 @@ def test_management_cash_moves_matches_a_lead_whose_month_was_mistyped_in_the_ea
     old = [{"phone": "1", "bootcamp_raw": b, "received": 3000, "owner": "Aleena Khan", "month": "2071-11"}]  # 24 Nov sheet: year mistyped
     new = [{"phone": "1", "bootcamp_raw": b, "received": 43170, "owner": "Aleena Khan", "month": "2026-11"}]
     assert cash_moves(new, old) == [("Aleena Khan", b, 40170)]
+
+
+MORNING_HTML = ('<div class="tile"><b>5</b><span>enrolled on Tuesday (LeadSquared stage)</span></div>'
+                '<div class="tile"><b>19 of 127</b><span>real talks (2 min+) of dials on Tuesday</span></div>'
+                '<div class="tile"><b>82%</b><span>48-hour score: real talk within 48 h, 154 of 187 leads past their deadline (target 90%)</span></div>'
+                '<div class="tile"><b>68</b><span>open leads to call today · 7 follow-ups first</span></div>'
+                '<h2>1 · Will pay today or already overdue (12) · ₹671,400 to collect</h2>'
+                '<tr><td>Follow-ups kept (saved call-backs due that day)</td><td>0 of 2</td><td><b>0 of 0</b></td></tr>'
+                '<tr><td>Missed calls from leads, not called back</td><td>2 of 5</td><td><b>4 of 7</b></td></tr>'
+                '<h2>Team performance by caller (Tue 24 Nov)</h2><table><tr><th>Caller</th></tr>'
+                '<tr><td>Rahul Kumar</td><td class=n>46</td><td class=n>24%</td><td class=n>2</td></tr></table>')
+
+
+def test_checks_read_the_morning_report_numbers():
+    from analytics.collection_daily.checks import morning_numbers
+    got = morning_numbers(MORNING_HTML)
+    assert (got["enrolled"], got["real"], got["dials"], got["met48"], got["past48"], got["open"]) == (5, 19, 127, 154, 187, 68)
+    assert (got["due_n"], got["due_rs"], got["paid"], got["fu"], got["in"]) == (12, 671400.0, 0, (0, 0), (4, 7))
+    assert got["callers"] == {"Rahul Kumar": (46, 2)}

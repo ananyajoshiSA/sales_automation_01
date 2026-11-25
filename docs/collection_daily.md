@@ -104,18 +104,23 @@ waiting leads, records to fix, and the day's routine.
 
 ## Management report for Puja Malik and Anmol Gakhar (sample 25 Nov 2026)
 
-Two pages, no lead lists, this month's bootcamps only (the user, 25 Nov: no older months, no extra Excel). Page 1:
-the month's money in one line (pool, collected by rupees and by leads, open, instalments still due, written off,
-cash since the previous day's sheet), five action points for Puja built by fixed rules from the report's own numbers,
-where the month stands against 85%, what worked and what did not since the previous sheet, and the TL scorecard.
-Page 2: money waiting on a decision (the same rules as the TL PDFs' page 1), open money by bootcamp and the callers
-holding most of it, callers to look at (with cash since the previous sheet), compliance, records, patterns for sales.
+At most three pages, plain sentences, no lead lists, this month's bootcamps only (the user, 25 Nov: no older months,
+no extra Excel, "keep the language simple", "don't stuff data"). Page 1: what to do today (five points from fixed
+rules), this month so far, and what worked and what did not since yesterday morning. Page 2: each team leader's team
+against its aims (measures as rows, TLs as columns), money waiting on a decision, money still to collect by bootcamp.
+Page 3: callers who need attention (each reason in a sentence), compliance, records to fix, what leads are telling us.
 The money views follow Puja's own daily analysis (8 Oct 2026).
 
-- Cash collected = the rise in "money received" between two downloads of the pool sheet, per lead already in the
-  earlier one (new leads' booking fees are not collection). It shows when finance updated the sheet.
-- Bootcamps held under 7 days ago, or mostly new in the sheet, are not called stuck or lowest recovery.
-- Recovery is compared like with like: November bootcamps held 21+ days ago against October's final figure.
+- **Checked before it is written** (`analytics/collection_daily/checks.py`): every number shared with this morning's
+  TL reports is read back from their HTML (open leads, enrolled, calls and real talks per TL and per caller, the
+  48-hour score, promised-by-today count and rupees, paid-in-full count, call-backs kept, missed calls), the open
+  leads and statuses are compared with the morning plan file, the pool sheet's totals with its MIS tab, and the
+  bootcamp table and money received are added up again. Any difference stops the build and prints it.
+- "Money received since yesterday 09:10" = the rise in "money received" between yesterday's and today's morning
+  downloads of the pool sheet, per lead in both (matched by phone and bootcamp across every month, because the 23 and
+  24 Nov sheets had ~130 rows with a mistyped year). It shows when finance entered the payment.
+- Sheet problems (impossible dates) are stated in an amber box at the top.
+- Bootcamps held under 7 days ago are not called "lowest recovery" or "no payment".
 - Compliance lists only calls checked against their transcript, from a small JSON file (`[{side, caller, date, what}]`).
 
 ```bash
