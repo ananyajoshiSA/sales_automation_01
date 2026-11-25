@@ -41,12 +41,12 @@ RECOVERED = ("disbursed", "one shot", "installments")  # the MIS counts these as
 OPEN = "booking fees received"
 
 
-def sheet_rows(path: str, month: str, side: str) -> list[dict]:
-    """The pool sheet's Mastersheet rows of ``month`` ("November 2026") on ``side``."""
+def sheet_rows(path: str, month: str | None, side: str) -> list[dict]:
+    """The pool sheet's Mastersheet rows of ``month`` ("November 2026", or every month when None) on ``side``."""
     from analytics.collections.sheets import read_bootcamp
-    key = datetime.strptime(month, "%B %Y").strftime("%Y-%m")
+    key = datetime.strptime(month, "%B %Y").strftime("%Y-%m") if month else None
     rows, _ = read_bootcamp(path)
-    return [r for r in rows if r["month"] == key and (r.get("vertical") or "").strip() and r["vertical"].lower() in side.lower()]
+    return [r for r in rows if (not key or r["month"] == key) and (r.get("vertical") or "").strip() and r["vertical"].lower() in side.lower()]
 
 
 def cash_moves(new: list[dict], old: list[dict]) -> list[tuple[str, str, float]]:
@@ -127,7 +127,9 @@ class Management:
         self.cw_oct = load_callerwise(pool, (day.replace(day=1) - timedelta(days=1)).replace(day=1))
         self.students = load_students(pool, f"{day:%B %Y}", side)
         self.sheet = sheet_rows(pool, f"{day:%B %Y}", side)
-        prev = sheet_rows(prev_pool, f"{day:%B %Y}", side)
+        # every month of the earlier sheet: on 24 Nov ~38 November rows carried a mistyped year (2028-11 … 2098-11), fixed
+        # a day later; matched on this month only, they read as new leads and their money was left out
+        prev = sheet_rows(prev_pool, None, side)
         self.moves = cash_moves(self.sheet, prev)
         self.in_prev = {(r["phone"], r["bootcamp_raw"]) for r in prev}
         read = lambda f: datetime.fromtimestamp(os.path.getmtime(f), IST)

@@ -119,3 +119,11 @@ def test_management_cash_moves_counts_only_leads_in_the_earlier_sheet():
     new = [row("1", 25000), row("2", 5000), row("3", 4000), row("4", 5000, "Shweta Pal")]  # 4: added since, booking fee only
     assert sorted(cash_moves(new, old), key=lambda m: m[2]) == [("Rahul Kumar", b, -1000), ("Rahul Kumar", b, 20000)]
     assert short(b) == "Independent Director · 14 Nov"
+
+
+def test_management_cash_moves_matches_a_lead_whose_month_was_mistyped_in_the_earlier_sheet():
+    from analytics.collection_daily.management import cash_moves
+    b = "Bootcamp | Global Academic Writers - November 21, November 22, November 23, 2026"
+    old = [{"phone": "1", "bootcamp_raw": b, "received": 3000, "owner": "Aleena Khan", "month": "2071-11"}]  # 24 Nov sheet: year mistyped
+    new = [{"phone": "1", "bootcamp_raw": b, "received": 43170, "owner": "Aleena Khan", "month": "2026-11"}]
+    assert cash_moves(new, old) == [("Aleena Khan", b, 40170)]
