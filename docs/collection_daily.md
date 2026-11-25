@@ -104,17 +104,25 @@ waiting leads, records to fix, and the day's routine.
 
 ## Management report for Puja Malik and Anmol Gakhar (sample 25 Nov 2026)
 
-Two pages, no lead lists: where the month stands against 85%, a scorecard per TL (red where off target), money waiting
-on a decision, callers to look at, compliance, records to fix, and patterns for sales. Built from the same run as the
-TL PDFs, plus the pool sheet downloaded a week earlier for the week-on-week line. Recovery is compared like with like:
-November bootcamps held 21+ days ago against October's final figure (newer bootcamps are still being collected).
-Compliance lists only calls checked against their transcript, from a small JSON file (`[{side, caller, date, what}]`).
+Two pages, no lead lists, this month's bootcamps only (the user, 25 Nov: no older months, no extra Excel). Page 1:
+the month's money in one line (pool, collected by rupees and by leads, open, instalments still due, written off,
+cash since the previous day's sheet), five action points for Puja built by fixed rules from the report's own numbers,
+where the month stands against 85%, what worked and what did not since the previous sheet, and the TL scorecard.
+Page 2: money waiting on a decision (the same rules as the TL PDFs' page 1), open money by bootcamp and the callers
+holding most of it, callers to look at (with cash since the previous sheet), compliance, records, patterns for sales.
+The money views follow Puja's own daily analysis (8 Oct 2026).
+
+- Cash collected = the rise in "money received" between two downloads of the pool sheet, per lead already in the
+  earlier one (new leads' booking fees are not collection). It shows when finance updated the sheet.
+- Bootcamps held under 7 days ago, or mostly new in the sheet, are not called stuck or lowest recovery.
+- Recovery is compared like with like: November bootcamps held 21+ days ago against October's final figure.
+- Compliance lists only calls checked against their transcript, from a small JSON file (`[{side, caller, date, what}]`).
 
 ```bash
-.venv/bin/python -m analytics.collection_daily.management data/coll_daily/<day> <day> data/coll_daily/<day-7>/bootcamp_pool.xlsx exports/collection_daily --compliance <checked.json>
+.venv/bin/python -m analytics.collection_daily.management data/coll_daily/<day> <day> data/coll_daily/<day-1>/bootcamp_pool.xlsx data/coll_daily/<day-7>/bootcamp_pool.xlsx exports/collection_daily --compliance <checked.json>
 ```
 
-Thresholds, frequency, delivery and whether compliance stays in are still with the user.
+Frequency, delivery and whether compliance stays in are still with the user.
 
 ## Community leads (added 21 Nov 2026)
 

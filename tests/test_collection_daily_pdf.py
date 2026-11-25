@@ -109,3 +109,13 @@ def test_management_leads_dialled_counts_each_lead_once():
              {"calls": [call("Asha", t(24, 9), out=False)]},
              {"calls": [call("Asha", t(24, 18))]}]
     assert leads_dialled(leads, "Asha", date(2026, 11, 24)) == 2
+
+
+def test_management_cash_moves_counts_only_leads_in_the_earlier_sheet():
+    from analytics.collection_daily.management import cash_moves, short
+    b = "Bootcamp | Independent Director - Nov 14, Nov 15, Nov 16 , 2026"
+    row = lambda phone, got, owner="Rahul Kumar": {"phone": phone, "bootcamp_raw": b, "received": got, "owner": owner}
+    old = [row("1", 5000), row("2", 5000), row("3", 5000)]
+    new = [row("1", 25000), row("2", 5000), row("3", 4000), row("4", 5000, "Shweta Pal")]  # 4: added since, booking fee only
+    assert sorted(cash_moves(new, old), key=lambda m: m[2]) == [("Rahul Kumar", b, -1000), ("Rahul Kumar", b, 20000)]
+    assert short(b) == "Independent Director · 14 Nov"
