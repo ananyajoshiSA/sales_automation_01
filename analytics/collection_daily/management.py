@@ -87,7 +87,7 @@ class Management:
         self.team = TeamPDF(side, *args)
         self.tls = sorted({l["tl"] for l in leads})
         self.by_tl = {tl: TeamPDF(side, *args, tl=tl, callerwise=self.cw_now) for tl in self.tls}
-        self.stats = review.day_stats(leads, self.yday)
+        # each TL's numbers come from that TL's own PDF (TeamPDF.stats): a dial on another TL's lead is not counted, as there
 
     # -- helpers ----------------------------------------------------------------------------------------------------
     def untouched(self, ls) -> int:
@@ -145,7 +145,7 @@ class Management:
             s48 = pct(sum(l["met48"] for l in past), len(past)) if past else None
             st = Counter()
             for c in t.callers:
-                st.update(self.stats.get(c, Counter()))
+                st.update(t.stats.get(c, Counter()))
             op_rows = t.rows
             talked = [j for l, j, _ in op_rows if l["real_talks"]]
             reached_pay = sum(map(reached_payment, talked))
@@ -193,7 +193,7 @@ class Management:
         rows = []
         for tl, t in self.by_tl.items():
             for c in t.callers:
-                s = self.stats.get(c, Counter())
+                s = t.stats.get(c, Counter())
                 mine = [l for l in t.leads if l["caller"] == c]
                 past = [l for l in mine if self.cut > l["deadline"]]
                 s48 = pct(sum(l["met48"] for l in past), len(past)) if past else None
