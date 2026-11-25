@@ -64,3 +64,15 @@ def test_team_leader_money_from_the_callerwise_mis():
     got = pdf.tl_mis(rows, {"Yamini Billore"})
     assert [(r["all_teams"], r["recovered"], r["day"]) for r in got] == [(10, 6, "2026-11-14")]
     assert pdf.same_person("Yamini Billore", "Yamini Hitesh Billore") and not pdf.same_person("Rahul Kumar", "Rahul Sharma")
+
+
+def test_management_recovery_compares_settled_bootcamps_only():
+    from analytics.collection_daily.management import recovery, settled
+    rows = [{"bootcamp": "Bootcamp | Law - October 24, October 25, October 26, 2026", "caller": "Yamini Hitesh Billore",
+             "all_teams": 10, "recovered": 6},
+            {"bootcamp": "Bootcamp | Law - Nov 14, Nov 15, Nov 16 , 2026", "caller": "Yamini Billore", "all_teams": 10, "recovered": 1},
+            {"bootcamp": "Bootcamp | Law - October 24, October 25, October 26, 2026", "caller": "Someone Else", "all_teams": 5, "recovered": 0}]
+    old = settled(rows, date(2026, 11, 25))
+    assert [r["recovered"] for r in old] == [6, 0]  # the 14 Nov bootcamp is still being collected
+    assert recovery(old, ["Yamini Billore"]) == 60
+    assert recovery(old, ["Nobody Here"]) is None

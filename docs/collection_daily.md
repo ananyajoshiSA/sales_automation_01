@@ -102,6 +102,20 @@ waiting leads, records to fix, and the day's routine.
 .venv/bin/python -m analytics.collection_daily.pdf $D 2026-11-19 exports/collection_daily/plan_2026-11-18.json exports/collection_daily "Salesa transcripts: …"
 ```
 
+## Management report for Puja Malik and Anmol Gakhar (sample 25 Nov 2026)
+
+Two pages, no lead lists: where the month stands against 85%, a scorecard per TL (red where off target), money waiting
+on a decision, callers to look at, compliance, records to fix, and patterns for sales. Built from the same run as the
+TL PDFs, plus the pool sheet downloaded a week earlier for the week-on-week line. Recovery is compared like with like:
+November bootcamps held 21+ days ago against October's final figure (newer bootcamps are still being collected).
+Compliance lists only calls checked against their transcript, from a small JSON file (`[{side, caller, date, what}]`).
+
+```bash
+.venv/bin/python -m analytics.collection_daily.management data/coll_daily/<day> <day> data/coll_daily/<day-7>/bootcamp_pool.xlsx exports/collection_daily --compliance <checked.json>
+```
+
+Thresholds, frequency, delivery and whether compliance stays in are still with the user.
+
 ## Community leads (added 21 Nov 2026)
 
 The lists and PDFs also carry community collection leads, named "Lead (Community)". Put them in the run folder's
