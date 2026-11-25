@@ -245,10 +245,10 @@ class TeamPDF:
         s = self.students.get(re.sub(r"\D", "", l["phone"])[-10:])
         return s.get("balance") if s else None
 
-    def act_today(self) -> str:
-        """Page 1 for a team leader: the leads where money moves or is lost today, each with its amount, date and step."""
+    def today_groups(self) -> tuple[list, list, list, list]:
+        """The act-today groups of page 1 (also counted in the management report, so both show the same numbers):
+        will pay today or overdue, call-backs fixed for today, on the brink of dropping, paid in full per the sheet."""
         day = self.day
-        rs = lambda x: "—" if x is None else f"₹{x:,.0f}"
         pay, booked, brink, paid, seen = [], [], [], [], set()
         for l, j, p in self.rows:
             if self.balance(l) == 0:  # the sheet has it fully paid: not a lead to chase, a record to fix
@@ -272,6 +272,13 @@ class TeamPDF:
                 booked.append((l, j, p))
         pay.sort(key=lambda r: (r[3], r[0]["caller"]))
         booked.sort(key=lambda r: r[2]["due"])
+        return pay, booked, brink, paid
+
+    def act_today(self) -> str:
+        """Page 1 for a team leader: the leads where money moves or is lost today, each with its amount, date and step."""
+        day = self.day
+        rs = lambda x: "—" if x is None else f"₹{x:,.0f}"
+        pay, booked, brink, paid = self.today_groups()
 
         def who(l):
             return f'<b>{e(l["name"] or "—")}</b> <span class="ph">{e(l["phone"])}</span><br><span class="muted">{e(l["caller"])} · {e(l["bootcamp"])}</span>'

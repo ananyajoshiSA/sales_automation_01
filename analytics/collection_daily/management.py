@@ -43,6 +43,21 @@ def settled(rows: list[dict], day: date) -> list[dict]:
     return [r for r in rows if (d := tag_date(r["bootcamp"])) and d <= (day - timedelta(days=SETTLED_DAYS)).isoformat()]
 
 
+def untouched(leads: list[dict], rows: list[tuple], day: date) -> int:
+    """Open leads, not cold and not waiting, given to the caller before the last 3 days and dialled on none of them.
+    A lead given yesterday and not yet dialled is a fresh lead (section 6), not an untouched one."""
+    since = day - timedelta(days=3)
+    judged = {l["lead_id"]: j for l, j, _ in rows}
+    return sum(1 for l in leads if (j := judged.get(l["lead_id"])) and j["status"] != "cold"
+               and not (j.get("waiting_until") or "") > day.isoformat()
+               and l["allocated"].astimezone(IST).date() < since
+               and (not l["last_dial"] or l["last_dial"].astimezone(IST).date() < since))
+
+
+def reached_payment(j: dict) -> bool:
+    return j["status"] == "hot" or (j["status"] in ("counsel", "connected") and route(j.get("payment")) != "Not decided")
+
+
 def recovery(rows: list[dict], callers) -> int | None:
     mine = [r for r in rows if any(same_person(r["caller"], c) for c in callers)]
     n = sum(r["all_teams"] for r in mine)
@@ -76,28 +91,24 @@ class Management:
 
     # -- helpers ----------------------------------------------------------------------------------------------------
     def untouched(self, ls) -> int:
-        """Open leads, not cold and not waiting, with no dial for 3+ days."""
-        rows = {l["lead_id"]: j for l, j, _ in self.rows}
-        return sum(1 for l in ls if l["lead_id"] in rows and rows[l["lead_id"]]["status"] != "cold"
-                   and not (rows[l["lead_id"]].get("waiting_until") or "") > self.day.isoformat()
-                   and (not l["last_dial"] or (self.cut - l["last_dial"]).days >= 3))
+        return untouched(ls, self.rows, self.day)
 
-    def money_groups(self, rows) -> dict:
-        g = {"due": [], "refund": [], "loan": [], "week": Counter()}
-        for l, j, p in rows:
-            bal = self.team.balance(l) or 0
-            if bal == 0 and self.team.balance(l) is not None:
+    def money_groups(self, t: TeamPDF) -> dict:
+        """Due today or overdue and refund asks exactly as on the TL's page 1 (sections 1 and 3); loans stuck and the
+        week's promises from the same rows."""
+        pay, _, brink, paid = t.today_groups()
+        bal = lambda l: t.balance(l) or 0
+        g = {"due": [bal(l) for l, *_ in pay], "refund": [bal(l) for l, j, _, why in brink if why.startswith("Asked for a refund")],
+             "loan": [], "week": Counter()}
+        skip = {l["lead_id"] for l, *_ in paid} | {l["lead_id"] for l, j, _, why in brink if why.startswith("Asked for a refund")}
+        for l, j, p in t.rows:
+            if l["lead_id"] in skip:
                 continue
-            kind = objection_kind(j.get("objection"))
             d = promised(j.get("payment"), self.day.year)
-            if kind == "Refund or cancel":
-                g["refund"].append(bal)
-            elif j["status"] in ("hot", "counsel") and d and d <= self.day:
-                g["due"].append(bal)
             if j["status"] == "hot" and route(j.get("payment")) == "Loan / finance" and (not d or d < self.day):
-                g["loan"].append(bal)
+                g["loan"].append(bal(l))
             if j["status"] in ("hot", "counsel") and d and self.day < d <= self.day + timedelta(days=6):
-                g["week"][d] += bal
+                g["week"][d] += bal(l)
         return g
 
     # -- page 1 -----------------------------------------------------------------------------------------------------
@@ -137,7 +148,7 @@ class Management:
                 st.update(self.stats.get(c, Counter()))
             op_rows = t.rows
             talked = [j for l, j, _ in op_rows if l["real_talks"]]
-            reached_pay = sum(1 for j in talked if j["status"] in ("hot",) or (j.get("payment") and route(j.get("payment")) != "Not decided"))
+            reached_pay = sum(map(reached_payment, talked))
             saved = sum(1 for l in ls for f in l["follow_ups"] if f["set_at"].astimezone(IST).date() == self.yday)
             unt = self.untouched(ls)
             rn, ro = recovery(self.cw_settled, t.callers), recovery(self.cw_oct, t.callers)
@@ -153,15 +164,16 @@ class Management:
                          ("Untouched 3+ days", "9%"), (f"Missed calls not called back ({self.yday:%a})", "11%"),
                          (f"Call-backs ({self.yday:%a})", "14%"), ("Talks that reached payment", "10%"), ("Recovery, older Nov bootcamps", "9%"),
                          ("October final", "10%")], rows, {i: "n" for i in range(1, 10)})
-                + f'<p class="muted">Red = below target, or recovery 5+ points under October. "Talks that reached payment" = open leads with a real '
-                  'talk that are Hot or have a payment route agreed (loan, card, UPI). Call-backs: times saved in LeadSquared after a talk; '
+                + f'<p class="muted">Red = below target, or recovery 5+ points under October. "Talks that reached payment" = of the open leads with a '
+                  'real talk, those Hot, or To be counselled / Talked with a payment route agreed (loan, card, UPI); a cold lead never counts. '
+                  '"Untouched 3+ days": open leads, given 3+ days ago, not cold or waiting, with no dial on any of the last 3 days. Call-backs: times saved in LeadSquared after a talk; '
                   f'most callers save none. Recovery compares like with like: November bootcamps held {SETTLED_DAYS}+ days ago (24 and 31 Oct) '
                   'against October\'s final figure, from the caller-wise MIS; the newer bootcamps are still being collected.</p>')
 
     def money(self) -> str:
         rows, tot = [], {"due": [], "refund": [], "loan": [], "week": Counter()}
         for tl, t in self.by_tl.items():
-            g = self.money_groups(t.rows)
+            g = self.money_groups(t)
             for k in ("due", "refund", "loan"):
                 tot[k] += g[k]
             tot["week"].update(g["week"])

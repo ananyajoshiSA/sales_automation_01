@@ -76,3 +76,25 @@ def test_management_recovery_compares_settled_bootcamps_only():
     assert [r["recovered"] for r in old] == [6, 0]  # the 14 Nov bootcamp is still being collected
     assert recovery(old, ["Yamini Billore"]) == 60
     assert recovery(old, ["Nobody Here"]) is None
+
+
+def test_management_untouched_skips_fresh_cold_and_waiting_leads():
+    from analytics.collection_daily.management import untouched
+    t = lambda d, h=10: datetime(2026, 11, d, h, tzinfo=IST)
+    leads = [{"lead_id": "fresh", "allocated": t(24), "last_dial": None},      # given yesterday: a fresh lead, not untouched
+             {"lead_id": "never", "allocated": t(18), "last_dial": None},      # given a week ago, never dialled
+             {"lead_id": "old", "allocated": t(10), "last_dial": t(21, 19)},   # nothing on 22, 23 or 24 Nov
+             {"lead_id": "recent", "allocated": t(10), "last_dial": t(22, 9)},
+             {"lead_id": "cold", "allocated": t(10), "last_dial": None},
+             {"lead_id": "wait", "allocated": t(10), "last_dial": None}]
+    js = {"cold": {"status": "cold"}, "wait": {"status": "counsel", "waiting_until": "2026-12-01"}}
+    rows = [(l, js.get(l["lead_id"], {"status": "hot"}), {}) for l in leads]
+    assert untouched(leads, rows, date(2026, 11, 25)) == 2
+
+
+def test_management_reached_payment_never_counts_cold():
+    from analytics.collection_daily.management import reached_payment
+    assert reached_payment({"status": "hot", "payment": None})
+    assert reached_payment({"status": "counsel", "payment": "Bajaj loan, docs on Friday"})
+    assert not reached_payment({"status": "connected", "payment": "undecided"})
+    assert not reached_payment({"status": "cold", "payment": "Bajaj loan"})
