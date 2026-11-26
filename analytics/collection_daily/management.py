@@ -37,7 +37,7 @@ table { font-size:9px; margin:2px 0 6px; } td, th { padding:4px 6px; } .band { p
 .band h1 { font-size:18px; } .tiles6 .tile b { font-size:13px; } .tiles6 .tile span { font-size:8.6px; }
 .two { display:grid; grid-template-columns: 1fr 1fr; gap:12px; } ol.acts { margin:4px 0 6px 18px; padding:0; } ol.acts li { margin:5px 0; }
 ul.notes { margin:2px 0 4px 16px; padding:0; color:#52514e; font-size:8.6px; } ul.notes li { margin:1px 0; }
-.amber { padding:5px 9px; margin:4px 0; }
+.amber { padding:5px 9px; margin:4px 0; } tr { page-break-inside: avoid; } h2 { page-break-after: avoid; }
 """
 RECOVERED = ("disbursed", "one shot", "installments")  # the MIS counts these as recovered (checked 25 Nov: 228 = 145 + 39 + 44)
 OPEN = "booking fees received"
@@ -69,6 +69,20 @@ def short(bootcamp: str) -> str:
     d = tag_date(bootcamp)
     name = bootcamp.removeprefix("Bootcamp | ").split(" - ")[0].strip()
     return f"{name} · {datetime.strptime(d, '%Y-%m-%d'):%d %b}" if d else name
+
+
+SINGULAR = [(r"(?<![\d,.])1 leads have", "1 lead has"), (r"(?<![\d,.])1 leads are", "1 lead is"),
+            (r"(?<![\d,.])1 leads still owe", "1 lead still owes"), (r"(?<![\d,.])1 leads", "1 lead"),
+            (r"(?<![\d,.])1 callers who have had", "1 caller who has had"), (r"(?<![\d,.])1 callers", "1 caller"),
+            (r"(?<![\d,.])1 real talks", "1 real talk"), (r"(?<![\d,.])1 calls\b", "1 call")]
+
+
+def singular(html: str) -> str:
+    """"1 leads" -> "1 lead" (and the like) everywhere in the finished page."""
+    import re
+    for a, b in SINGULAR:
+        html = re.sub(a, b, html)
+    return html
 
 
 def first(name: str) -> str:
@@ -141,6 +155,10 @@ class Management:
         # sheet problems are shown at the top of the report, not worked around quietly
         odd = lambda rows: sum(1 for r in rows if r["month"] and (r["month"] == "unknown" or r["month"] > f"{day.year + 1}"))
         self.data_notes = []
+        if gaps := self.pool_vs_mis():
+            self.data_notes.append(f"The pool sheet's MIS tab (as of {self.as_of}) is behind its Mastersheet for "
+                                   + "; ".join(gaps) + " (Mastersheet against MIS). Lead counts and money follow the MIS, as in the "
+                                   "team leaders' reports; the bootcamp table and money received follow the Mastersheet.")
         for rows, when in ((sheet_rows(pool, None, side), self.pool_read), (prev, self.prev_read)):
             if k := odd(rows):
                 self.data_notes.append(f"The pool sheet downloaded {when:%a %d %b %H:%M} has {k} rows with an impossible date (a year after "
@@ -191,7 +209,7 @@ class Management:
         """Bootcamps fair to judge on a day's cash and on recovery: held a week or more ago and already in the previous sheet
         (a bootcamp added to the sheet today has had no chance to bring in money since the last one)."""
         week = (self.day - timedelta(days=7)).isoformat()
-        return [b for b in self.camps() if b["day"] and b["day"] <= week and 2 * b["tracked"] >= b["n"]]
+        return [b for b in self.camps() if b["day"] and b["day"] <= week and 2 * b["tracked"] >= b["n"] and b["n"] >= 10]
 
     def untouched(self, ls) -> int:
         return untouched(ls, self.rows, self.day)
@@ -244,8 +262,38 @@ class Management:
                 "drop": sum(1 for r in sh if st(r) == "drop"), "drop_rs": sum(r["balance"] or 0 for r in sh if st(r) == "drop")}
 
     # -- page 1 -----------------------------------------------------------------------------------------------------
-    def glance(self) -> str:
+    def month_totals(self) -> dict:
+        """Leads and money as the pool sheet's MIS tab gives them, the same figures as the TL reports; the pool's
+        price, instalments due and money lost on drops come from the Mastersheet (the MIS has no such columns)."""
         s = self.sheet_totals()
+        mis = lambda k: sum(r[k] for r in self.mis)
+        return {**s, "n": mis("all_teams"), "rec": mis("recovered"), "open": mis("pending"), "drop": mis("dropped"),
+                "got": mis("recovered_amount"), "open_rs": mis("pending_amount")}
+
+    def pool_vs_mis(self) -> list[str]:
+        """Bootcamps where the pool sheet's Mastersheet and its MIS tab disagree (the MIS is refreshed less often)."""
+        from analytics.collections.pool_mis import course_of
+        by: dict = defaultdict(Counter)
+        for r in self.sheet:
+            st = (r["status"] or "").lower()
+            b = by[(tag_date(r["bootcamp_raw"]), course_of(r["bootcamp_raw"]))]
+            b["leads"] += 1
+            b["dropped"] += st == "drop"
+            b["pending"] += st == OPEN
+            b["rupees"] += r["received"] or 0
+        out = []
+        for m in self.mis:
+            b = by.pop((m["day"], m["course"]), Counter())
+            diff = [f"{k} {b[k]:,.0f} against {v:,.0f}" for k, v in
+                    (("leads", m["all_teams"]), ("dropped", m["dropped"]), ("pending", m["pending"]))  # new payments: the cash section
+                    if round(b[k]) != round(v)]
+            if diff:
+                out.append(f"{short(m['name'])} ({', '.join(diff)})")
+        out += [f"{k[1]} · {k[0]}: in the Mastersheet, not in the MIS" for k in by]
+        return out
+
+    def glance(self) -> str:
+        s = self.month_totals()
         end = (self.day.replace(day=28) + timedelta(days=4)).replace(day=1) - timedelta(days=1)
         days_left = (end - self.day).days + 1
         need = max(0, math.ceil(TARGET * s["n"] / 100) - s["rec"])
@@ -287,7 +335,8 @@ class Management:
         rf = sum(len(g["refund"]) for g in due.values())
         if rf:
             out.append(f"<b>{rf} leads ({lakh(sum(sum(g['refund']) for g in due.values()))}) asked for a refund or to cancel.</b> Decide today: "
-                       "keep them with instalments or a later batch, or let them go. Their names are on page 1 of each team leader's report.")
+                       "keep them with instalments or a later batch, or let them go. Their names are " + ("in each team leader's section of the "
+                       "team report (priority leads)." if self.side == "Mayur" else "on page 1 of each team leader's report."))
         stuck = [b for b in self.judged() if b["cash"] <= 0 and b["open"]]
         if stuck:
             b = stuck[0]
@@ -326,8 +375,10 @@ class Management:
                 + '</div><div><h3 class="bad">What did not work</h3>' + tb(bad) + "</div></div>"
                 + f'<p class="muted">Money received means payments entered in the pool sheet between {self.prev_read:%a %d %b %H:%M} and '
                   f'{self.pool_read:%a %d %b %H:%M} IST, the two morning downloads. Finance enters them, so a payment made but not yet entered '
-                  'is not counted. Booking fees of new leads are not counted. Enrolments are from LeadSquared. Bootcamps held in the last 7 days '
-                  'are left out of "lowest recovery" and "no payment".</p>')
+                  'is not counted. Booking fees of new leads are not counted. Enrolments are from '
+                  + ("the team's enrolment sheet and LeadSquared" if self.side == "Mayur" else "LeadSquared")
+                  + '. Bootcamps held in the last 7 days, and those with fewer than 10 leads, are left out of "lowest recovery" '
+                  'and "no payment".</p>')
 
     # -- page 2 -----------------------------------------------------------------------------------------------------
     def scorecard(self) -> str:
@@ -488,11 +539,12 @@ class Management:
                 f'Money from the pool sheet downloaded {self.pool_read:%a %d %b %H:%M} IST. No lead lists: the team leaders have those in their own reports.</p></div>')
         notes = "".join(f'<div class="amber">{e(x)}</div>' for x in self.data_notes)
         p1 = '<div class="page">' + head + notes + self.actions() + self.glance() + self.worked() + "</div>"
-        p2 = '<div class="page">' + self.scorecard() + self.money() + self.bootcamps() + "</div>"
-        p3 = ('<div class="page">' + self.callers() + self.compliance_box() + self.records() + self.patterns()
-              + (f'<p class="muted">{e(checked)}</p>' if checked else "") + "</div>")
-        return (f'<!doctype html><html><head><meta charset="utf-8"><title>Where to act</title>'
-                f"<style>{CSS}{EXTRA_CSS}{MGMT_CSS}</style></head><body>{p1}{p2}{p3}</body></html>")
+        # pages 2 and 3 flow as one, so a team with more team leaders or bootcamps still fits on three pages
+        p2 = ('<div class="page">' + self.scorecard() + self.money() + self.bootcamps() + self.callers() + self.compliance_box()
+              + self.records() + self.patterns() + (f'<p class="muted">{e(checked)}</p>' if checked else "") + "</div>")
+        p3 = ""
+        return singular(f'<!doctype html><html><head><meta charset="utf-8"><title>Where to act</title>'
+                        f"<style>{CSS}{EXTRA_CSS}{MGMT_CSS}</style></head><body>{p1}{p2}{p3}</body></html>")
 
 
 def main() -> None:

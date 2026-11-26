@@ -20,7 +20,9 @@ def morning_numbers(html: str) -> dict:
     """The numbers a morning team leader report printed: its tiles, page 1 counts, scorecard and caller table."""
     out: dict = {}
     for b, span in TILE.findall(html):
-        if span.startswith("open leads to call today"):
+        if span.startswith("leads recovered this month"):
+            out["recovered"], out["leads"] = map(int, re.match(r"(\d+) of (\d+)", b).groups())
+        elif span.startswith("open leads to call today"):
             out["open"] = int(b)
         elif span.startswith("enrolled on"):
             out["enrolled"] = int(b)
@@ -91,9 +93,10 @@ def against_morning(m, out_dir: str) -> tuple[int, list[str]]:
             same(f"{tl} · {k}", ours[k], got.get(k))
         same(f"{tl} · call-backs kept", (ours["fu_kept"], ours["fu_due"]), got.get("fu"))
         same(f"{tl} · missed calls not called back", (ours["in_unreturned"], ours["in_missed"]), got.get("in"))
-        same(f"{tl} · callers", set(ours["callers"]), set(got["callers"]))
+        same(f"{tl} · callers with calls", {c for c, v in ours["callers"].items() if v[0]}, set(got["callers"]))
         for c, v in ours["callers"].items():
-            same(f"{tl} · {c} calls and real talks", v, got["callers"].get(c))
+            # the morning caller table leaves out a caller with no calls that day
+            same(f"{tl} · {c} calls and real talks", v, got["callers"].get(c, (0, 0)))
 
     plan = os.path.join(out_dir, f"plan_{m.day.isoformat()}.json")
     if os.path.exists(plan):
@@ -103,11 +106,16 @@ def against_morning(m, out_dir: str) -> tuple[int, list[str]]:
     else:
         wrong.append(f"morning plan not found ({os.path.basename(plan)})")
 
+    # the month's leads recovered, as this report shows them, against the morning reports' covers (team, or TLs added up)
+    mt = m.month_totals()
+    if whole is not None:
+        same("leads recovered this month (team cover)", (mt["rec"], mt["n"]), (cover.get("recovered"), cover.get("leads")))
+    else:
+        tiles = [morning_numbers(open(os.path.join(out_dir, f"Collections plan - {team}'s team - TL {tl} - {m.day:%a %d %b %Y}.html"),
+                                      encoding="utf-8").read()) for tl in m.by_tl]
+        same("leads recovered this month (TL covers added up)", (mt["rec"], mt["n"]),
+             (sum(t.get("recovered", 0) for t in tiles), sum(t.get("leads", 0) for t in tiles)))
     s = m.sheet_totals()
-    mis = lambda k: sum(r[k] for r in m.mis)
-    for ours, k in ((s["n"], "all_teams"), (s["rec"], "recovered"), (s["open"], "pending"), (s["drop"], "dropped"),
-                    (s["got"], "recovered_amount"), (s["open_rs"], "pending_amount")):
-        same(f"pool sheet vs its MIS · {k}", ours, mis(k))
     camps = m.camps()
     same("bootcamp table · leads", sum(b["n"] for b in camps), s["n"])
     same("bootcamp table · leads still to collect", sum(b["open"] for b in camps), s["open"])
