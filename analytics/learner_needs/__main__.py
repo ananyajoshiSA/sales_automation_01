@@ -95,7 +95,8 @@ def cmd_aggregate(cfg: dict, run: str, out: str, key: str) -> int:
                if not os.path.exists(p[:-4] + ".tsv")]
     groups = {k.lower(): v for k, v in (cfg.get("groups") or {}).items()}
     um = agg.unmapped(rows, groups)
-    summary = agg.summarise(rows, groups, agg.read_themes(os.path.join(run, "themes.tsv")))
+    themes = [t for p in sorted(glob.glob(os.path.join(run, "themes*.tsv"))) for t in agg.read_themes(p)]
+    summary = agg.summarise(rows, groups, themes)
     agg.save_summary(summary, os.path.join(run, "summary.json"))
     os.makedirs(out, exist_ok=True)
     agg.write_lead_csv(rows, groups, os.path.join(out, f"Learner_needs_{key}_leads.csv"))
@@ -126,8 +127,8 @@ def cmd_pdf(cfg: dict, run: str, out: str, key: str) -> None:
 def cmd_status(run: str) -> None:
     txt = sorted(glob.glob(os.path.join(run, "chunk_*.txt")))
     tsv = [p for p in txt if os.path.exists(p[:-4] + ".tsv")]
-    print(f"{run}: {len(txt)} chunks, {len(tsv)} read; themes.tsv "
-          f"{'yes' if os.path.exists(os.path.join(run, 'themes.tsv')) else 'no'}; findings.json "
+    print(f"{run}: {len(txt)} chunks, {len(tsv)} read; themes files "
+          f"{len(glob.glob(os.path.join(run, 'themes*.tsv')))}; findings.json "
           f"{'yes' if os.path.exists(os.path.join(run, 'findings.json')) else 'no'}")
     for p in txt:
         if p not in tsv:

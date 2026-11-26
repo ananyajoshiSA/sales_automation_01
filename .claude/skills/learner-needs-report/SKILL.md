@@ -38,8 +38,8 @@ Run data (lead PII) lives in `data/learner_needs/<KEY>/` and is never committed.
 6. **Themes.** From the readers' replies draft `data/learner_needs/<KEY>/codebook.json`: 6–12 themes per
    kind (`hope`, `doubt`, `misconception`, `question`, `resonated`), each `{"theme", "means"}`. Then one
    subagent per ~300 rows: "Read analytics/learner_needs/themes_brief.md and follow it. Codebook: …
-   Inputs: chunk_01.tsv … Output: data/learner_needs/<KEY>/themes_<n>.tsv". Concatenate into
-   `themes.tsv`, add themes for any OTHER that came up 3+ times, re-run step 4.
+   Inputs: chunk_01.tsv … Output: data/learner_needs/<KEY>/themes_<n>.tsv". `aggregate` reads every
+   `themes*.tsv`. For any OTHER that came up 3+ times, add a theme and recode those rows; re-run step 4.
 7. **Findings.** Read `summary.json`, the TSVs and the outline, then write
    `data/learner_needs/<KEY>/findings.json` (shape below). Put each question on the day and script segment
    where it should be answered. Every item that has a count names its `theme`; never type a count.
@@ -48,7 +48,7 @@ Run data (lead PII) lives in `data/learner_needs/<KEY>/` and is never committed.
 9. **Checks before sharing (all required):**
    - `aggregate` exit 0; total lead lines = chunk calls (`status`); every chunk has a TSV.
    - Hand-check 20 random TSV lines against their calls (`chunk_XX.txt`, same LEAD number) and 20
-     `themes.tsv` lines against their TSV rows. Report how many were right; fix and re-run if any were wrong.
+     `themes*.tsv` lines against their TSV rows. Report how many were right; fix and re-run if any were wrong.
    - Open the PDF (render page 1–2 to PNG and look): no empty sections, no "-" counts where a theme was named.
    - No phone numbers or surnames in findings, quotes or the PDF.
 
