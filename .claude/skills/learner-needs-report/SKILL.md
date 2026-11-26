@@ -7,6 +7,7 @@ description: Learner-needs report for any bootcamp from 300–700 TimePay call t
 
 Readers are Claude itself: every call is read by a subagent, never by keyword rules or a model API.
 Guide with the reasons behind each rule: [docs/learner_needs.md](../../../docs/learner_needs.md).
+Project instructions and ready prompts: [docs/learner_needs_prompts.md](../../../docs/learner_needs_prompts.md).
 Code: `analytics/learner_needs/`. Bootcamp settings: `analytics/learner_needs/bootcamps/<KEY>.json`.
 Run data (lead PII) lives in `data/learner_needs/<KEY>/` and is never committed.
 
