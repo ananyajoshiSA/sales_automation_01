@@ -1,0 +1,57 @@
+{
+ "name": "Corporate Finance",
+ "dates": "12–14 Dec 2026",
+ "context": "",
+ "campaign_ids": [
+  "cJBpjGfFIvmWkAAtDcpR"
+ ],
+ "calls_from": "2026-07-01T00:00:00",
+ "calls_to": null,
+ "min_seconds": 60,
+ "sample_size": 300,
+ "min_per_funnel": 8,
+ "chunk_size": 130,
+ "growthx": {
+  "leadtype": "",
+  "from": "",
+  "to": ""
+ },
+ "scripts": {
+  "source": "Oct 2026 folder",
+  "day1": "1jkUxivN1S45y8UwUbTvlO6KrmJYmUrUerFSB75sofpA",
+  "day2": "15JYt7Lejj68OLS2xzpvi4YdZe5W_cHOTeNYeCH3fmDk",
+  "day3": "1nhB0vo9LDHcLKIGR2aFdpJJ284BEBQELhTEhn3DBp3U"
+ },
+ "groups": {
+  "working finance pro": "Working finance professionals",
+  "fresher/mba job-seeker": "Freshers and MBA job seekers",
+  "ca/cma student": "Freshers and MBA job seekers",
+  "loan dsa/consultant": "Loan DSAs, advisors and MSME owners",
+  "insurance/wealth advisor": "Loan DSAs, advisors and MSME owners",
+  "msme owner": "Loan DSAs, advisors and MSME owners",
+  "tax/accounts practitioner": "Tax and accounts practitioners",
+  "retired/senior": "Retired and senior",
+  "non-finance switcher": "Switching into finance",
+  "career restarter": "Switching into finance",
+  "unclear/too short": "Not enough said",
+  "loan dsa / loan agent": "Loan DSAs, advisors and MSME owners",
+  "insurance / mf agent": "Loan DSAs, advisors and MSME owners",
+  "project-report / msme consultant": "Loan DSAs, advisors and MSME owners",
+  "business owner / startup": "Loan DSAs, advisors and MSME owners",
+  "real estate / property consultant": "Loan DSAs, advisors and MSME owners",
+  "working accountant (ap/r2r/tax)": "Working finance professionals",
+  "mid-career finance professional": "Working finance professionals",
+  "senior finance professional": "Working finance professionals",
+  "fp&a / finance analyst": "Working finance professionals",
+  "mba fresher / job seeker": "Freshers and MBA job seekers",
+  "ca / ca student": "Freshers and MBA job seekers",
+  "student / fresher": "Freshers and MBA job seekers",
+  "cma / cma student": "Freshers and MBA job seekers",
+  "older / retired professional": "Retired and senior",
+  "career switcher (non-finance)": "Switching into finance",
+  "career-break returner": "Switching into finance",
+  "tax / audit practitioner": "Tax and accounts practitioners",
+  "unclear / too short": "Not enough said",
+  "loan seeker (misfit)": "Wanted a loan (wrong audience)"
+ }
+}

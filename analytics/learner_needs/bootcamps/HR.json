@@ -1,0 +1,48 @@
+{
+ "name": "Strategic HR",
+ "dates": "12–14 Dec 2026",
+ "context": "",
+ "campaign_ids": [
+  "opHiBDrJmHrSvAuyUjVB"
+ ],
+ "calls_from": "2026-07-01T00:00:00",
+ "calls_to": null,
+ "min_seconds": 60,
+ "sample_size": 300,
+ "min_per_funnel": 8,
+ "chunk_size": 130,
+ "growthx": {
+  "leadtype": "",
+  "from": "",
+  "to": ""
+ },
+ "scripts": {
+  "source": "Oct 2026 folder",
+  "day1": "1210RdtZNk4np86iLMqBdtlXPhIAetjIxzKkagDRkEoE",
+  "day2": "1oWC-leJ0RrP9DXSelfvp3_BT9FN0nIc8MhYI0T2Io-8",
+  "day3": "1aQ6pzzc27YkCoLKd_O6NnKkaKUhxcttvcYXvCFxpTsQ"
+ },
+ "groups": {
+  "working hr seeking remote/better pay": "Working HR wanting remote work or better pay",
+  "mid-career hr exploring": "Working HR wanting remote work or better pay",
+  "mid-career hr wanting remote global": "Working HR wanting remote work or better pay",
+  "in-house hr wanting ai skills": "Working HR wanting remote work or better pay",
+  "payroll/ops hr wanting growth": "Working HR wanting remote work or better pay",
+  "senior hr / consultant builder": "Senior HR building a consultancy",
+  "senior hr / near-retired": "Senior HR building a consultancy",
+  "consultancy owner scaling": "Senior HR building a consultancy",
+  "career-break returner": "Mothers and career-break returners",
+  "mom wanting wfh hr": "Mothers and career-break returners",
+  "career-break woman": "Mothers and career-break returners",
+  "working mother hr": "Mothers and career-break returners",
+  "fresher / no hr experience": "Job seekers and freshers",
+  "between roles job-seeker": "Job seekers and freshers",
+  "job seeker hr": "Job seekers and freshers",
+  "hr fresher": "Job seekers and freshers",
+  "non-hr career switcher": "Switching into HR",
+  "non-hr switcher": "Switching into HR",
+  "wrong course / confused": "Wrong course",
+  "too short to tell": "Not enough said",
+  "unclear / too short": "Not enough said"
+ }
+}
