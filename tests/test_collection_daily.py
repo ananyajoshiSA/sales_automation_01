@@ -275,22 +275,29 @@ def test_mayur_enrolments_come_from_the_sheet_or_leadsquared():
     assert diff == {"sheet_only": ["sheet", "comm"], "lsq_only": ["lsq"]}
 
 
-def test_caller_trend_week_counts_and_flags():
+def test_caller_trend_counts_and_shortfalls():
     from collections import Counter
     from datetime import date as d_, datetime as dt
-    from analytics.collection_daily.caller_trend import flags, week_stats
+    from analytics.collection_daily.caller_trend import per_day, period_stats, shortfalls
     t = lambda day, h, m=0: dt(2026, 11, day, h, m, tzinfo=IST)
     call = lambda when, out=True, answered=True, dur=200, by="Asha", status="Answered": \
         {"t": when, "out": out, "answered": answered, "dur": dur, "by": by, "status": status}
-    lead = {"caller": "Asha", "calls": [call(t(12, 10)), call(t(12, 11), answered=False, status="NotAnswered"),
-                                         call(t(12, 12), out=False, answered=False),       # missed, called back 12:30
-                                         call(t(12, 12, 30)), call(t(13, 15), out=False, answered=False),  # missed, never returned
-                                         call(t(20, 10))],                                 # outside the week
-            "follow_ups": [{"set_at": t(12, 10, 5), "due": t(13, 11), "kept": False}]}
-    s = week_stats([lead], d_(2026, 11, 12), d_(2026, 11, 18))["Asha"]
-    assert (s["dials"], s["days"], s["low_days"], s["real"], s["missed"], s["returned"], s["fu_saved"], s["fu_due"], s["fu_kept"]) == \
-        (3, 1, 1, 2, 2, 1, 1, 1, 0)
-    assert flags(Counter(dials=60, days=6, failed=0), median=20) == ["dials 10 a day against a team median of 20"]
-    assert flags(Counter(dials=60, days=6, failed=30), median=20) == ["dialer problem: half or more of the calls failed"]
-    assert flags(Counter(dials=200, days=5, missed=10, returned=3, fu_due=6, fu_kept=2, real=30, fu_saved=2), median=40) == \
-        ["kept 2 of 6 follow-ups", "saved 2 call-backs after 30 real talks", "called back 3 of 10 missed calls the same day"]
+    a = {"lead_id": "a", "caller": "Asha", "calls": [call(t(12, 10)), call(t(12, 11), answered=False, status="NotAnswered"),
+                                                    call(t(12, 12), out=False, answered=False),       # missed, called back 12:30
+                                                    call(t(12, 12, 30)), call(t(13, 15), out=False, answered=False),  # never returned
+                                                    call(t(20, 10))],                                 # after the period
+         "follow_ups": [{"set_at": t(12, 10, 5), "due": t(13, 11), "kept": False}]}
+    b = {"lead_id": "b", "caller": "Asha", "calls": [call(t(13, 9))], "follow_ups": []}
+    s = period_stats([a, b], d_(2026, 11, 12), d_(2026, 11, 18))["Asha"]
+    assert (s["dials"], s["days"], s["lead_days"], s["real"], s["missed"], s["returned"], s["fu_saved"], s["fu_due"], s["fu_kept"]) == \
+        (4, 2, 2, 3, 2, 1, 1, 1, 0)
+    assert s["talks_saved"] == 1  # only the 10:00 talk was followed by a saved next call time
+    assert per_day(s) == (2.0, 1.0)
+    assert shortfalls(Counter(dials=60, lead_days=30, days=6), 20, 9) == \
+        ["Made 10 calls a day to 5 different leads; the team's middle caller made 20 calls to 9 leads."]
+    assert shortfalls(Counter(dials=60, days=6, failed=30), 20, 9)[0].startswith("Dialer problem")
+    assert shortfalls(Counter(dials=200, lead_days=100, days=5, missed=10, returned=3, fu_due=6, fu_kept=2, real=30, talks_saved=2), 40, 20) == \
+        ["Made 2 of 6 follow-ups at the time saved in LeadSquared.", "Called back 3 of 10 missed calls from leads the same day."]
+    from analytics.collection_daily.caller_trend import saves_none
+    assert saves_none(Counter(real=30, talks_saved=2)) and not saves_none(Counter(real=30, talks_saved=5))
+    assert not saves_none(Counter(real=10, talks_saved=0))  # too few talks to tell
