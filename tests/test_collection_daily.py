@@ -273,3 +273,24 @@ def test_mayur_enrolments_come_from_the_sheet_or_leadsquared():
     assert by["lsq"]["enrolled"] and by["lsq"]["enrolled_at"] == lsq_at      # LeadSquared still counts
     assert not by["anmol"]["enrolled"]                                        # Anmol's team: LeadSquared only
     assert diff == {"sheet_only": ["sheet", "comm"], "lsq_only": ["lsq"]}
+
+
+def test_caller_trend_week_counts_and_flags():
+    from collections import Counter
+    from datetime import date as d_, datetime as dt
+    from analytics.collection_daily.caller_trend import flags, week_stats
+    t = lambda day, h, m=0: dt(2026, 11, day, h, m, tzinfo=IST)
+    call = lambda when, out=True, answered=True, dur=200, by="Asha", status="Answered": \
+        {"t": when, "out": out, "answered": answered, "dur": dur, "by": by, "status": status}
+    lead = {"caller": "Asha", "calls": [call(t(12, 10)), call(t(12, 11), answered=False, status="NotAnswered"),
+                                         call(t(12, 12), out=False, answered=False),       # missed, called back 12:30
+                                         call(t(12, 12, 30)), call(t(13, 15), out=False, answered=False),  # missed, never returned
+                                         call(t(20, 10))],                                 # outside the week
+            "follow_ups": [{"set_at": t(12, 10, 5), "due": t(13, 11), "kept": False}]}
+    s = week_stats([lead], d_(2026, 11, 12), d_(2026, 11, 18))["Asha"]
+    assert (s["dials"], s["days"], s["low_days"], s["real"], s["missed"], s["returned"], s["fu_saved"], s["fu_due"], s["fu_kept"]) == \
+        (3, 1, 1, 2, 2, 1, 1, 1, 0)
+    assert flags(Counter(dials=60, days=6, failed=0), median=20) == ["dials 10 a day against a team median of 20"]
+    assert flags(Counter(dials=60, days=6, failed=30), median=20) == ["dialer problem: half or more of the calls failed"]
+    assert flags(Counter(dials=200, days=5, missed=10, returned=3, fu_due=6, fu_kept=2, real=30, fu_saved=2), median=40) == \
+        ["kept 2 of 6 follow-ups", "saved 2 call-backs after 30 real talks", "called back 3 of 10 missed calls the same day"]
