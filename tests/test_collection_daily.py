@@ -301,3 +301,16 @@ def test_caller_trend_counts_and_shortfalls():
     from analytics.collection_daily.caller_trend import saves_none
     assert saves_none(Counter(real=30, talks_saved=2)) and not saves_none(Counter(real=30, talks_saved=5))
     assert not saves_none(Counter(real=10, talks_saved=0))  # too few talks to tell
+
+
+def test_caller_trend_leaves_out_days_on_leave():
+    from datetime import date as d_, datetime as dt
+    from analytics.collection_daily.caller_trend import on_leave, period_stats, shortfalls
+    t = lambda day, h: dt(2026, 11, day, h, tzinfo=IST)
+    call = lambda when, out=True, answered=True: {"t": when, "out": out, "answered": answered, "dur": 200, "by": "Ayush", "status": "Answered"}
+    lead = {"lead_id": "a", "caller": "Ayush", "calls": [call(t(13, 10)), call(t(16, 10), out=False, answered=False)], "follow_ups": []}
+    leave = {"Ayush": [(d_(2026, 11, 15), d_(2026, 12, 6))]}
+    assert on_leave(leave, "Ayush", d_(2026, 11, 15)) and not on_leave(leave, "Ayush", d_(2026, 11, 14))
+    s = period_stats([lead], d_(2026, 11, 12), d_(2026, 11, 25), leave)["Ayush"]
+    assert (s["days"], s["missed"], s["leave_days"]) == (1, 0, 11)  # the missed call on 16 Nov falls in the leave
+    assert shortfalls(s, 35, 17) == []                              # one working day: not judged
