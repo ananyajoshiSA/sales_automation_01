@@ -314,3 +314,26 @@ def test_caller_trend_leaves_out_days_on_leave():
     s = period_stats([lead], d_(2026, 11, 12), d_(2026, 11, 25), leave)["Ayush"]
     assert (s["days"], s["missed"], s["leave_days"]) == (1, 0, 11)  # the missed call on 16 Nov falls in the leave
     assert shortfalls(s, 35, 17) == []                              # one working day: not judged
+
+
+def test_caller_talks_plain_reasons():
+    from collections import defaultdict
+    from datetime import date as d_, timedelta
+    from analytics.collection_daily.caller_talks import good, problems
+    work = [d_(2026, 11, 16) + timedelta(k) for k in (0, 1, 2, 3, 4)]
+    base = dict(caller="Asha", tl="T", work=work, calls=defaultdict(int, {d: 30 for d in work}),
+                leads=defaultdict(set, {d: set(range(12)) for d in work}), talks=40, saved=0, missed=10, late=2, never=0,
+                due=0, made=0, d48=10, met48=10, open=20, stale=0, since=d_(2026, 11, 22), enrolled=5, leave=False)
+    assert problems(base) == []                                   # never saving alone does not list a caller
+    one_off = {**base, "calls": defaultdict(int, {d: (0 if d == work[0] else 30) for d in work})}
+    assert problems(one_off) == []                                # one quiet day may be a day off
+    late = {**base, "late": 6, "never": 1, "d48": 10, "met48": 6}
+    assert problems(late) == [
+        "When leads called and the call was missed, they were not called back the same day 6 times (of 10); 1 of these leads was never called back.",
+        "4 of 10 new leads did not get a real talk (2 minutes or more) within 48 hours.",
+        "Never saves the next call time in LeadSquared after a talk (0 after 40 talks), so follow-ups depend on memory and cannot be checked."]
+    thin = {**base, "leads": defaultdict(set, {d: set(range(4)) for d in work}), "stale": 3}
+    assert problems(thin)[:2] == ["On 5 of 5 working days called only 4 of the 20 open leads.",
+                                  "3 open leads were not called on any of the last 3 days (23–25 Nov)."]
+    assert problems({**base, "open": 8, "leads": defaultdict(set)}) == []   # a small book is not judged on calls
+    assert good(base) == "Calls every working day, enrolled 5 leads in this period, talked to 10 of 10 new leads within 48 hours."
