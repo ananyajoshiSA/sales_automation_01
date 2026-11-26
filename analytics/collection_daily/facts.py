@@ -166,4 +166,9 @@ def collect(run_dir: str, cut: datetime) -> list[dict]:
                 acts = sorted((a for a in hist.get(l["lead_id"]) or [] if utc(a.get("CreatedOn"))), key=lambda a: a["CreatedOn"])
                 out.append({**l, "side": side, "bootcamp_day": day, "data_dir": d, "team_of": team.get(l["caller"]),
                             **lead_facts(l, acts, start, cut)})
-    return out + (community(run_dir, cut, notes, groups) if out else [])
+    out += community(run_dir, cut, notes, groups) if out else []
+    # Mayur's team: enrolments from the team's live enrolment sheet when the run has it (the user, 26 Nov 2026)
+    from analytics.collection_daily import enrolments
+    if (pays := enrolments.load(run_dir)) is not None:
+        enrolments.apply(out, pays, cut)
+    return out

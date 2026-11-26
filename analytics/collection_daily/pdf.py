@@ -188,9 +188,14 @@ class TeamPDF:
                     tl_mis(callerwise or [], {l["caller"] for l in self.leads} | {tl}))
         self.bootcamp_leads = [l for l in self.leads if not l.get("community")]
         self.community_leads = [l for l in self.leads if l.get("community")]
-        self.stats = review.day_stats(self.leads, self.yday)
-        self.stats_before = review.day_stats(self.leads, self.yday - timedelta(days=1))
+        # a caller's calls count on any of the team's collection leads, so a TL's section adds up to the team cover (26 Nov)
+        team = [l for l in leads if l["side"] == side]
+        mine = {l["caller"] for l in self.leads}
+        self.stats = {c: v for c, v in review.day_stats(team, self.yday).items() if c in mine}
+        self.stats_before = {c: v for c, v in review.day_stats(team, self.yday - timedelta(days=1)).items() if c in mine}
         self.ads = sorted({l["ad"] for l in self.leads})
+        # Mayur's team: enrolments from the team's enrolment sheet as well as LeadSquared (the user, 26 Nov 2026)
+        self.enrol_src = "enrolment sheet or LeadSquared" if any("enrolled_sheet" in l for l in self.leads) else "LeadSquared stage"
         self.callers = sorted({l["caller"] for l in self.leads}, key=lambda c: (self.by_id_tl(c), c))
 
     def by_id_tl(self, caller: str) -> tuple:
@@ -218,7 +223,7 @@ class TeamPDF:
         enrolled = [l for l in self.leads if review.on(l.get("enrolled_at"), self.yday)]
         tiles = [(f"{rec} of {n}", f"leads recovered this month ({pct(rec, n)}%; target {TARGET}%) · pool sheet MIS of {self.mis_as_of}"),
                  (lakh(sum(r["recovered_amount"] for r in self.mis)), f"collected so far · {lakh(sum(r['pending_amount'] for r in self.mis))} still pending (MIS)"),
-                 (str(len(enrolled)), f"enrolled on {self.yday:%A} (LeadSquared stage)"),
+                 (str(len(enrolled)), f"enrolled on {self.yday:%A} ({self.enrol_src})"),
                  (f"{y['real']} of {y['dials']}", f"real talks (2 min+) of dials on {self.yday:%A}"),
                  (f"{pct(met, past)}%", f"48-hour score: real talk within 48 h, {met} of {past} leads past their deadline (target 90%)"),
                  (f"{len(self.rows)}", f"open leads to call today · {g[1]} follow-ups first, {g[2]} on the 48-hour clock")]
@@ -316,7 +321,7 @@ class TeamPDF:
 
         def m(s: Counter, k: str) -> str:
             return str(s[k])
-        score = [("Enrolled (LeadSquared stage)", m(b, "enrolled"), m(y, "enrolled")),
+        score = [(f"Enrolled ({self.enrol_src})", m(b, "enrolled"), m(y, "enrolled")),
                  ("Callers who dialled", f'{b["dialled"]} of {len(self.callers)}', f'{y["dialled"]} of {len(self.callers)}'),
                  ("Dials", m(b, "dials"), m(y, "dials")), ("Answer rate", f'{pct(b["answered"], b["dials"])}%', f'{pct(y["answered"], y["dials"])}%'),
                  ("Real talks (2 min+)", m(b, "real"), m(y, "real")),
@@ -618,8 +623,14 @@ class TeamPDF:
             done = (s.get("status") or "").lower().startswith(("recovered", "disbursed", "one shot", "instal")) or (s.get("outcome") or "").lower() in ("recovered",)
             if done and not l["enrolled"] and not l["dropped"]:
                 recs.append([lead_cell(l), e(f'Pool sheet: {s.get("status") or s.get("outcome")}'), "LeadSquared stage not Course Enrolled: move the stage."])
-            elif l["enrolled"] and not done and (s.get("status") or "").lower() in ("pending", ""):
-                recs.append([lead_cell(l), "LeadSquared: Course Enrolled", e(f'Pool sheet: {s.get("status") or "pending"}: update the sheet with the payment.')])
+            elif l["enrolled"] and not done and (s.get("status") or "").lower() in ("pending", "", "booking fees received"):
+                recs.append([lead_cell(l), e(f"Enrolled ({self.enrol_src})"), e(f'Pool sheet: {s.get("status") or "pending"}: update the sheet with the payment.')])
+        for l in self.leads:  # Mayur's team: the enrolment sheet against LeadSquared
+            if "enrolled_sheet" not in l or l["enrolled_sheet"] == l["enrolled_lsq"]:
+                continue
+            recs.append([lead_cell(l), "Enrolment sheet: payment recorded" if l["enrolled_sheet"] else "LeadSquared: enrolled",
+                         "LeadSquared stage not Course Enrolled: move the stage." if l["enrolled_sheet"] else
+                         "No payment in the enrolment sheet: check the payment and add it to the sheet."])
         missing = [l for l in self.bootcamp_leads if not l["enrolled"] and not l["dropped"] and not self.students.get(re.sub(r"\D", "", l["phone"])[-10:])]
         return ('<div class="page"><h2>9. Leads going cold, waiting list, records to fix</h2>'
                 + f"<h2>Cold ({len(cold)}): WhatsApp first, then one call</h2>"
@@ -627,7 +638,7 @@ class TeamPDF:
                 + f"<h2>Waiting until an agreed date ({len(wait)}): do not call before it</h2>"
                 + table([("Lead", "30%"), ("Until", "12%"), ("Last talk", "58%")], wr)
                 + f"<h2>Records to fix ({len(recs)})</h2>"
-                + (table([("Lead", "30%"), ("Found", "30%"), ("Fix", "40%")], recs) if recs else "<p>LeadSquared stages and the pool sheet agree for this team.</p>")
+                + (table([("Lead", "30%"), ("Found", "30%"), ("Fix", "40%")], recs) if recs else f"<p>LeadSquared stages and the pool sheet{' and the enrolment sheet' if 'sheet' in self.enrol_src else ''} agree for this team.</p>")
                 + (f'<p class="muted">{len(missing)} open LeadSquared leads are not in the pool sheet\'s November list for this team (matched by phone).</p>'
                    if missing else "") + "</div>")
 

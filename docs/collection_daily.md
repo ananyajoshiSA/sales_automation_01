@@ -129,6 +129,22 @@ The money views follow Puja's own daily analysis (8 Oct 2026).
 
 Frequency, delivery and whether compliance stays in are still with the user.
 
+## Mayur's team: enrolments from the team's enrolment sheet (26 Nov 2026)
+
+LeadSquared's Course Enrolled stage is updated late for Mayur's team, so its enrolments also come from the team's live
+enrolment sheet (November tab "Changemaker", plus "Changemakers_oct" for the October bootcamps). Download it into the
+run folder before `prepare`:
+
+```bash
+.venv/bin/python -m analytics.collection_daily.enrolments $D
+```
+
+A Mayur lead is enrolled when the sheet has a collection balance payment for it (bootcamp or community; booking fees
+and new sales do not count) or LeadSquared shows it enrolled, from the earlier date. On 25 Nov data neither source was
+complete alone: the sheet had 18 payments LeadSquared did not show yet, and missed some enrolments the pool sheet
+confirms paid. Leads where the two disagree are listed under records to fix (TL report) and counted in the
+where-to-act report. Anmol's team keeps LeadSquared only.
+
 ## Community leads (added 21 Nov 2026)
 
 The lists and PDFs also carry community collection leads, named "Lead (Community)". Put them in the run folder's

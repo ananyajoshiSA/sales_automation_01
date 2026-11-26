@@ -30,7 +30,7 @@ from analytics.collections.tags import tag_date
 from integrations.timeutil import IST
 
 SETTLED_DAYS = 21  # a bootcamp this old has had most of its collection time: fair to set against October's final figure
-HEADS = {"Puja / Anmol": "Puja Malik and Anmol Gakhar", "Mayur": "Mayur and the ADs"}
+HEADS = {"Puja / Anmol": "Puja Malik and Anmol Gakhar", "Mayur": "Mayur Sachdeva, Sahil Arora and Raunak Mandilwar"}
 MGMT_CSS = """
 body { font-size:10px; line-height:1.45; } h2 { font-size:13px; margin:14px 0 6px; } h3 { font-size:10.5px; margin:4px 0; }
 table { font-size:9px; margin:2px 0 6px; } td, th { padding:4px 6px; } .band { padding:12px 16px; margin-bottom:8px; }
@@ -152,7 +152,7 @@ class Management:
         self.team = TeamPDF(side, *args)
         self.tls = sorted({l["tl"] for l in leads})
         self.by_tl = {tl: TeamPDF(side, *args, tl=tl, callerwise=self.cw_now) for tl in self.tls}
-        # each TL's numbers come from that TL's own PDF (TeamPDF.stats): a dial on another TL's lead is not counted, as there
+        # each TL's numbers come from that TL's own PDF (TeamPDF.stats): a caller's calls on any of the team's leads
 
     # -- helpers ----------------------------------------------------------------------------------------------------
     def tl_of(self, caller: str) -> str:
@@ -422,7 +422,7 @@ class Management:
                     why.append(f"Recovery on the 24 and 31 Oct bootcamps is {rn}%, against {ro}% in October.")
                 if why:
                     got = sum(v for o, v in cash.items() if same_person(o, c))
-                    rows.append([f"<b>{e(c)}</b><br><span class=muted>{e(tl)}</span>", str(s["dials"]), str(leads_dialled(t.leads, c, self.yday)),
+                    rows.append([f"<b>{e(c)}</b><br><span class=muted>{e(tl)}</span>", str(s["dials"]), str(leads_dialled(self.leads, c, self.yday)),
                                  str(s["real"]), red(lakh(got), got <= 0), "<br>".join(why)])
         return ("<h2>Callers who need attention</h2>"
                 + (table([("Caller and team leader", "19%"), (f"Calls on {yd}", "8%"), ("Different leads called", "9%"), ("Real talks", "7%"),
@@ -443,7 +443,7 @@ class Management:
         enrolled_pending = 0
         for l in self.leads:
             s = self.students.get("".join(ch for ch in l["phone"] if ch.isdigit())[-10:])
-            if l["enrolled"] and s and (s.get("status") or "").lower() in ("pending", ""):
+            if l["enrolled"] and s and (s.get("status") or "").lower() in ("pending", "", "booking fees received"):
                 enrolled_pending += 1
         fresh = [l for l in self.leads if l["allocated"].astimezone(IST).date() == self.yday]
         not_tried = sum(1 for l in fresh if not any(c["out"] and c["t"] >= l["allocated"] for c in l["calls"]))
@@ -452,7 +452,16 @@ class Management:
             items.append(f"{paid} leads have paid in full according to the pool sheet but are still open in LeadSquared. Finance should confirm, "
                          "then move them to Course Enrolled.")
         if enrolled_pending:
-            items.append(f"{enrolled_pending} leads are Course Enrolled in LeadSquared but still pending in the pool sheet. The sheet needs updating.")
+            items.append(f"{enrolled_pending} leads are enrolled, but the pool sheet still shows only their booking fee. The pool sheet needs updating.")
+        if any("enrolled_sheet" in l for l in self.leads):  # Mayur's team: the enrolment sheet against LeadSquared
+            ahead = sum(1 for l in self.leads if l.get("enrolled_sheet") and not l.get("enrolled_lsq"))
+            behind = sum(1 for l in self.leads if l.get("enrolled_lsq") and "enrolled_sheet" in l and not l["enrolled_sheet"])
+            if ahead:
+                items.append(f"{ahead} leads have a payment in the enrolment sheet but are not Course Enrolled in LeadSquared yet. "
+                             "Their stage should be moved.")
+            if behind:
+                items.append(f"{behind} leads are enrolled in LeadSquared but have no payment in the enrolment sheet. Check each payment "
+                             "and add it to the sheet. These leads are counted as enrolled.")
         items.append(f"{not_tried} of the {len(fresh)} leads given to callers on {self.yday:%A} had not been called by "
                      f"{self.cut.astimezone(IST):%H:%M} today.")
         return "<h2>Records to fix</h2><ul>" + "".join(f"<li>{x}</li>" for x in items) + "</ul>"

@@ -243,3 +243,33 @@ def test_one_team_build_keeps_the_other_teams_plan(tmp_path):
     morning.build([b], judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
     _, saved = morning.build([a], judged, date(2026, 11, 18), ist("2026-11-17 21:00"), str(tmp_path))
     assert set(json.load(open(saved))["leads"]) == {"1", "2"}
+
+
+def test_mayur_enrolments_come_from_the_sheet_or_leadsquared():
+    from datetime import datetime as dt
+    from analytics.collection_daily.enrolments import apply, payments, read_csv
+    text = ("Date,Team Name,Couseller Name,Student Name ,Contact No,Email Id,Course name,Enrollment,"
+            "Financial status (LawSikho/Bajaj/Credence/Eduvanz),Revenue Collected\n"
+            '25/11/2026,Changemakers,Kanika Verma,A,919876543210,a@x,"Bootcamp | US Accounting - November 14, November 15, 2026",'
+            'Bootcamp collections - balance payments,Amount received from PayU,"54,000"\n'
+            '24/11/2026,Changemakers,Kanika Verma,B,9876500000,b@x,"Bootcamp | US Accounting - November 14, November 15, 2026",'
+            "Bootcamp collections - balance payments,Booking fees,3000\n"
+            '20/11/2026,Changemakers,Aisha Sami,C,9876511111,c@x,"Community: AI FOR LEGAL - Group 31, (15th November, 2026)",'
+            "Community Collections - balance payments,1st installment,20000\n"
+            '20/11/2026,Changemakers,Aisha Sami,D,9876522222,d@x,"iHUB IIT course",New enrollment,1st installment,20000\n')
+    pays = payments(read_csv(text))
+    assert [p["phone"] for p in pays] == ["9876543210", "9876511111"]  # booking fee and new sale left out
+    cut = dt(2026, 11, 26, 8, 30, tzinfo=IST)
+    lsq_at = dt(2026, 11, 19, 15, 0, tzinfo=IST)
+    lead = lambda i, phone, **k: {"lead_id": i, "side": "Mayur", "phone": phone, "bootcamp_day": "2026-11-14", "enrolled": False,
+                                  "enrolled_at": None, "dropped": True, **k}
+    leads = [lead("sheet", "+91-9876543210"), lead("fee", "9876500000"), lead("comm", "9876511111", community=True),
+             lead("lsq", "9876533333", enrolled=True, enrolled_at=lsq_at),
+             {**lead("anmol", "9876543210"), "side": "Puja / Anmol"}]
+    diff = apply(leads, pays, cut)
+    by = {l["lead_id"]: l for l in leads}
+    assert by["sheet"]["enrolled"] and by["sheet"]["enrolled_at"] == dt(2026, 11, 25, 12, 0, tzinfo=IST) and not by["sheet"]["dropped"]
+    assert not by["fee"]["enrolled"] and by["comm"]["enrolled"]
+    assert by["lsq"]["enrolled"] and by["lsq"]["enrolled_at"] == lsq_at      # LeadSquared still counts
+    assert not by["anmol"]["enrolled"]                                        # Anmol's team: LeadSquared only
+    assert diff == {"sheet_only": ["sheet", "comm"], "lsq_only": ["lsq"]}

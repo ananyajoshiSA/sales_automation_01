@@ -28,6 +28,13 @@ def morning_numbers(html: str) -> dict:
             out["real"], out["dials"] = map(int, re.match(r"(\d+) of (\d+)", b).groups())
         elif "48-hour score" in span:
             out["met48"], out["past48"] = map(int, re.search(r"(\d+) of (\d+) leads past", span).groups())
+    m = re.search(r'<h1>TL [^<]+</h1><p>(\d+) open leads', html)
+    if m:
+        out["open"] = int(m[1])
+    for key, label in (("enrolled", "Enrolled ("), ("dials", "Dials"), ("real", "Real talks (2 min+)")):
+        m = re.search(r"<td>" + re.escape(label) + r"[^<]*</td>.*?<b>(\d+)</b>", html, re.S)
+        if m and key not in out:
+            out[key] = int(m[1])
     m = re.search(r"Will pay today or already overdue \((\d+)\) · ₹([\d,]+)", html)
     out["due_n"], out["due_rs"] = (int(m[1]), float(m[2].replace(",", ""))) if m else (0, 0.0)
     m = re.search(r"Paid in full per the sheet, still open in LeadSquared \((\d+)\)", html)
@@ -54,13 +61,33 @@ def against_morning(m, out_dir: str) -> tuple[int, list[str]]:
             wrong.append(f"{what}: report {ours}, morning {theirs}")
 
     team = m.side.split(" / ")[-1]
+    teamwise = os.path.join(out_dir, f"Bootcamp collections plan - {team}'s team - {m.day:%a %d %b %Y}.html")
+    whole = open(teamwise, encoding="utf-8").read() if m.side == "Mayur" and os.path.exists(teamwise) else None
+    keys = (("open", "enrolled", "dials", "real", "met48", "past48", "due_n", "due_rs", "paid") if whole is None else
+            ("open", "enrolled", "dials", "real"))  # the team-wise PDF has no per-TL tiles or page-1 lists
+    if whole is not None:  # Mayur's one team-wise PDF: the team's tiles, then each TL under a banner
+        cover = morning_numbers(whole[:whole.find("<h1>TL ")])
+        tot = Counter()
+        for t in m.by_tl.values():
+            tot.update({k: v for k, v in m.tl_numbers(t).items() if isinstance(v, int)})
+        for k in ("open", "enrolled", "dials", "real", "met48", "past48"):
+            same(f"whole team · {k}", tot[k], cover.get(k))
     for tl, t in m.by_tl.items():
-        path = os.path.join(out_dir, f"Collections plan - {team}'s team - TL {tl} - {m.day:%a %d %b %Y}.html")
-        if not os.path.exists(path):
-            wrong.append(f"{tl}: this morning's report not found ({os.path.basename(path)})")
-            continue
-        got, ours = morning_numbers(open(path, encoding="utf-8").read()), m.tl_numbers(t)
-        for k in ("open", "enrolled", "dials", "real", "met48", "past48", "due_n", "due_rs", "paid"):
+        if whole is not None:
+            at = whole.find(f"<h1>TL {tl}</h1>")
+            nxt = whole.find("<h1>TL ", at + 5)
+            html = whole[at:nxt if nxt > 0 else None] if at >= 0 else ""
+            if not html:
+                wrong.append(f"{tl}: not found in this morning's team report")
+                continue
+        else:
+            path = os.path.join(out_dir, f"Collections plan - {team}'s team - TL {tl} - {m.day:%a %d %b %Y}.html")
+            if not os.path.exists(path):
+                wrong.append(f"{tl}: this morning's report not found ({os.path.basename(path)})")
+                continue
+            html = open(path, encoding="utf-8").read()
+        got, ours = morning_numbers(html), m.tl_numbers(t)
+        for k in keys:
             same(f"{tl} · {k}", ours[k], got.get(k))
         same(f"{tl} · call-backs kept", (ours["fu_kept"], ours["fu_due"]), got.get("fu"))
         same(f"{tl} · missed calls not called back", (ours["in_unreturned"], ours["in_missed"]), got.get("in"))

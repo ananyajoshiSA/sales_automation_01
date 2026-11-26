@@ -146,3 +146,14 @@ def test_checks_read_the_morning_report_numbers():
     assert (got["enrolled"], got["real"], got["dials"], got["met48"], got["past48"], got["open"]) == (5, 19, 127, 154, 187, 68)
     assert (got["due_n"], got["due_rs"], got["paid"], got["fu"], got["in"]) == (12, 671400.0, 0, (0, 0), (4, 7))
     assert got["callers"] == {"Rahul Kumar": (46, 2)}
+
+
+def test_a_team_leaders_section_counts_calls_on_any_team_lead_so_it_adds_up_to_the_team():
+    day = date(2026, 11, 19)
+    base = dict(side="Mayur", ad="AD", follow_ups=[], deadline=ist("2026-11-20 20:00"), met48=True, enrolled_at=None)
+    a = lead(**base, lead_id="a", tl="T1", caller="Asha", calls=[call("2026-11-18 11:00", by="Asha"), call("2026-11-18 12:00", by="Ravi")])
+    b = lead(**base, lead_id="b", tl="T2", caller="Ravi", calls=[call("2026-11-18 13:00", by="Ravi")])
+    args = ([a, b], [], {}, ist("2026-11-19 08:30"), day, {}, ("", []), {}, {})
+    team, t2 = pdf.TeamPDF("Mayur", *args), pdf.TeamPDF("Mayur", *args, tl="T2", callerwise=[])
+    assert t2.stats["Ravi"]["dials"] == 2 and set(t2.stats) == {"Ravi"}
+    assert sum(s["dials"] for s in team.stats.values()) == 3
