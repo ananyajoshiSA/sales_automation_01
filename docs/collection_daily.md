@@ -10,6 +10,9 @@ they are redesigned.
 the caller's bucket (the last LeadSquared owner change to that caller); a lead allocated on Monday must have its talk
 by 20:00 IST on Wednesday. Baseline from 13 Nov: talk within 48 h 78–83%, pick-up 89–94%.
 
+**Before giving any information about a lead** (a list of leads, a flag, a status), read its LeadSquared Notes,
+comments and tasks and its Salesa transcripts first, fresh at the time of the question (the user, 27 Nov 2026).
+
 ## Two reports a day (Monday to Sunday)
 
 | Report | When | For | What |
