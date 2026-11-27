@@ -84,7 +84,7 @@ def period_stats(leads: list[dict], first: date, last: date, leave: dict | None 
             if c["answered"] and c["dur"] >= facts.REAL_SECS:
                 s["real"] += 1
                 # the next call time saved in LeadSquared within 30 minutes of this talk
-                s["talks_saved"] += any(timedelta(0) <= f["set_at"] - c["t"] <= facts.FORM_AFTER_CALL for f in l["follow_ups"])
+                s["talks_saved"] += any(f.get("source", "lsq") == "lsq" and timedelta(0) <= f["set_at"] - c["t"] <= facts.FORM_AFTER_CALL for f in l["follow_ups"])
         s = out[l["caller"]]
         for f in l["follow_ups"]:
             if working(l["caller"], f["set_at"]):

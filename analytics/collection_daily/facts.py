@@ -83,6 +83,60 @@ def follow_ups(lead: dict, cut: datetime) -> list[dict]:
     return out
 
 
+def agreed_follow_ups(lead: dict, history: dict, cut: datetime) -> list[dict]:
+    """Next call times agreed on a call or in a Note (the readers' ``followup_at``, one per grade) where LeadSquared has
+    no call-back saved for that talk (the user, 27 Nov 2026: take the time from the transcript when LeadSquared lacks it).
+    Each is set at the last answered call before the grade was made and kept like a saved one."""
+    saved = lead["follow_ups"]
+    answered = [c["t"] for c in lead["calls"] if c["answered"] and c["t"] <= cut]
+    dials = [c["t"] for c in lead["calls"] if c["out"] and c["t"] <= cut]
+    out, seen = [], set()
+    for day, g in sorted(history.items()):
+        due = _ist_time(g.get("followup_at"))
+        made = datetime.strptime(day, "%Y-%m-%d").replace(hour=9, tzinfo=IST)  # grades are made from the morning's data
+        if not due or due in seen:
+            continue
+        talk = max((t for t in answered if t <= min(made, due, cut)), default=None)
+        if not talk or due <= talk:
+            continue
+        if any(timedelta(0) <= f["set_at"] - talk <= FORM_AFTER_CALL or abs(f["due"] - due) <= KEPT_WITHIN for f in saved):
+            continue  # LeadSquared already holds a call-back for this talk or this time
+        seen.add(due)
+        kept = any(timedelta(minutes=-15) <= t - due <= KEPT_WITHIN for t in dials)
+        out.append({"set_at": talk, "due": due, "kept": kept if due + KEPT_WITHIN <= cut else None, "source": "talk"})
+    return out
+
+
+def _ist_time(s: str | None) -> datetime | None:
+    try:
+        return datetime.strptime((s or "")[:16], "%Y-%m-%d %H:%M").replace(tzinfo=IST)
+    except ValueError:
+        return None
+
+
+def with_agreed(leads: list[dict], judgements: dict, cut: datetime) -> None:
+    """Add the agreed follow-ups to each lead's ``follow_ups`` (LeadSquared's keep ``source`` "lsq")."""
+    upto = cut.astimezone(IST).date().isoformat()
+    for l in leads:
+        for f in l["follow_ups"]:
+            f.setdefault("source", "lsq")
+        hist = {d: g for d, g in (judgements.get(l["lead_id"]) or {}).items() if d <= upto}
+        if extra := agreed_follow_ups(l, hist, cut):
+            l["follow_ups"] = sorted(l["follow_ups"] + extra, key=lambda f: f["due"])
+            l["next_follow_up"] = max(l["follow_ups"], key=lambda f: f["set_at"])["due"]
+
+
+def team_cover(leads: list[dict], cover: dict, cut: datetime) -> None:
+    """While a team leader is away, their callers work under another TL (``{caller: {"tl", "from", "to"}}``); the
+    caller's leads move to that TL and AD for the reports."""
+    day = cut.astimezone(IST).date().isoformat()
+    ad_of = {l["tl"]: l["ad"] for l in leads}
+    for l in leads:
+        c = cover.get(l["caller"])
+        if c and c["from"] <= day <= c["to"]:
+            l["tl"], l["ad"] = c["tl"], ad_of.get(c["tl"], l["ad"])
+
+
 def lead_facts(lead: dict, acts: list[dict], start: datetime, cut: datetime) -> dict:
     s = state(lead, cut)
     alloc = allocation(lead, acts, start)
@@ -108,6 +162,7 @@ def note_loan_done(notes: list[dict], cut: datetime) -> datetime | None:
 
 
 COMMUNITY = "community"
+COVER = "data/coll_daily/cover.json"
 _HISTS: dict[str, dict] = {}
 
 
@@ -171,4 +226,8 @@ def collect(run_dir: str, cut: datetime) -> list[dict]:
     from analytics.collection_daily import enrolments
     if (pays := enrolments.load(run_dir)) is not None:
         enrolments.apply(out, pays, cut)
+    jpath = os.path.join(run_dir, "judgements.json")
+    with_agreed(out, json.load(open(jpath)) if os.path.exists(jpath) else {}, cut)
+    if os.path.exists(COVER):  # git-ignored: who works under which TL while a TL is away
+        team_cover(out, json.load(open(COVER)), cut)
     return out

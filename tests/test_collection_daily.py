@@ -337,3 +337,21 @@ def test_caller_talks_plain_reasons():
                                   "3 open leads were not called on any of the last 3 days (23–25 Nov)."]
     assert problems({**base, "open": 8, "leads": defaultdict(set)}) == []   # a small book is not judged on calls
     assert good(base) == "Calls every working day, enrolled 5 leads in this period, talked to 10 of 10 new leads within 48 hours."
+
+
+def test_agreed_follow_ups_fill_in_where_leadsquared_has_none():
+    from datetime import datetime as dt
+    from analytics.collection_daily.facts import agreed_follow_ups, team_cover
+    t = lambda day, h, m=0: dt(2026, 11, day, h, m, tzinfo=IST)
+    call = lambda when, out=True, answered=True: {"t": when, "out": out, "answered": answered}
+    lead = {"calls": [call(t(20, 15)), call(t(23, 11, 30)), call(t(24, 16)), call(t(25, 15))],
+            "follow_ups": [{"set_at": t(24, 16, 5), "due": t(25, 12), "kept": False, "source": "lsq"}]}
+    history = {"2026-11-21": {"followup_at": "2026-11-23 11:00"},   # agreed on the 20 Nov talk, dialled 11:30: kept
+               "2026-11-25": {"followup_at": "2026-11-25 12:30"},   # LeadSquared already holds 25 Nov 12:00 for that talk
+               "2026-11-26": {"followup_at": "2026-11-27 11:00"}}   # not due yet
+    got = agreed_follow_ups(lead, history, t(26, 8, 30))
+    assert [(f["due"], f["kept"], f["source"], f["set_at"]) for f in got] == [(t(23, 11), True, "talk", t(20, 15)),
+                                                                              (t(27, 11), None, "talk", t(25, 15))]
+    leads = [{"caller": "Himanshi", "tl": "Ayush", "ad": "Sahil"}, {"caller": "Vedahi", "tl": "Sonal", "ad": "Sahil2"}]
+    team_cover(leads, {"Himanshi": {"tl": "Sonal", "from": "2026-11-15", "to": "2026-12-06"}}, t(27, 8))
+    assert (leads[0]["tl"], leads[0]["ad"]) == ("Sonal", "Sahil2")

@@ -134,7 +134,7 @@ MORNING_HTML = ('<div class="tile"><b>5</b><span>enrolled on Tuesday (LeadSquare
                 '<div class="tile"><b>82%</b><span>48-hour score: real talk within 48 h, 154 of 187 leads past their deadline (target 90%)</span></div>'
                 '<div class="tile"><b>68</b><span>open leads to call today · 7 follow-ups first</span></div>'
                 '<h2>1 · Will pay today or already overdue (12) · ₹671,400 to collect</h2>'
-                '<tr><td>Follow-ups kept (saved call-backs due that day)</td><td>0 of 2</td><td><b>0 of 0</b></td></tr>'
+                '<tr><td>Follow-ups kept (call-backs saved in LeadSquared or agreed on a call, due that day)</td><td>0 of 2</td><td><b>0 of 0</b></td></tr>'
                 '<tr><td>Missed calls from leads, not called back</td><td>2 of 5</td><td><b>4 of 7</b></td></tr>'
                 '<h2>Team performance by caller (Tue 24 Nov)</h2><table><tr><th>Caller</th></tr>'
                 '<tr><td>Rahul Kumar</td><td class=n>46</td><td class=n>24%</td><td class=n>2</td></tr></table>')

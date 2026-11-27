@@ -62,7 +62,7 @@ def caller_facts(caller: str, team: list[dict], first: date, last: date, leave: 
                 leads[day_of(c["t"])].add(l["lead_id"])
             if c["answered"] and c["dur"] >= facts.REAL_SECS:
                 talks += 1
-                saved += any(timedelta(0) <= f["set_at"] - c["t"] <= facts.FORM_AFTER_CALL for f in l["follow_ups"])
+                saved += any(f.get("source", "lsq") == "lsq" and timedelta(0) <= f["set_at"] - c["t"] <= facts.FORM_AFTER_CALL for f in l["follow_ups"])
     missed = [(l, c) for l in mine for c in l["calls"] if not c["out"] and not c["answered"] and in_work(c["t"])]
     late = [(l, c) for l, c in missed if not any(d["out"] and d["t"] > c["t"] and day_of(d["t"]) == day_of(c["t"]) for d in l["calls"])]
     never = {l["lead_id"] for l, c in missed if not any(d["out"] and d["t"] > c["t"] for d in l["calls"])}

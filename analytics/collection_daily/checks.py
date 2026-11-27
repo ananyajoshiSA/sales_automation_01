@@ -41,7 +41,7 @@ def morning_numbers(html: str) -> dict:
     out["due_n"], out["due_rs"] = (int(m[1]), float(m[2].replace(",", ""))) if m else (0, 0.0)
     m = re.search(r"Paid in full per the sheet, still open in LeadSquared \((\d+)\)", html)
     out["paid"] = int(m[1]) if m else 0
-    for key, label in (("fu", "Follow-ups kept (saved call-backs due that day)"), ("in", "Missed calls from leads, not called back")):
+    for key, label in (("fu", "Follow-ups kept (call-backs saved in LeadSquared or agreed on a call, due that day)"), ("in", "Missed calls from leads, not called back")):
         m = re.search(re.escape(label) + r"</td>.*?<b>(\d+) of (\d+)</b>", html, re.S)
         if m:
             out[key] = (int(m[1]), int(m[2]))

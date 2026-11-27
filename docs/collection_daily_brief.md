@@ -39,8 +39,10 @@ the lead said but no answered call is near it and the channel is not stated, tak
   "One shot · salary 1 Dec", "Undecided". "—" if not discussed.
 - `objection` — ≤ 12 words, only for `counsel` (and for `cold` when the lead refused): what the lead objects to.
 - `followup_at` — "YYYY-MM-DD HH:MM" (IST) of the next call agreed with the lead in a transcript or Note, if it is
-  after the cut-off; a call-back saved in LeadSquared is already in the header, so add it here only when the talk agreed
-  a different time. Leave it out otherwise. A day without a time: use 11:00.
+  after the cut-off. Always give it when the last talk or Note agreed a time and the header shows no call-back saved
+  in LeadSquared for it (the user, 27 Nov 2026: take the follow-up time from the transcript when LeadSquared lacks it);
+  the reports then count it as a follow-up, kept or not. When LeadSquared already holds the same time, leave it out.
+  A day without a time: use 11:00.
 - `waiting_until` — "YYYY-MM-DD" only when the lead asked us to wait until a named date or event and the caller agreed
   (salary date, exam, loan decision). The lead is not called before it unless it calls us. Leave it out otherwise.
 - `iit_pitch` — ≤ 25 words, always present: whether the IIT add-on (the IIT programme offered with the bootcamp) was

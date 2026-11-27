@@ -145,6 +145,15 @@ complete alone: the sheet had 18 payments LeadSquared did not show yet, and miss
 confirms paid. Leads where the two disagree are listed under records to fix (TL report) and counted in the
 where-to-act report. Anmol's team keeps LeadSquared only.
 
+## Follow-ups agreed on calls, and team cover (27 Nov 2026)
+
+- A follow-up is a call-back saved in LeadSquared after a talk, or, when none is saved for that talk, the next call
+  time the readers found in its transcript or a Note (`followup_at` in a grade, `facts.with_agreed`). Both are kept
+  the same way (a dial from 15 minutes before to 2 hours after) and count everywhere follow-ups are counted. "Next
+  call time saved in LeadSquared" stays a separate measure.
+- While a TL is away, `data/coll_daily/cover.json` (git-ignored) moves their callers to another TL:
+  `{"caller": {"tl": "...", "from": "YYYY-MM-DD", "to": "YYYY-MM-DD"}}`. Leave days are in `data/coll_daily/leave.json`.
+
 ## Community leads (added 21 Nov 2026)
 
 The lists and PDFs also carry community collection leads, named "Lead (Community)". Put them in the run folder's

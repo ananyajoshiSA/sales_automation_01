@@ -326,7 +326,7 @@ class TeamPDF:
                  ("Dials", m(b, "dials"), m(y, "dials")), ("Answer rate", f'{pct(b["answered"], b["dials"])}%', f'{pct(y["answered"], y["dials"])}%'),
                  ("Real talks (2 min+)", m(b, "real"), m(y, "real")),
                  ("Talk time", f'{round(b["talk_secs"] / 60)} min', f'{round(y["talk_secs"] / 60)} min'),
-                 ("Follow-ups kept (saved call-backs due that day)", f'{b["fu_kept"]} of {b["fu_due"]}', f'{y["fu_kept"]} of {y["fu_due"]}'),
+                 ("Follow-ups kept (call-backs saved in LeadSquared or agreed on a call, due that day)", f'{b["fu_kept"]} of {b["fu_due"]}', f'{y["fu_kept"]} of {y["fu_due"]}'),
                  ("Missed calls from leads, not called back", f'{b["in_unreturned"]} of {b["in_missed"]}', f'{y["in_unreturned"]} of {y["in_missed"]}'),
                  ("New leads whose 48 hours ended that day: real talk in time", f'{b["d48_met"]} of {b["d48_due"]}', f'{y["d48_met"]} of {y["d48_due"]}')]
         sc = table([("Measure", "46%"), (bd, "27%"), (yd, "27%")], [[e(a), e(c), f"<b>{e(d)}</b>"] for a, c, d in score])
