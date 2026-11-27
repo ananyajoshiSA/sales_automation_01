@@ -173,6 +173,12 @@ class Management:
         # each TL's numbers come from that TL's own PDF (TeamPDF.stats): a caller's calls on any of the team's leads
 
     # -- helpers ----------------------------------------------------------------------------------------------------
+    def away(self, caller: str) -> bool:
+        """On leave yesterday or today (``data/coll_daily/leave.json``): not judged, not asked for collections."""
+        from analytics.collection_daily.caller_trend import load_leave, on_leave
+        leave = load_leave()
+        return any(on_leave(leave, c, d) for c in leave if same_person(c, caller) for d in (self.yday, self.day))
+
     def tl_of(self, caller: str) -> str:
         return next((l["tl"] for l in self.leads if same_person(l["caller"], caller)), "")
 
@@ -320,7 +326,7 @@ class Management:
         for r in self.sheet:
             if (r["status"] or "").lower() == OPEN:
                 held[r["owner"]] += r["balance"] or 0
-        zero = sorted((o for o, v in cash.items() if v <= 0 and held[o] > 0), key=lambda o: -held[o])
+        zero = sorted((o for o, v in cash.items() if v <= 0 and held[o] > 0 and not self.away(o)), key=lambda o: -held[o])
         out = []
         if zero:
             out.append(f"<b>Speak to the {len(zero)} callers who have had no payment since {e(self.window)}.</b> Ask each one what they "
@@ -330,7 +336,8 @@ class Management:
         n, rs = sum(len(g["due"]) for g in due.values()), sum(sum(g["due"]) for g in due.values())
         if n:
             out.append(f"<b>{n} leads ({lakh(rs)}) promised to pay by today, or are late.</b> At 12:00, ask each team leader how many have paid: "
-                       + ", ".join(f"{e(tl)} {len(g['due'])} leads ({lakh(sum(g['due']))})" for tl, g in sorted(due.items(), key=lambda x: -sum(x[1]["due"])))
+                       + ", ".join(f"{e(tl)} {len(g['due'])} leads ({lakh(sum(g['due']))})" for tl, g in sorted(due.items(), key=lambda x: -sum(x[1]["due"]))
+                                   if g["due"])
                        + ".")
         rf = sum(len(g["refund"]) for g in due.values())
         if rf:
@@ -362,7 +369,7 @@ class Management:
                 ("Bootcamp that paid the most", f"{e(camps[0]['name'])}: {lakh(camps[0]['cash'])}" if camps and camps[0]["cash"] > 0 else "None"),
                 (f"Enrolled on {self.yday:%A}", f"{sum(enrolled.values())} leads: " + ", ".join(f"{e(first(c))} {k}" for c, k in enrolled.most_common())
                  if enrolled else "None")]
-        zero = sorted(o for o, v in cash.items() if v <= 0)
+        zero = sorted(o for o, v in cash.items() if v <= 0 and not self.away(o))
         stuck = [b for b in self.judged() if b["cash"] <= 0 and b["open"]]
         low = [b for b in self.judged() if b["open"]]
         low = min(low, key=lambda b: (b["rec"] / b["n"], -b["open_rs"])) if low else None
@@ -404,7 +411,8 @@ class Management:
                                   x["rec_old"] is not None and x["rec_oct"] is not None and x["rec_old"] < x["rec_oct"] - 5)),
                 row("Recovery in October, same callers (final)", "", lambda x: f"{x['rec_oct']}%" if x["rec_oct"] is not None else "—")]
         return ("<h2>How each team leader's team is doing</h2>"
-                + table([("", "34%")] + [(f"{e(tl)}", "16%") for tl in tls] + [("Aim", "18%")], rows, {i: "n" for i in range(1, len(tls) + 1)})
+                + table([("", "34%")] + [(e(tl) + (" (on leave)" if self.away(tl) else ""), "16%") for tl in tls] + [("Aim", "18%")], rows,
+                        {i: "n" for i in range(1, len(tls) + 1)})
                 + '<ul class="notes"><li>Red means the team is short of the aim.</li>'
                   '<li>A real talk is an answered call of 2 minutes or more.</li>'
                   '<li>"Not called for 3 days or more" counts open leads, given at least 3 days ago, that are not cold or waiting for a later date.</li>'
@@ -419,7 +427,7 @@ class Management:
             for k in ("due", "refund", "loan"):
                 tot[k] += g[k]
             tot["week"].update(g["week"])
-            rows.append([f"<b>{e(tl)}</b>"] + [f"{len(g[k])} leads · {lakh(sum(g[k]))}" for k in ("due", "refund", "loan")]
+            rows.append([f"<b>{e(tl)}</b>" + (" (on leave)" if self.away(tl) else "")] + [f"{len(g[k])} leads · {lakh(sum(g[k]))}" for k in ("due", "refund", "loan")]
                         + [lakh(sum(g["week"].values()))])
         rows.append(["<b>Whole team</b>"] + [f"<b>{len(tot[k])} leads · {lakh(sum(tot[k]))}</b>" for k in ("due", "refund", "loan")]
                     + [f"<b>{lakh(sum(tot['week'].values()))}</b>"])
@@ -453,6 +461,8 @@ class Management:
         yd = self.yday.strftime("%A")
         for tl, t in self.by_tl.items():
             for c in t.callers:
+                if self.away(c):
+                    continue  # on leave: other callers cover the leads
                 s = t.stats.get(c, Counter())
                 mine = [l for l in t.leads if l["caller"] == c]
                 past = [l for l in mine if self.cut > l["deadline"]]
@@ -536,12 +546,13 @@ class Management:
     def html(self, checked: str = "") -> str:
         head = (f'<div class="band"><small>Collections · {e(TEAM_ADS[self.side])} · for {e(HEADS[self.side])}</small>'
                 f'<h1>Where to act · {self.day:%A %d %B %Y}</h1><p>Calls and leads from LeadSquared, read {self.cut.astimezone(IST):%a %d %b %H:%M} IST. '
-                f'Money from the pool sheet downloaded {self.pool_read:%a %d %b %H:%M} IST. No lead lists: the team leaders have those in their own reports.</p></div>')
+                f'Money from the pool sheet downloaded {self.pool_read:%a %d %b %H:%M} IST. No lead lists: the team leaders have those in their own reports.'
+                + (f" {e(checked)}" if checked else "") + "</p></div>")
         notes = "".join(f'<div class="amber">{e(x)}</div>' for x in self.data_notes)
         p1 = '<div class="page">' + head + notes + self.actions() + self.glance() + self.worked() + "</div>"
         # pages 2 and 3 flow as one, so a team with more team leaders or bootcamps still fits on three pages
         p2 = ('<div class="page">' + self.scorecard() + self.money() + self.bootcamps() + self.callers() + self.compliance_box()
-              + self.records() + self.patterns() + (f'<p class="muted">{e(checked)}</p>' if checked else "") + "</div>")
+              + self.records() + self.patterns() + "</div>")
         p3 = ""
         return singular(f'<!doctype html><html><head><meta charset="utf-8"><title>Where to act</title>'
                         f"<style>{CSS}{EXTRA_CSS}{MGMT_CSS}</style></head><body>{p1}{p2}{p3}</body></html>")
