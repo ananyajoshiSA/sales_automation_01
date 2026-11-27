@@ -100,12 +100,12 @@ def problems(f: dict) -> list[str]:
         out.append(f"When leads called and the call was missed, they were not called back the same day {f['late']} times (of {f['missed']})"
                    + (f"; {f['never']} of these leads {'were' if f['never'] != 1 else 'was'} never called back." if f["never"] else "."))
     if f["due"] >= 5 and f["made"] * 2 < f["due"]:
-        out.append(f"Made only {f['made']} of {f['due']} follow-ups at the time saved in LeadSquared.")
+        out.append(f"Made only {f['made']} of {f['due']} follow-ups at the agreed time.")
     if out and f["d48"] - f["met48"] >= 4 and f["met48"] < 0.85 * f["d48"]:
         out.append(f"{f['d48'] - f['met48']} of {f['d48']} new leads did not get a real talk (2 minutes or more) within 48 hours.")
     if out and nosave(f):
-        out.append(f"Never saves the next call time in LeadSquared after a talk ({f['saved']} after {f['talks']} talks), so follow-ups depend "
-                   "on memory and cannot be checked.")
+        out.append(f"Does not save the next call time in LeadSquared after a talk ({f['saved']} after {f['talks']} talks), so the team "
+                   "leader cannot see the coming follow-ups in LeadSquared.")
     return out
 
 
@@ -139,8 +139,9 @@ def html(teams: dict, first: date, last: date, cut: datetime) -> str:
                         f'<p class="good">{e(good(f))}</p><ul>' + "".join(f"<li>{e(x)}</li>" for x in p) + "</ul></div>" for f, p in listed)
         notes = []
         if quiet:
-            notes.append(f"{', '.join(quiet)} also never save the next call time in LeadSquared after a talk, so their follow-ups cannot be "
-                         "checked. Nothing else stood out for them.")
+            notes.append(f"{', '.join(quiet)} also do not save the next call time in LeadSquared after a talk, so their team leaders cannot "
+                         "see the coming follow-ups there; their follow-ups are checked from the times agreed on calls. Nothing else stood "
+                         "out for them.")
         if small:
             notes.append(f"{', '.join(small)} have {BIG_BOOK} or fewer open leads and call nearly all of them, so they are not judged on how "
                          "many calls they make.")
@@ -154,8 +155,9 @@ def html(teams: dict, first: date, last: date, cut: datetime) -> str:
             f'{cut.astimezone(IST):%a %d %b %H:%M} IST.</p></div>'
             + (cards or "<p>No caller needs a talk on these points.</p>")
             + "<h2>Not on the list</h2><ul class=\"notes\">" + "".join(f"<li>{e(n)}</li>" for n in notes) + "</ul>"
-            + '<ul class="notes"><li>A follow-up is the next call time a caller saves in LeadSquared after talking to a lead; it is made on '
-              "time when the lead is called between 15 minutes before and 2 hours after it. A real talk is an answered call of 2 minutes or "
+            + '<ul class="notes"><li>A follow-up is the next call time agreed with a lead: saved in LeadSquared after the talk or, when '
+              "nothing is saved, the time agreed on the call or in a Note (read from the transcripts and Notes). It is made on time when "
+              "the lead is called between 15 minutes before and 2 hours after it. A real talk is an answered call of 2 minutes or "
               "more. Missed calls, follow-ups and new leads count for the caller who owns the lead now.</li></ul></div>")
     return (f'<!doctype html><html><head><meta charset="utf-8"><title>Callers to talk to</title>'
             f"<style>{CSS}{EXTRA_CSS}{PAGE_CSS}</style></head><body>{''.join(pages)}</body></html>")

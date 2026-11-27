@@ -331,7 +331,7 @@ def test_caller_talks_plain_reasons():
     assert problems(late) == [
         "When leads called and the call was missed, they were not called back the same day 6 times (of 10); 1 of these leads was never called back.",
         "4 of 10 new leads did not get a real talk (2 minutes or more) within 48 hours.",
-        "Never saves the next call time in LeadSquared after a talk (0 after 40 talks), so follow-ups depend on memory and cannot be checked."]
+        "Does not save the next call time in LeadSquared after a talk (0 after 40 talks), so the team leader cannot see the coming follow-ups in LeadSquared."]
     thin = {**base, "leads": defaultdict(set, {d: set(range(4)) for d in work}), "stale": 3}
     assert problems(thin)[:2] == ["On 5 of 5 working days called only 4 of the 20 open leads.",
                                   "3 open leads were not called on any of the last 3 days (23–25 Nov)."]
