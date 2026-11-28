@@ -515,8 +515,9 @@ class Management:
         if enrolled_pending:
             items.append(f"{enrolled_pending} leads are enrolled, but the pool sheet still shows only their booking fee. The pool sheet needs updating.")
         if any("enrolled_sheet" in l for l in self.leads):  # Mayur's team: the enrolment sheet against LeadSquared
-            ahead = sum(1 for l in self.leads if l.get("enrolled_sheet") and not l.get("enrolled_lsq"))
-            behind = sum(1 for l in self.leads if l.get("enrolled_lsq") and "enrolled_sheet" in l and not l["enrolled_sheet"])
+            # one person can be both a bootcamp and a community lead under the same LeadSquared lead: count the lead once
+            ahead = len({l["lead_id"] for l in self.leads if l.get("enrolled_sheet") and not l.get("enrolled_lsq")})
+            behind = len({l["lead_id"] for l in self.leads if l.get("enrolled_lsq") and "enrolled_sheet" in l and not l["enrolled_sheet"]})
             if ahead:
                 items.append(f"{ahead} leads have a payment in the enrolment sheet but are not Course Enrolled in LeadSquared yet. "
                              "Their stage should be moved.")
