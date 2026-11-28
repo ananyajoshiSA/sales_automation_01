@@ -72,6 +72,7 @@ def against_morning(m, out_dir: str) -> tuple[int, list[str]]:
         tot = Counter()
         for t in m.by_tl.values():
             tot.update({k: v for k, v in m.tl_numbers(t).items() if isinstance(v, int)})
+        tot["open"] += tot["moved"]  # counted as enrolled here, still open in the morning report
         for k in ("open", "enrolled", "dials", "real", "met48", "past48"):
             same(f"whole team · {k}", tot[k], cover.get(k))
     for tl, t in m.by_tl.items():
@@ -89,6 +90,8 @@ def against_morning(m, out_dir: str) -> tuple[int, list[str]]:
                 continue
             html = open(path, encoding="utf-8").read()
         got, ours = morning_numbers(html), m.tl_numbers(t)
+        # leads counted as enrolled here are still open in the morning report, and in its paid-in-full list
+        ours = {**ours, "open": ours["open"] + ours["moved"], "paid": ours["paid"] + ours["moved"]}
         for k in keys:
             same(f"{tl} · {k}", ours[k], got.get(k))
         same(f"{tl} · call-backs kept", (ours["fu_kept"], ours["fu_due"]), got.get("fu"))
@@ -101,8 +104,9 @@ def against_morning(m, out_dir: str) -> tuple[int, list[str]]:
     plan = os.path.join(out_dir, f"plan_{m.day.isoformat()}.json")
     if os.path.exists(plan):
         leads = {k: v for k, v in json.load(open(plan))["leads"].items() if v["side"] == m.side}
-        same("open leads in the morning plan", len(m.rows), len(leads))
-        same("open leads by status (morning plan)", dict(Counter(j["status"] for _, j, _ in m.rows)), dict(Counter(v["status"] for v in leads.values())))
+        same("open leads in the morning plan", len(m.rows) + len(m.moved), len(leads))
+        same("open leads by status (morning plan)", dict(Counter(j["status"] for _, j, _ in m.rows) + m.moved_status),
+             dict(Counter(v["status"] for v in leads.values())))
     else:
         wrong.append(f"morning plan not found ({os.path.basename(plan)})")
 

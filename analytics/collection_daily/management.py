@@ -126,7 +126,8 @@ def recovery(rows: list[dict], callers) -> int | None:
 
 
 class Management:
-    def __init__(self, side: str, run_dir: str, day: date, prev_pool: str, week_ago_pool: str, compliance: list[dict]):
+    def __init__(self, side: str, run_dir: str, day: date, prev_pool: str, week_ago_pool: str, compliance: list[dict],
+                 paid_as_enrolled: bool = False):
         self.side, self.day, self.yday = side, day, day - timedelta(days=1)
         self.cut = facts.read_at(run_dir)
         leads = [l for l in facts.collect(run_dir, self.cut) if l["side"] == side]
@@ -168,6 +169,23 @@ class Management:
         args = (leads, self.rows, {"day": "", "leads": {}}, self.cut, day, load_feedback(run_dir),
                 (self.as_of, mis), self.students, {"transcripts": "", "pool_read": "", "prev_cut": ""})
         self.team = TeamPDF(side, *args)
+        # leads paid in full per the pool sheet but still open in LeadSquared, counted as enrolled when asked (the user,
+        # 28 Nov 2026); the checks allow for exactly these against the team leaders' reports
+        self.moved: dict[str, str] = {}
+        self.moved_status: Counter = Counter()
+        if paid_as_enrolled:
+            self.moved = {l["lead_id"]: l["tl"] for l, *_ in self.rows if self.team.balance(l) == 0}
+            self.moved_status = Counter(j["status"] for l, j, _ in self.rows if l["lead_id"] in self.moved)
+            self.rows = [r for r in self.rows if r[0]["lead_id"] not in self.moved]
+            for l in leads:
+                if l["lead_id"] in self.moved:
+                    l["enrolled"] = True
+            args = (leads, self.rows, *args[2:])
+            self.team = TeamPDF(side, *args)
+            if self.moved:
+                self.data_notes.append(f"{len(self.moved)} leads paid in full according to the pool sheet, but still open in LeadSquared, "
+                                       "are counted as enrolled in this report, so open leads are that many fewer than in the team "
+                                       "leaders' reports.")
         self.tls = sorted({l["tl"] for l in leads})
         self.by_tl = {tl: TeamPDF(side, *args, tl=tl, callerwise=self.cw_now) for tl in self.tls}
         # each TL's numbers come from that TL's own PDF (TeamPDF.stats): a caller's calls on any of the team's leads
@@ -255,6 +273,7 @@ class Management:
                 "untouched": self.untouched(ls), "talked": len(talked), "agreed": sum(map(reached_payment, talked)),
                 "rec_old": recovery(self.cw_settled, t.callers), "rec_oct": recovery(self.cw_oct, t.callers),
                 "due_n": len(g["due"]), "due_rs": sum(g["due"]), "paid": len(paid),
+                "moved": sum(1 for tl in self.moved.values() if tl == t.tl),
                 "callers": {c: (t.stats.get(c, Counter())["dials"], t.stats.get(c, Counter())["real"]) for c in t.callers}}
 
     def sheet_totals(self) -> dict:
@@ -512,6 +531,9 @@ class Management:
         if paid:
             items.append(f"{paid} leads have paid in full according to the pool sheet but are still open in LeadSquared. Finance should confirm, "
                          "then move them to Course Enrolled.")
+        if self.moved:
+            items.append(f"{len(self.moved)} leads paid in full according to the pool sheet are counted as enrolled in this report. Finance "
+                         "should confirm, then move them to Course Enrolled in LeadSquared.")
         if enrolled_pending:
             items.append(f"{enrolled_pending} leads are enrolled, but the pool sheet still shows only their booking fee. The pool sheet needs updating.")
         if any("enrolled_sheet" in l for l in self.leads):  # Mayur's team: the enrolment sheet against LeadSquared
@@ -565,10 +587,11 @@ def main() -> None:
     ap.add_argument("run_dir"); ap.add_argument("day"); ap.add_argument("prev_pool"); ap.add_argument("week_ago_pool"); ap.add_argument("out_dir")
     ap.add_argument("--side", default="Puja / Anmol")
     ap.add_argument("--compliance", help="verified calls: [{side, caller, date, what}]")
+    ap.add_argument("--paid-as-enrolled", action="store_true", help="count leads paid in full per the pool sheet as enrolled")
     a = ap.parse_args()
     comp = json.load(open(a.compliance)) if a.compliance else []
     day = date.fromisoformat(a.day)
-    m = Management(a.side, a.run_dir, day, a.prev_pool, a.week_ago_pool, comp)
+    m = Management(a.side, a.run_dir, day, a.prev_pool, a.week_ago_pool, comp, a.paid_as_enrolled)
     n, wrong = against_morning(m, a.out_dir)
     for w in wrong:
         print("MISMATCH:", w)
