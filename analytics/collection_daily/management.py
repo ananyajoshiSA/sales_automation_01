@@ -496,7 +496,7 @@ class Management:
         if not self.compliance:
             return "<h2>Compliance</h2><p>No checked call advised a lead to give a finance partner false information.</p>"
         items = "".join(f'<li><b>{e(c["caller"])}</b> ({e(c["date"])}): {e(c["what"])}</li>' for c in self.compliance)
-        return (f"<h2>Compliance: {len(self.compliance)} call to review</h2><ol>{items}</ol>"
+        return (f"<h2>Compliance: {len(self.compliance)} call{'s' if len(self.compliance) != 1 else ''} to review</h2><ol>{items}</ol>"
                 '<p class="muted">Each call was checked against its recording transcript. Lead details are available on request.</p>')
 
     def records(self) -> str:
